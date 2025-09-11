@@ -1,6 +1,8 @@
 static_resources:
   listeners:
-  - address:
+  # This listener proxies requests from port 8000 to 8001
+  - name: listener_8000_proxy
+    address:
       socket_address:
         address: 0.0.0.0
         port_value: 8000
@@ -9,10 +11,43 @@ static_resources:
       - name: envoy.filters.network.http_connection_manager
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-          stat_prefix: ingress_http
+          stat_prefix: ingress_http_8000
           route_config:
             virtual_hosts:
-            - name: local_route
+            - name: local_proxy_route
+              domains:
+              - "*"
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  # Change: This now routes to the cluster
+                  cluster: service_8001
+          http_filters:
+          - name: pyvoy
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              dynamic_module_config:
+                name: pyvoy
+              filter_name: pyvoy
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  - name: listener_8001_direct_response
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8001
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http_8001
+          route_config:
+            virtual_hosts:
+            - name: local_direct_response_route
               domains:
               - "*"
               routes:
@@ -23,13 +58,21 @@ static_resources:
                   body:
                     inline_string: a
           http_filters:
-          - name: pyvoy
-            typed_config:
-              # https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/dynamic_modules/v3/dynamic_modules.proto#envoy-v3-api-msg-extensions-dynamic-modules-v3-dynamicmoduleconfig
-              "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
-              dynamic_module_config:
-                name: pyvoy
-              filter_name: pyvoy
           - name: envoy.filters.http.router
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+  - name: service_8001
+    connect_timeout: 0.25s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_8001
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 8001

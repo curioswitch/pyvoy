@@ -86,7 +86,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_request_body(
         &mut self,
-        _envoy_filter: &mut EHF,
+        envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         println!("RAG");
@@ -98,8 +98,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
+        println!("BAG");
         envoy_filter.remove_response_header("content-length");
-        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
+        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
 
     fn on_response_body(
@@ -115,7 +116,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         let response_rx = self.response_rx.as_ref().unwrap();
         match response_rx.recv().unwrap() {
             ResponseEvent::Start(status) => {
+                println!("CAT");
                 envoy_filter.set_response_header(":status", status.to_string().as_bytes());
+                envoy_filter.continue_encoding();
+                println!("DOG");
             }
             ResponseEvent::Body(body) => {
                 envoy_filter.inject_response_body(&body, false);

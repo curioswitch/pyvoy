@@ -2,3 +2,5 @@ debug
 target
 
 __pycache__
+
+.envrc
