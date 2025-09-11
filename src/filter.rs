@@ -81,7 +81,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         self.execute_app(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
 
     fn on_request_body(
@@ -90,7 +90,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         println!("RAG");
-        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationNoBuffer
     }
 
     fn on_response_headers(
@@ -99,7 +99,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         println!("BAG");
-        envoy_filter.remove_response_header("content-length");
+        println!("{}", envoy_filter.remove_response_header("content-length"));
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
 
@@ -108,7 +108,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        envoy_filter.drain_response_body(1);
+        println!("RUG");
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
@@ -117,14 +117,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         match response_rx.recv().unwrap() {
             ResponseEvent::Start(status) => {
                 println!("CAT");
-                envoy_filter.set_response_header(":status", status.to_string().as_bytes());
-                envoy_filter.continue_encoding();
+                println!("{}", envoy_filter.inject_request_body(&[], true));
+                //println!("{}", envoy_filter.prepare_response_headers());
+                println!("{}", envoy_filter.set_response_header(":status", status.to_string().as_bytes()));
+                //println!("{}", envoy_filter.send_response_headers(false));
                 println!("DOG");
             }
             ResponseEvent::Body(body) => {
+                println!("BAR");
                 envoy_filter.inject_response_body(&body, false);
             }
             ResponseEvent::Finish(body) => {
+                println!("CAR");
                 envoy_filter.inject_response_body(&body, true);
             }
             ResponseEvent::FinishNoBody() => {
