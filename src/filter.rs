@@ -60,7 +60,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             loop_,
             app,
             asgi,
+            sent_response_headers: false,
+            start_response_event: None,
             response_rx: None,
+            response_buffer: None,
+            response_ended: false,
+            process_response_buffer: false,
         })
     }
 }
@@ -71,7 +76,12 @@ struct Filter {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
     asgi: Py<PyDict>,
+    sent_response_headers: bool,
+    start_response_event: Option<ResponseStartEvent>,
     response_rx: Option<Receiver<ResponseEvent>>,
+    response_buffer: Option<Vec<ResponseBodyEvent>>,
+    response_ended: bool,
+    process_response_buffer: bool,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -80,16 +90,24 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        println!("OReqH");
         self.execute_app(envoy_filter);
-        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
+        envoy_filter.remove_request_header("content-length");
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
 
     fn on_request_body(
         &mut self,
         envoy_filter: &mut EHF,
-        _end_of_stream: bool,
+        end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        println!("RAG");
+        println!("OReqB");
+        println!("{}", end_of_stream);
+        if let Some(buffers) = envoy_filter.get_request_body() {
+            for buffer in buffers {
+                println!("{}", buffer.as_slice().len());
+            }
+        }
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationNoBuffer
     }
 
@@ -98,41 +116,82 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        println!("BAG");
-        println!("{}", envoy_filter.remove_response_header("content-length"));
+        println!("OResH");
+        envoy_filter.remove_response_header("content-length");
+        if let Some(start_event) = self.start_response_event.take() {
+            envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
+            for (k, v) in start_event.headers {
+                envoy_filter.set_response_header(k.as_str(), v.as_slice());
+            }
+            self.process_response_buffer = true;
+            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        }
+        self.sent_response_headers = true;
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
 
     fn on_response_body(
         &mut self,
         envoy_filter: &mut EHF,
-        _end_of_stream: bool,
+        end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        println!("RUG");
+        println!("OResB");
+        println!("{}", end_of_stream);
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, _event_id: u64) {
+        println!("OS1");
+        if let Some(buffers) = envoy_filter.get_request_body() {
+            for buffer in buffers {
+                println!("{}", buffer.as_slice().len());
+            }
+        }
+        if self.process_response_buffer {
+            println!("OS2");
+            if let Some(buffer) = self.response_buffer.take() {
+                println!("OS3");
+                for event in buffer {
+                    println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
+                    Python::attach(|py| {
+                        let future = event.future.bind(py);
+                        let set_result = future.getattr("set_result").unwrap();
+                        self.loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, PyNone::get(py))).unwrap();
+                    });
+                }
+            }
+            self.process_response_buffer = false;
+            return;
+        }
         let response_rx = self.response_rx.as_ref().unwrap();
-        match response_rx.recv().unwrap() {
-            ResponseEvent::Start(status) => {
-                println!("CAT");
-                println!("{}", envoy_filter.inject_request_body(&[], true));
-                //println!("{}", envoy_filter.prepare_response_headers());
-                println!("{}", envoy_filter.set_response_header(":status", status.to_string().as_bytes()));
-                //println!("{}", envoy_filter.send_response_headers(false));
-                println!("DOG");
-            }
-            ResponseEvent::Body(body) => {
-                println!("BAR");
-                envoy_filter.inject_response_body(&body, false);
-            }
-            ResponseEvent::Finish(body) => {
-                println!("CAR");
-                envoy_filter.inject_response_body(&body, true);
-            }
-            ResponseEvent::FinishNoBody() => {
-                envoy_filter.inject_response_body(&[], true);
+        println!("OS4");
+        if let Ok(event) = response_rx.recv() {
+            println!("OS5");
+            match event {
+                ResponseEvent::Start(event) => {
+                    println!("OS6");
+                    self.start_response_event.replace(event);
+                }
+                ResponseEvent::Body(event) => {
+                    println!("OS7");
+                    match self.sent_response_headers {
+                        true => {
+                            println!("OS8");
+                            println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
+                        },
+                        false => match self.response_buffer {
+                            Some(ref mut buffer) => {
+                                println!("OS9");
+                                buffer.push(event);
+                            },
+                            None => {
+                                println!("OS10");
+                                let mut buffer = vec![event];
+                                self.response_buffer.replace(buffer);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -206,6 +265,7 @@ impl Filter {
                 ASGISendCallable {
                     response_tx,
                     scheduler,
+                    loop_: self.loop_.clone_ref(py),
                 },
             ))?;
             let asyncio = PyModule::import(py, "asyncio")?;
@@ -241,23 +301,48 @@ fn set_scope_address<EHF: EnvoyHttpFilter>(
 }
 
 #[pyclass]
+struct ASGIReceiveCallable {
+    request_rx: Receiver<RequestEvent>,
+}
+
+unsafe impl Sync for ASGIReceiveCallable {}
+
+impl ASGIReceiveCallable {
+    async fn __call__(&self) -> PyResult<PyObject> {
+        let event = self.request_rx.recv().unwrap();
+        Python::with_gil(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "http.request")?;
+            dict.set_item("body", event.body)?;
+            dict.set_item("more_body", event.more_body)?;
+            Ok(dict.into())
+        })
+    }
+}
+
+#[pyclass]
 struct ASGISendCallable {
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    loop_: Py<PyAny>,
 }
 
 unsafe impl Sync for ASGISendCallable {}
 
 #[pymethods]
 impl ASGISendCallable {
-    async fn __call__(&self, event: Py<PyDict>) -> PyResult<()> {
+    fn __call__(&self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
+            let future = self.loop_.bind(py).call_method0("create_future")?;
+            
             let event = event.bind(py);
             let event_type: String = match event.get_item("type")? {
                 Some(v) => v.extract()?,
-                None => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    "Missing 'type' in ASGI event",
-                )),
+                None => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                        "Missing 'type' in ASGI event",
+                    ));
+                }
             };
 
             match event_type.as_str() {
@@ -267,47 +352,58 @@ impl ASGISendCallable {
                         None => {
                             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                                 "Missing 'status' in http.response.start event",
-                            ))
+                            ));
                         }
                     };
-                    self.response_tx.send(ResponseEvent::Start(status)).unwrap();
+                    self.response_tx
+                        .send(ResponseEvent::Start(ResponseStartEvent {
+                            status,
+                            headers: vec![],
+                        }))
+                        .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
+                    future.call_method1("set_result", (PyNone::get(py),))?;
                 }
                 "http.response.body" => {
                     let more_body: bool = match event.get_item("more_body")? {
                         Some(v) => v.extract()?,
                         None => false,
                     };
-                    if let Some(body) = event.get_item("body")? {
-                        let body: Vec<u8> = body.extract()?;
-                        self.response_tx
-                            .send(match more_body {
-                                true => ResponseEvent::Body(body),
-                                false => ResponseEvent::Finish(body),
-                            })
-                            .unwrap();
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                    } else if !more_body {
-                        self.response_tx
-                            .send(ResponseEvent::FinishNoBody())
-                            .unwrap();
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                    }
+                    let body: Vec<u8> = match event.get_item("body")? {
+                        Some(body) => body.extract()?,
+                        _ => Vec::new(),
+                    };
+                    self.response_tx.send(ResponseEvent::Body(ResponseBodyEvent { body, more_body, future: future.clone().unbind() })).unwrap();
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
                 _ => {
                     return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                         "Unsupported ASGI event type",
-                    ))
+                    ));
                 }
             }
-            Ok(())
+            Ok(future.unbind())
         })
     }
 }
 
+struct RequestEvent {
+    body: Vec<u8>,
+    more_body: bool,
+}
+
+struct ResponseStartEvent {
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+}
+
+struct ResponseBodyEvent {
+    body: Vec<u8>,
+    more_body: bool,
+    future: Py<PyAny>,
+}
+
 enum ResponseEvent {
-    Start(u16),
-    Body(Vec<u8>),
-    Finish(Vec<u8>),
-    FinishNoBody(),
+    Start(ResponseStartEvent),
+    Body(ResponseBodyEvent),
 }

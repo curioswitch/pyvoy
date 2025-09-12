@@ -67,6 +67,7 @@ static_resources:
     connect_timeout: 0.25s
     type: STATIC
     lb_policy: ROUND_ROBIN
+    http2_protocol_options: {}
     load_assignment:
       cluster_name: service_8001
       endpoints:
@@ -75,4 +76,4 @@ static_resources:
             address:
               socket_address:
                 address: 127.0.0.1
-                port_value: 8001
+                port_value: 8002

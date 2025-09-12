@@ -1,6 +1,7 @@
 import asyncio
 
 async def app(scope, send):
+    print(scope)
     await send({
         "type": "http.response.start",
         "status": 202,
