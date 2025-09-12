@@ -29,7 +29,15 @@ func main() {
 		panic(err)
 	}
 	println("response:", string(buf[:n]))
-	reqBodyW.Write([]byte("heeeeeeefj;aiejf;aiefj aef;jaefi;jaef;iajef;ieajfa;iejfa;eifjae;ifjaef;jefello"))
+	println("request: Choko")
+	reqBodyW.Write([]byte("Choko"))
+	n, err = res.Body.Read(buf)
+	if err != nil {
+		panic(err)
+	}
+	println("response:", string(buf[:n]))
+	println("request: make money")
+	reqBodyW.Write([]byte("make money"))
 	reqBodyW.Close()
 	n, err = res.Body.Read(buf)
 	if err != nil {

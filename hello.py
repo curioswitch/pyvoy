@@ -1,19 +1,30 @@
 import asyncio
 
-async def app(scope, send):
+async def app(scope, recv, send):
     print(scope)
     await send({
         "type": "http.response.start",
         "status": 202,
     })
+    print('s1')
     await send({
         "type": "http.response.body",
-        "body": b"Hello",
+        "body": b"Who are you?",
         "more_body": True,
     })
+    print('r1')
+    msg = await recv()
     await asyncio.sleep(5)
     await send({
         "type": "http.response.body",
-        "body": b" World!",
+        "body": b"Hi " + msg["body"] + b". What do you want to do?",
+        "more_body": True,
+    })
+    print('r2')
+    msg = await recv()
+    await asyncio.sleep(5)
+    await send({
+        "type": "http.response.body",
+        "body": b"Let's " + msg["body"] + b"!",
         "more_body": False,
     })

@@ -62,14 +62,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             asgi,
             sent_response_headers: false,
             start_response_event: None,
+            request_future_rx: None,
             response_rx: None,
             response_buffer: None,
-            response_ended: false,
             process_response_buffer: false,
         })
     }
 }
 
+const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
 
 struct Filter {
@@ -78,9 +79,11 @@ struct Filter {
     asgi: Py<PyDict>,
     sent_response_headers: bool,
     start_response_event: Option<ResponseStartEvent>,
+
+    request_future_rx: Option<Receiver<Py<PyAny>>>,
+
     response_rx: Option<Receiver<ResponseEvent>>,
     response_buffer: Option<Vec<ResponseBodyEvent>>,
-    response_ended: bool,
     process_response_buffer: bool,
 }
 
@@ -103,12 +106,16 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         println!("OReqB");
         println!("{}", end_of_stream);
-        if let Some(buffers) = envoy_filter.get_request_body() {
-            for buffer in buffers {
-                println!("{}", buffer.as_slice().len());
+        if has_request_body(envoy_filter) && let Some(request_future_rx) = self.request_future_rx.as_ref() {
+            println!("OReqB2");
+            match request_future_rx.try_recv() {
+                Ok(future) => {
+                    process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
+                },
+                Err(_) => println!("No future available1"),
             }
         }
-        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationNoBuffer
+        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
 
     fn on_response_headers(
@@ -132,7 +139,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_response_body(
         &mut self,
-        envoy_filter: &mut EHF,
+        _envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
         println!("OResB");
@@ -140,24 +147,33 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
-    fn on_scheduled(&mut self, envoy_filter: &mut EHF, _event_id: u64) {
-        println!("OS1");
-        if let Some(buffers) = envoy_filter.get_request_body() {
-            for buffer in buffers {
-                println!("{}", buffer.as_slice().len());
+    fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
+        println!("OS1 {}", event_id);
+        if event_id == EVENT_ID_REQUEST {
+            println!("OS1.0");
+            if has_request_body(envoy_filter) && let Some(request_future_rx) = self.request_future_rx.as_ref() {
+                println!("OS1.1");
+                match request_future_rx.try_recv() {
+                    Ok(future) => {
+                        println!("OS1.2");
+                        process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
+                    },
+                    Err(_) => println!("No future available2"),
+                }
             }
+            return;
         }
         if self.process_response_buffer {
             println!("OS2");
             if let Some(buffer) = self.response_buffer.take() {
                 println!("OS3");
                 for event in buffer {
+                    // TODO: It's better to resolve the future after injecting, but if the stream
+                    // ends, the filter immediately becomes invalid including the loop_ reference.
+                    // Instead of an independent loop_, it should be possible to borrow the Config's
+                    // reference somehow.
+                    set_future_to_none(&self.loop_, event.future).unwrap();
                     println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
-                    Python::attach(|py| {
-                        let future = event.future.bind(py);
-                        let set_result = future.getattr("set_result").unwrap();
-                        self.loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, PyNone::get(py))).unwrap();
-                    });
                 }
             }
             self.process_response_buffer = false;
@@ -177,6 +193,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     match self.sent_response_headers {
                         true => {
                             println!("OS8");
+                            set_future_to_none(&self.loop_, event.future).unwrap();
                             println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
                         },
                         false => match self.response_buffer {
@@ -255,16 +272,23 @@ impl Filter {
                 envoy_dynamic_module_type_attribute_id::DestinationPort,
             )?;
 
-            let scheduler = envoy_filter.new_scheduler();
             let (response_tx, response_rx) = channel::<ResponseEvent>();
             self.response_rx.replace(response_rx);
+
+            let (request_future_tx, request_future_rx) = channel::<Py<PyAny>>();
+            self.request_future_rx.replace(request_future_rx);
 
             let app = self.app.bind(py);
             let coro = app.call1((
                 scope,
+                ASGIReceiveCallable {
+                    request_future_tx,
+                    scheduler: envoy_filter.new_scheduler(),
+                    loop_: self.loop_.clone_ref(py),
+                },
                 ASGISendCallable {
                     response_tx,
-                    scheduler,
+                    scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
                 },
             ))?;
@@ -300,22 +324,65 @@ fn set_scope_address<EHF: EnvoyHttpFilter>(
     }
 }
 
+fn set_future_to_none(loop_: &Py<PyAny>, future: Py<PyAny>) -> PyResult<()> {
+    Python::attach(|py| {
+        let future = future.bind(py);
+        let set_result = future.getattr("set_result")?;
+        loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, PyNone::get(py)))?;
+        Ok(())
+    })
+}
+
+fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
+    if let Some(buffers) = envoy_filter.get_request_body() {
+        for buffer in buffers {
+            if (buffer.as_slice().len() > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn process_request_future<EHF: EnvoyHttpFilter>(
+    envoy_filter: &mut EHF, loop_: &Py<PyAny>, future: Py<PyAny>, more_body: bool) -> PyResult<()> {
+    println!("prf");
+    let mut body = Vec::new();
+    if let Some(buffers) = envoy_filter.get_request_body() {
+        for buffer in buffers {
+            body.extend_from_slice(buffer.as_slice());
+        }
+    }
+    envoy_filter.drain_request_body(body.len());
+    Python::attach(|py| {
+        let future = future.bind(py);
+        let set_result = future.getattr("set_result")?;
+        let event = PyDict::new(py);
+        event.set_item("type", "http.request")?;
+        event.set_item("body", body)?;
+        event.set_item("more_body", more_body)?;
+        loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, event))?;
+        Ok(())
+    })
+}
+
 #[pyclass]
 struct ASGIReceiveCallable {
-    request_rx: Receiver<RequestEvent>,
+    request_future_tx: Sender<Py<PyAny>>,
+    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    loop_: Py<PyAny>,
 }
 
 unsafe impl Sync for ASGIReceiveCallable {}
 
+#[pymethods]
 impl ASGIReceiveCallable {
-    async fn __call__(&self) -> PyResult<PyObject> {
-        let event = self.request_rx.recv().unwrap();
-        Python::with_gil(|py| {
-            let dict = PyDict::new(py);
-            dict.set_item("type", "http.request")?;
-            dict.set_item("body", event.body)?;
-            dict.set_item("more_body", event.more_body)?;
-            Ok(dict.into())
+    fn __call__(&self) -> PyResult<Py<PyAny>> {
+        Python::attach(|py| {
+            let future = self.loop_.bind(py).call_method0("create_future")?;
+            self.request_future_tx.send(future.clone().unbind()).unwrap();
+            self.scheduler.commit(EVENT_ID_REQUEST);
+            Ok(future.unbind())
         })
     }
 }
