@@ -14,12 +14,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    with PyvoyServer(args.app[0]):
+    with PyvoyServer(args.app[0]) as server:
+        print(f"pyvoy listening on port: {server.listener_port}")
         try:
             while True:
                 time.sleep(4000000)
         except KeyboardInterrupt:
-            pass
+            print("Shutting down pyvoy...")
 
 
 if __name__ == "__main__":
