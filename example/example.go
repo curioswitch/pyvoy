@@ -7,7 +7,7 @@ import (
 
 func main() {
 	reqBodyR, reqBodyW := io.Pipe()
-	req, _ := http.NewRequest("POST", "http://localhost:8000/foo", reqBodyR)
+	req, _ := http.NewRequest("POST", "http://localhost:55416/foo", reqBodyR)
 	req.ContentLength = -1
 	var prots http.Protocols
 	prots.SetUnencryptedHTTP2(true)

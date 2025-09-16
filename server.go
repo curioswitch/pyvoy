@@ -1,15 +1,20 @@
 package main
 
 import (
+	"log"
+	"net"
 	"net/http"
 	"time"
 )
 
 func main() {
+	lis, err := net.Listen("tcp", ":0")
+	if err != nil {
+		log.Fatalf("Unable to open port: %v\n", err)
+	}
 	var prots http.Protocols
 	prots.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
-		Addr:      ":8002",
 		Protocols: &prots,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			println("Got req")
@@ -22,5 +27,6 @@ func main() {
 		}),
 		ReadHeaderTimeout: 3 * time.Second,
 	}
-	srv.ListenAndServe()
+	log.Printf("Listening on port: %d\n", lis.Addr().(*net.TCPAddr).Port)
+	srv.Serve(lis)
 }

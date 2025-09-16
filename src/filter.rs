@@ -3,6 +3,7 @@ use std::thread;
 
 use envoy_proxy_dynamic_modules_rust_sdk::{abi::envoy_dynamic_module_type_attribute_id, *};
 use pyo3::{
+    intern,
     prelude::*,
     types::{PyDict, PyList, PyNone},
 };
@@ -28,7 +29,13 @@ impl Config {
             res.unwrap();
         });
 
-        let loop_ = rx.recv().unwrap();
+        let loop_ = match rx.recv() {
+            Ok(loop_) => loop_,
+            Err(e) => {
+                eprintln!("Failed to create Python event loop thread: {}", e);
+                return None;
+            }
+        };
 
         match Python::attach(|py| {
             let module = PyModule::import(py, "hello")?;
@@ -62,7 +69,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             loop_,
             app,
             asgi,
-            sent_response_headers: false,
+            response_headers_state: ResponseHeadersState::Start,
             start_response_event: None,
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
@@ -72,16 +79,23 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             process_response_buffer: false,
         })
     }
-}
+}   
 
 const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
+
+enum ResponseHeadersState {
+    Start,
+    Pending,
+    Sent,
+}
 
 struct Filter {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
     asgi: Py<PyDict>,
-    sent_response_headers: bool,
+
+    response_headers_state: ResponseHeadersState,
     start_response_event: Option<ResponseStartEvent>,
 
     request_future_rx: Receiver<Py<PyAny>>,
@@ -101,7 +115,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         println!("OReqH");
         self.execute_app(envoy_filter);
-        envoy_filter.remove_request_header("content-length");
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
 
@@ -131,28 +144,22 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         println!("OResH");
+        let mut header_keys: Vec<String> = Vec::new();
+        for (key, _) in envoy_filter.get_response_headers() {
+            header_keys.push(String::from_utf8_lossy(key.as_slice()).to_string());
+        }
+        for key in header_keys {
+            envoy_filter.remove_response_header(key.as_str());
+        }
         match self.start_response_event.take() {
             Some(start_event) => {
                 println!("OResH2");
-                let mut header_keys: Vec<String> = Vec::new();
-                for (key, _) in envoy_filter.get_response_headers() {
-                    header_keys.push(String::from_utf8_lossy(key.as_slice()).to_string());
-                }
-                for key in header_keys {
-                    envoy_filter.remove_response_header(key.as_str());
-                }
-                envoy_filter
-                    .set_response_header(":status", start_event.status.to_string().as_bytes());
-                for (k, v) in start_event.headers {
-                    envoy_filter.set_response_header(k.as_str(), v.as_slice());
-                }
-                self.process_response_buffer = true;
-                envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
-                self.sent_response_headers = true;
+                self.send_response_headers(envoy_filter, start_event);
                 abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
             }
             None => {
                 println!("OResH3");
+                self.response_headers_state = ResponseHeadersState::Pending;
                 abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
             }
         }
@@ -210,12 +217,29 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             match event {
                 ResponseEvent::Start(event) => {
                     println!("OS6");
-                    self.start_response_event.replace(event);
+                    match self.response_headers_state {
+                        ResponseHeadersState::Start => {
+                            println!("OS6.3");
+                            self.start_response_event.replace(event);
+                        }
+                        ResponseHeadersState::Pending => {
+                            println!("OS6.2");
+                            self.send_response_headers(envoy_filter, event);
+                            envoy_filter.continue_encoding();
+                            return;
+                        }
+                        ResponseHeadersState::Sent => {
+                            println!("OS6.1");
+                            // Headers already sent, ignore this event.
+                            // TODO: This is probably an error condition.
+                            return;
+                        }
+                    }
                 }
                 ResponseEvent::Body(event) => {
                     println!("OS7");
-                    match self.sent_response_headers {
-                        true => {
+                    match self.response_headers_state {
+                        ResponseHeadersState::Sent => {
                             println!("OS8");
                             set_future_to_none(&self.loop_, event.future).unwrap();
                             println!(
@@ -223,7 +247,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                                 envoy_filter.inject_response_body(&event.body, !event.more_body)
                             );
                         }
-                        false => match self.response_buffer {
+                        _ => match self.response_buffer {
                             Some(ref mut buffer) => {
                                 println!("OS9");
                                 buffer.push(event);
@@ -245,33 +269,33 @@ impl Filter {
     fn execute_app<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &EHF) {
         let res: PyResult<()> = Python::attach(|py| {
             let scope = PyDict::new(py);
-            scope.set_item("type", "http")?;
-            scope.set_item("asgi", self.asgi.bind(py))?;
+            scope.set_item(intern!(py, "type"), intern!(py, "http"))?;
+            scope.set_item(intern!(py, "asgi"), self.asgi.bind(py))?;
             if let Some(method) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestMethod)
             {
-                scope.set_item("method", String::from_utf8_lossy(method.as_slice()))?;
+                scope.set_item(intern!(py, "method"), String::from_utf8_lossy(method.as_slice()))?;
             }
             if let Some(scheme) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestScheme)
             {
-                scope.set_item("scheme", String::from_utf8_lossy(scheme.as_slice()))?;
+                scope.set_item(intern!(py, "scheme"), String::from_utf8_lossy(scheme.as_slice()))?;
             }
             if let Some(path) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
             {
                 let decoded_path = urlencoding::decode_binary(path.as_slice());
-                scope.set_item("path", String::from_utf8_lossy(&decoded_path))?;
-                scope.set_item("raw_path", path.as_slice())?;
+                scope.set_item(intern!(py, "path"), String::from_utf8_lossy(&decoded_path))?;
+                scope.set_item(intern!(py, "raw_path"), path.as_slice())?;
             }
             if let Some(query) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestQuery)
             {
-                scope.set_item("query", query.as_slice())?;
+                scope.set_item(intern!(py, "query"), query.as_slice())?;
             } else {
-                scope.set_item("query", b"")?;
+                scope.set_item(intern!(py, "query"), b"")?;
             }
-            scope.set_item("root_path", "")?;
+            scope.set_item(intern!(py, "root_path"), "")?;
             let headers = PyList::new(
                 py,
                 envoy_filter
@@ -279,7 +303,7 @@ impl Filter {
                     .iter()
                     .map(|(k, v)| (k.as_slice(), v.as_slice())),
             )?;
-            scope.set_item("headers", headers)?;
+            scope.set_item(intern!(py, "headers"), headers)?;
 
             set_scope_address(
                 py,
@@ -313,11 +337,22 @@ impl Filter {
                     loop_: self.loop_.clone_ref(py),
                 },
             ))?;
-            let asyncio = PyModule::import(py, "asyncio")?;
-            asyncio.call_method1("run_coroutine_threadsafe", (coro, &self.loop_.bind(py)))?;
+            let asyncio = PyModule::import(py, intern!(py, "asyncio"))?;
+            asyncio.call_method1(intern!(py, "run_coroutine_threadsafe"), (coro, &self.loop_.bind(py)))?;
             Ok(())
         });
         res.unwrap()
+    }
+
+    fn send_response_headers<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF, start_event: ResponseStartEvent) {
+        envoy_filter
+            .set_response_header(":status", start_event.status.to_string().as_bytes());
+        for (k, v) in start_event.headers {
+            envoy_filter.set_response_header(k.as_str(), v.as_slice());
+        }
+        self.process_response_buffer = true;
+        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        self.response_headers_state = ResponseHeadersState::Sent;
     }
 }
 
@@ -359,7 +394,7 @@ fn set_future_to_none(loop_: &Py<PyAny>, future: Py<PyAny>) -> PyResult<()> {
 fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
     if let Some(buffers) = envoy_filter.get_request_body() {
         for buffer in buffers {
-            if (buffer.as_slice().len() > 0) {
+            if !buffer.as_slice().is_empty() {
                 return true;
             }
         }
@@ -383,14 +418,14 @@ fn process_request_future<EHF: EnvoyHttpFilter>(
     envoy_filter.drain_request_body(body.len());
     Python::attach(|py| {
         let future = future.bind(py);
-        let set_result = future.getattr("set_result")?;
+        let set_result = future.getattr(intern!(py, "set_result"))?;
         let event = PyDict::new(py);
-        event.set_item("type", "http.request")?;
-        event.set_item("body", body)?;
-        event.set_item("more_body", more_body)?;
+        event.set_item(intern!(py, "type"), intern!(py, "http.request"))?;
+        event.set_item(intern!(py, "body"), body)?;
+        event.set_item(intern!(py, "more_body"), more_body)?;
         loop_
             .bind(py)
-            .call_method1("call_soon_threadsafe", (set_result, event))?;
+            .call_method1(intern!(py, "call_soon_threadsafe"), (set_result, event))?;
         Ok(())
     })
 }
@@ -408,7 +443,7 @@ unsafe impl Sync for ASGIReceiveCallable {}
 impl ASGIReceiveCallable {
     fn __call__(&self) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
-            let future = self.loop_.bind(py).call_method0("create_future")?;
+            let future = self.loop_.bind(py).call_method0(intern!(py, "create_future"))?;
             self.request_future_tx
                 .send(future.clone().unbind())
                 .unwrap();
@@ -431,7 +466,7 @@ unsafe impl Sync for ASGISendCallable {}
 impl ASGISendCallable {
     fn __call__(&self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
-            let future = self.loop_.bind(py).call_method0("create_future")?;
+            let future = self.loop_.bind(py).call_method0(intern!(py, "create_future"))?;
 
             let event = event.bind(py);
             let event_type: String = match event.get_item("type")? {
@@ -445,7 +480,7 @@ impl ASGISendCallable {
 
             match event_type.as_str() {
                 "http.response.start" => {
-                    let status: u16 = match event.get_item("status")? {
+                    let status: u16 = match event.get_item(intern!(py, "status"))? {
                         Some(v) => v.extract()?,
                         None => {
                             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -453,7 +488,7 @@ impl ASGISendCallable {
                             ));
                         }
                     };
-                    let headers: Vec<(String, Vec<u8>)> = match event.get_item("headers")? {
+                    let headers: Vec<(String, Vec<u8>)> = match event.get_item(intern!(py, "headers"))? {
                         Some(v) => {
                             let mut headers = Vec::new();
                             for item in v.try_iter()? {
@@ -475,14 +510,14 @@ impl ASGISendCallable {
                         .send(ResponseEvent::Start(ResponseStartEvent { status, headers }))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
-                    future.call_method1("set_result", (PyNone::get(py),))?;
+                    future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
                 "http.response.body" => {
-                    let more_body: bool = match event.get_item("more_body")? {
+                    let more_body: bool = match event.get_item(intern!(py, "more_body"))? {
                         Some(v) => v.extract()?,
                         None => false,
                     };
-                    let body: Vec<u8> = match event.get_item("body")? {
+                    let body: Vec<u8> = match event.get_item(intern!(py, "body"))? {
                         Some(body) => body.extract()?,
                         _ => Vec::new(),
                     };
