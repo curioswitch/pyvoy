@@ -116,8 +116,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             println!("OReqB2");
             match self.request_future_rx.try_recv() {
                 Ok(future) => {
-                    process_request_future(envoy_filter, &self.loop_, future, !end_of_stream).unwrap();
-                },
+                    process_request_future(envoy_filter, &self.loop_, future, !end_of_stream)
+                        .unwrap();
+                }
                 Err(_) => println!("No future available1"),
             }
         }
@@ -140,7 +141,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 for key in header_keys {
                     envoy_filter.remove_response_header(key.as_str());
                 }
-                envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
+                envoy_filter
+                    .set_response_header(":status", start_event.status.to_string().as_bytes());
                 for (k, v) in start_event.headers {
                     envoy_filter.set_response_header(k.as_str(), v.as_slice());
                 }
@@ -177,7 +179,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     Ok(future) => {
                         println!("OS1.2");
                         process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
-                    },
+                    }
                     Err(_) => println!("No future available2"),
                 }
             }
@@ -193,7 +195,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     // Instead of an independent loop_, it should be possible to borrow the Config's
                     // reference somehow.
                     set_future_to_none(&self.loop_, event.future).unwrap();
-                    println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
+                    println!(
+                        "{}",
+                        envoy_filter.inject_response_body(&event.body, !event.more_body)
+                    );
                 }
             }
             self.process_response_buffer = false;
@@ -213,19 +218,22 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         true => {
                             println!("OS8");
                             set_future_to_none(&self.loop_, event.future).unwrap();
-                            println!("{}", envoy_filter.inject_response_body(&event.body, !event.more_body));
-                        },
+                            println!(
+                                "{}",
+                                envoy_filter.inject_response_body(&event.body, !event.more_body)
+                            );
+                        }
                         false => match self.response_buffer {
                             Some(ref mut buffer) => {
                                 println!("OS9");
                                 buffer.push(event);
-                            },
+                            }
                             None => {
                                 println!("OS10");
                                 let buffer = vec![event];
                                 self.response_buffer.replace(buffer);
                             }
-                        }
+                        },
                     }
                 }
             }
@@ -341,7 +349,9 @@ fn set_future_to_none(loop_: &Py<PyAny>, future: Py<PyAny>) -> PyResult<()> {
     Python::attach(|py| {
         let future = future.bind(py);
         let set_result = future.getattr("set_result")?;
-        loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, PyNone::get(py)))?;
+        loop_
+            .bind(py)
+            .call_method1("call_soon_threadsafe", (set_result, PyNone::get(py)))?;
         Ok(())
     })
 }
@@ -358,7 +368,11 @@ fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
 }
 
 fn process_request_future<EHF: EnvoyHttpFilter>(
-    envoy_filter: &mut EHF, loop_: &Py<PyAny>, future: Py<PyAny>, more_body: bool) -> PyResult<()> {
+    envoy_filter: &mut EHF,
+    loop_: &Py<PyAny>,
+    future: Py<PyAny>,
+    more_body: bool,
+) -> PyResult<()> {
     println!("prf");
     let mut body = Vec::new();
     if let Some(buffers) = envoy_filter.get_request_body() {
@@ -374,7 +388,9 @@ fn process_request_future<EHF: EnvoyHttpFilter>(
         event.set_item("type", "http.request")?;
         event.set_item("body", body)?;
         event.set_item("more_body", more_body)?;
-        loop_.bind(py).call_method1("call_soon_threadsafe", (set_result, event))?;
+        loop_
+            .bind(py)
+            .call_method1("call_soon_threadsafe", (set_result, event))?;
         Ok(())
     })
 }
@@ -393,7 +409,9 @@ impl ASGIReceiveCallable {
     fn __call__(&self) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
             let future = self.loop_.bind(py).call_method0("create_future")?;
-            self.request_future_tx.send(future.clone().unbind()).unwrap();
+            self.request_future_tx
+                .send(future.clone().unbind())
+                .unwrap();
             self.scheduler.commit(EVENT_ID_REQUEST);
             Ok(future.unbind())
         })
@@ -414,7 +432,7 @@ impl ASGISendCallable {
     fn __call__(&self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
             let future = self.loop_.bind(py).call_method0("create_future")?;
-            
+
             let event = event.bind(py);
             let event_type: String = match event.get_item("type")? {
                 Some(v) => v.extract()?,
@@ -434,7 +452,7 @@ impl ASGISendCallable {
                                 "Missing 'status' in http.response.start event",
                             ));
                         }
-                    };                    println!("http.response.start2");
+                    };
                     let headers: Vec<(String, Vec<u8>)> = match event.get_item("headers")? {
                         Some(v) => {
                             let mut headers = Vec::new();
@@ -446,18 +464,15 @@ impl ASGISendCallable {
                                 let value_bytes = value_item.downcast::<pyo3::types::PyBytes>()?;
                                 headers.push((
                                     String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
-                                    value_bytes.as_bytes().to_vec()
+                                    value_bytes.as_bytes().to_vec(),
                                 ));
                             }
                             headers
-                        },
+                        }
                         None => Vec::new(),
                     };
                     self.response_tx
-                        .send(ResponseEvent::Start(ResponseStartEvent {
-                            status,
-                            headers,
-                        }))
+                        .send(ResponseEvent::Start(ResponseStartEvent { status, headers }))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                     future.call_method1("set_result", (PyNone::get(py),))?;
@@ -471,7 +486,13 @@ impl ASGISendCallable {
                         Some(body) => body.extract()?,
                         _ => Vec::new(),
                     };
-                    self.response_tx.send(ResponseEvent::Body(ResponseBodyEvent { body, more_body, future: future.clone().unbind() })).unwrap();
+                    self.response_tx
+                        .send(ResponseEvent::Body(ResponseBodyEvent {
+                            body,
+                            more_body,
+                            future: future.clone().unbind(),
+                        }))
+                        .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
                 _ => {
