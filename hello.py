@@ -1,5 +1,3 @@
-import asyncio
-
 async def app(scope, recv, send):
     print(scope)
     await send({
@@ -14,7 +12,6 @@ async def app(scope, recv, send):
     })
     print('r1')
     msg = await recv()
-    await asyncio.sleep(5)
     await send({
         "type": "http.response.body",
         "body": b"Hi " + msg["body"] + b". What do you want to do?",
@@ -22,7 +19,6 @@ async def app(scope, recv, send):
     })
     print('r2')
     msg = await recv()
-    await asyncio.sleep(5)
     await send({
         "type": "http.response.body",
         "body": b"Let's " + msg["body"] + b"!",

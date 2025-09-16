@@ -23,6 +23,10 @@ func main() {
 	}
 	println(res.Proto)
 	defer res.Body.Close()
+	println(res.Status)
+	for k, v := range res.Header {
+		println("header:", k, v[0])
+	}
 	buf := make([]byte, 1024)
 	n, err := res.Body.Read(buf)
 	if err != nil {

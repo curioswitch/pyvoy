@@ -110,7 +110,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             println!("OReqB2");
             match request_future_rx.try_recv() {
                 Ok(future) => {
-                    process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
+                    process_request_future(envoy_filter, &self.loop_, future, !end_of_stream).unwrap();
                 },
                 Err(_) => println!("No future available1"),
             }
@@ -124,7 +124,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         println!("OResH");
-        envoy_filter.remove_response_header("content-length");
+        let mut header_keys: Vec<String> = Vec::new();
+        for (key, _) in envoy_filter.get_response_headers() {
+            header_keys.push(String::from_utf8_lossy(key.as_slice()).as_ref().to_string());
+        }
+        for key in header_keys {
+            envoy_filter.remove_response_header(key.as_str());
+        }
         if let Some(start_event) = self.start_response_event.take() {
             envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
             for (k, v) in start_event.headers {
@@ -144,6 +150,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
         println!("OResB");
         println!("{}", end_of_stream);
+        // Ignore upstream's response completely.
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
@@ -203,7 +210,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             },
                             None => {
                                 println!("OS10");
-                                let mut buffer = vec![event];
+                                let buffer = vec![event];
                                 self.response_buffer.replace(buffer);
                             }
                         }
@@ -422,10 +429,14 @@ impl ASGISendCallable {
                             ));
                         }
                     };
+                    let headers: Vec<(String, Vec<u8>)> = match event.get_item("headers")? {
+                        Some(v) => v.extract()?,
+                        None => Vec::new(),
+                    };
                     self.response_tx
                         .send(ResponseEvent::Start(ResponseStartEvent {
                             status,
-                            headers: vec![],
+                            headers,
                         }))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
@@ -452,11 +463,6 @@ impl ASGISendCallable {
             Ok(future.unbind())
         })
     }
-}
-
-struct RequestEvent {
-    body: Vec<u8>,
-    more_body: bool,
 }
 
 struct ResponseStartEvent {
