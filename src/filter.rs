@@ -56,14 +56,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
                 self.asgi.clone_ref(py),
             )
         });
+        let (request_future_tx, request_future_rx) = channel::<Py<PyAny>>();
+        let (response_tx, response_rx) = channel::<ResponseEvent>();
         Box::new(Filter {
             loop_,
             app,
             asgi,
             sent_response_headers: false,
             start_response_event: None,
-            request_future_rx: None,
-            response_rx: None,
+            request_future_rx: request_future_rx,
+            request_future_tx: Some(request_future_tx),
+            response_rx: response_rx,
+            response_tx: Some(response_tx),
             response_buffer: None,
             process_response_buffer: false,
         })
@@ -80,9 +84,11 @@ struct Filter {
     sent_response_headers: bool,
     start_response_event: Option<ResponseStartEvent>,
 
-    request_future_rx: Option<Receiver<Py<PyAny>>>,
+    request_future_rx: Receiver<Py<PyAny>>,
+    request_future_tx: Option<Sender<Py<PyAny>>>,
+    response_rx: Receiver<ResponseEvent>,
+    response_tx: Option<Sender<ResponseEvent>>,
 
-    response_rx: Option<Receiver<ResponseEvent>>,
     response_buffer: Option<Vec<ResponseBodyEvent>>,
     process_response_buffer: bool,
 }
@@ -106,9 +112,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         println!("OReqB");
         println!("{}", end_of_stream);
-        if has_request_body(envoy_filter) && let Some(request_future_rx) = self.request_future_rx.as_ref() {
+        if has_request_body(envoy_filter) {
             println!("OReqB2");
-            match request_future_rx.try_recv() {
+            match self.request_future_rx.try_recv() {
                 Ok(future) => {
                     process_request_future(envoy_filter, &self.loop_, future, !end_of_stream).unwrap();
                 },
@@ -129,7 +135,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 println!("OResH2");
                 let mut header_keys: Vec<String> = Vec::new();
                 for (key, _) in envoy_filter.get_response_headers() {
-                    header_keys.push(String::from_utf8_lossy(key.as_slice()).as_ref().to_string());
+                    header_keys.push(String::from_utf8_lossy(key.as_slice()).to_string());
                 }
                 for key in header_keys {
                     envoy_filter.remove_response_header(key.as_str());
@@ -165,9 +171,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         println!("OS1 {}", event_id);
         if event_id == EVENT_ID_REQUEST {
             println!("OS1.0");
-            if has_request_body(envoy_filter) && let Some(request_future_rx) = self.request_future_rx.as_ref() {
+            if has_request_body(envoy_filter) {
                 println!("OS1.1");
-                match request_future_rx.try_recv() {
+                match self.request_future_rx.try_recv() {
                     Ok(future) => {
                         println!("OS1.2");
                         process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
@@ -193,9 +199,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.process_response_buffer = false;
             return;
         }
-        let response_rx = self.response_rx.as_ref().unwrap();
         println!("OS4");
-        if let Ok(event) = response_rx.recv() {
+        if let Ok(event) = self.response_rx.recv() {
             println!("OS5");
             match event {
                 ResponseEvent::Start(event) => {
@@ -286,22 +291,16 @@ impl Filter {
                 envoy_dynamic_module_type_attribute_id::DestinationPort,
             )?;
 
-            let (response_tx, response_rx) = channel::<ResponseEvent>();
-            self.response_rx.replace(response_rx);
-
-            let (request_future_tx, request_future_rx) = channel::<Py<PyAny>>();
-            self.request_future_rx.replace(request_future_rx);
-
             let app = self.app.bind(py);
             let coro = app.call1((
                 scope,
                 ASGIReceiveCallable {
-                    request_future_tx,
+                    request_future_tx: self.request_future_tx.take().unwrap(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
                 },
                 ASGISendCallable {
-                    response_tx,
+                    response_tx: self.response_tx.take().unwrap(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
                 },
