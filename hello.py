@@ -3,6 +3,10 @@ async def app(scope, recv, send):
     await send({
         "type": "http.response.start",
         "status": 202,
+        "headers": [
+            (b"content-type", b"text/plain"),
+            (b"x-animal", b"bear"),
+        ],
     })
     print('s1')
     await send({

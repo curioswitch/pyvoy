@@ -124,23 +124,30 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         println!("OResH");
-        let mut header_keys: Vec<String> = Vec::new();
-        for (key, _) in envoy_filter.get_response_headers() {
-            header_keys.push(String::from_utf8_lossy(key.as_slice()).as_ref().to_string());
-        }
-        for key in header_keys {
-            envoy_filter.remove_response_header(key.as_str());
-        }
-        if let Some(start_event) = self.start_response_event.take() {
-            envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
-            for (k, v) in start_event.headers {
-                envoy_filter.set_response_header(k.as_str(), v.as_slice());
+        match self.start_response_event.take() {
+            Some(start_event) => {
+                println!("OResH2");
+                let mut header_keys: Vec<String> = Vec::new();
+                for (key, _) in envoy_filter.get_response_headers() {
+                    header_keys.push(String::from_utf8_lossy(key.as_slice()).as_ref().to_string());
+                }
+                for key in header_keys {
+                    envoy_filter.remove_response_header(key.as_str());
+                }
+                envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
+                for (k, v) in start_event.headers {
+                    envoy_filter.set_response_header(k.as_str(), v.as_slice());
+                }
+                self.process_response_buffer = true;
+                envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+                self.sent_response_headers = true;
+                abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
             }
-            self.process_response_buffer = true;
-            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+            None => {
+                println!("OResH3");
+                abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
+            }
         }
-        self.sent_response_headers = true;
-        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
 
     fn on_response_body(
@@ -428,9 +435,23 @@ impl ASGISendCallable {
                                 "Missing 'status' in http.response.start event",
                             ));
                         }
-                    };
+                    };                    println!("http.response.start2");
                     let headers: Vec<(String, Vec<u8>)> = match event.get_item("headers")? {
-                        Some(v) => v.extract()?,
+                        Some(v) => {
+                            let mut headers = Vec::new();
+                            for item in v.try_iter()? {
+                                let tuple = item?;
+                                let key_item = tuple.get_item(0)?;
+                                let value_item = tuple.get_item(1)?;
+                                let key_bytes = key_item.downcast::<pyo3::types::PyBytes>()?;
+                                let value_bytes = value_item.downcast::<pyo3::types::PyBytes>()?;
+                                headers.push((
+                                    String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
+                                    value_bytes.as_bytes().to_vec()
+                                ));
+                            }
+                            headers
+                        },
                         None => Vec::new(),
                     };
                     self.response_tx
