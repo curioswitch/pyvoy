@@ -8,6 +8,8 @@ use pyo3::{
     types::{PyDict, PyList, PyNone},
 };
 
+use crate::filter;
+
 pub struct Config {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
@@ -15,7 +17,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(_filter_config: &str) -> Option<Self> {
+    pub fn new(filter_config: &str) -> Option<Self> {
         let (tx, rx) = sync_channel(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
@@ -37,9 +39,11 @@ impl Config {
             }
         };
 
+        println!("Loading Python application from {}", filter_config);
         match Python::attach(|py| {
-            let module = PyModule::import(py, "hello")?;
-            let app = module.getattr("app")?;
+            let (module, attr) = filter_config.split_once(":").unwrap_or((filter_config, "app"));
+            let module = PyModule::import(py, module)?;
+            let app = module.getattr(attr)?;
             let asgi = PyDict::new(py);
             asgi.set_item("version", "3.0")?;
             asgi.set_item("spec_version", "2.2")?;

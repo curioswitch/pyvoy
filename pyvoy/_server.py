@@ -7,7 +7,8 @@ class PyvoyServer:
     listener_address: str
     listener_port: int
 
-    def __init__(self, *, port: int = 0) -> None:
+    def __init__(self, app: str, *, port: int = 0) -> None:
+        self._app = app
         self._port = port
 
     def __enter__(self) -> "PyvoyServer":
@@ -76,6 +77,10 @@ class PyvoyServer:
                                                             "name": "pyvoy"
                                                         },
                                                         "filter_name": "pyvoy",
+                                                        "filter_config": {
+                                                            "@type": "type.googleapis.com/google.protobuf.StringValue",
+                                                            "value": self._app,
+                                                        },
                                                     },
                                                 },
                                                 {
@@ -136,12 +141,12 @@ class PyvoyServer:
         admin_address = ""
         logs = []
         while True:
+            line = self._process.stderr.readline()
+            logs.append(line)
             if self._process.poll() is not None:
                 print("".join(logs))
                 msg = "Envoy process exited unexpectedly"
                 raise RuntimeError(msg)
-            line = self._process.stderr.readline()
-            logs.append(line)
             if "admin address:" in line:
                 admin_address = line.split("admin address:")[1].strip()
             if "starting main dispatch loop" in line:
