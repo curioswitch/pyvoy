@@ -40,7 +40,10 @@ class PyvoyServer:
                     {
                         "name": "listener",
                         "address": {
-                            "socket_address": {"address": "0.0.0.0", "port_value": self._port}
+                            "socket_address": {
+                                "address": "0.0.0.0",
+                                "port_value": self._port,
+                            }
                         },
                         "filter_chains": [
                             {
@@ -129,11 +132,7 @@ class PyvoyServer:
         }
 
         self._process = subprocess.Popen(
-            [
-                "/Users/anuraag/git/envoy/bazel-bin/source/exe/envoy-static",
-                "--config-yaml",
-                json.dumps(config),
-            ],
+            ["envoy", "--config-yaml", json.dumps(config)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -144,7 +143,6 @@ class PyvoyServer:
             line = self._process.stderr.readline()
             logs.append(line)
             if self._process.poll() is not None:
-                print("".join(logs))
                 msg = "Envoy process exited unexpectedly"
                 raise RuntimeError(msg)
             if "admin address:" in line:
@@ -155,7 +153,9 @@ class PyvoyServer:
             f"http://{admin_address}/listeners?format=json"
         )
         response_data = json.loads(response.read())
-        socket_address = response_data["listener_statuses"][0]["local_address"]["socket_address"]
+        socket_address = response_data["listener_statuses"][0]["local_address"][
+            "socket_address"
+        ]
         self.listener_address = socket_address["address"]
         self.listener_port = socket_address["port_value"]
 
