@@ -27,13 +27,15 @@ def main() -> None:
 
     args = parser.parse_args(namespace=CLIArgs())
 
-    with PyvoyServer(args.app, address=args.address, port=args.port) as server:
-        print(f"pyvoy listening on {server.listener_address}:{server.listener_port}")
+    with PyvoyServer(
+        args.app, address=args.address, port=args.port, print_startup_logs=True
+    ) as server:
+        print(f"pyvoy listening on {server.listener_address}:{server.listener_port}")  # noqa: T201
         try:
             while True:
                 time.sleep(4000000)
         except KeyboardInterrupt:
-            print("Shutting down pyvoy...")
+            print("Shutting down pyvoy...")  # noqa: T201
 
 
 if __name__ == "__main__":

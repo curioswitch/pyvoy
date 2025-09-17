@@ -11,11 +11,20 @@ from ._bin import get_envoy_path, get_pyvoy_dir_path, get_upstream_path
 class PyvoyServer:
     _listener_address: str
     _listener_port: int
+    _print_startup_logs: bool
 
-    def __init__(self, app: str, *, address: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(
+        self,
+        app: str,
+        *,
+        address: str = "127.0.0.1",
+        port: int = 0,
+        print_startup_logs: bool = False,
+    ) -> None:
         self._app = app
         self._address = address
         self._port = port
+        self._print_startup_logs = print_startup_logs
 
     def __enter__(self) -> "PyvoyServer":
         self.start()
@@ -160,10 +169,16 @@ class PyvoyServer:
         )
         admin_address = ""
         assert self._process.stderr is not None  # noqa: S101
+        startup_logs = []
         while True:
             line = self._process.stderr.readline()
-            print(line, end="")
+            if self._print_startup_logs:
+                print(line, end="")  # noqa: T201
+            else:
+                startup_logs.append(line)
             if self._process.poll() is not None:
+                if not self._print_startup_logs:
+                    print("".join(startup_logs), end="")  # noqa: T201
                 msg = "Envoy process exited unexpectedly"
                 raise RuntimeError(msg)
             if "admin address:" in line:

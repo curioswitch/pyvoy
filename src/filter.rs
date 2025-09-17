@@ -37,7 +37,6 @@ impl Config {
             }
         };
 
-        println!("Loading Python application from {}", filter_config);
         match Python::attach(|py| {
             let (module, attr) = filter_config
                 .split_once(":")
@@ -117,7 +116,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        println!("OReqH");
         self.execute_app(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
@@ -127,16 +125,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        println!("OReqB");
-        println!("{}", end_of_stream);
         if has_request_body(envoy_filter) {
-            println!("OReqB2");
             match self.request_future_rx.try_recv() {
                 Ok(future) => {
                     process_request_future(envoy_filter, &self.loop_, future, !end_of_stream)
                         .unwrap();
                 }
-                Err(_) => println!("No future available1"),
+                Err(_) => {}
             }
         }
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
@@ -147,7 +142,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        println!("OResH");
         let mut header_keys: Vec<String> = Vec::new();
         for (key, _) in envoy_filter.get_response_headers() {
             header_keys.push(String::from_utf8_lossy(key.as_slice()).to_string());
@@ -157,12 +151,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         match self.start_response_event.take() {
             Some(start_event) => {
-                println!("OResH2");
                 self.send_response_headers(envoy_filter, start_event);
                 abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
             }
             None => {
-                println!("OResH3");
                 self.response_headers_state = ResponseHeadersState::Pending;
                 abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
             }
@@ -172,98 +164,72 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_response_body(
         &mut self,
         _envoy_filter: &mut EHF,
-        end_of_stream: bool,
+        _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        println!("OResB");
-        println!("{}", end_of_stream);
         // Ignore upstream's response completely.
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
-        println!("OS1 {}", event_id);
         if event_id == EVENT_ID_REQUEST {
-            println!("OS1.0");
             if has_request_body(envoy_filter) {
-                println!("OS1.1");
                 match self.request_future_rx.try_recv() {
                     Ok(future) => {
-                        println!("OS1.2");
                         process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
                     }
-                    Err(_) => println!("No future available2"),
+                    Err(_) => {}
                 }
             }
             return;
         }
         if self.process_response_buffer {
-            println!("OS2");
             if let Some(buffer) = self.response_buffer.take() {
-                println!("OS3");
                 for event in buffer {
                     // TODO: It's better to resolve the future after injecting, but if the stream
                     // ends, the filter immediately becomes invalid including the loop_ reference.
                     // Instead of an independent loop_, it should be possible to borrow the Config's
                     // reference somehow.
                     set_future_to_none(&self.loop_, event.future).unwrap();
-                    println!(
-                        "{}",
-                        envoy_filter.inject_response_body(&event.body, !event.more_body)
-                    );
+                    envoy_filter.inject_response_body(&event.body, !event.more_body);
                 }
             }
             self.process_response_buffer = false;
             return;
         }
-        println!("OS4");
         if let Ok(event) = self.response_rx.recv() {
-            println!("OS5");
             match event {
                 ResponseEvent::Start(event) => {
-                    println!("OS6");
                     match self.response_headers_state {
                         ResponseHeadersState::Start => {
-                            println!("OS6.3");
                             self.start_response_event.replace(event);
                         }
                         ResponseHeadersState::Pending => {
-                            println!("OS6.2");
                             self.send_response_headers(envoy_filter, event);
                             envoy_filter.continue_encoding();
                             return;
                         }
                         ResponseHeadersState::Sent => {
-                            println!("OS6.1");
                             // Headers already sent, ignore this event.
                             // TODO: This is probably an error condition.
                             return;
                         }
                     }
                 }
-                ResponseEvent::Body(event) => {
-                    println!("OS7");
-                    match self.response_headers_state {
-                        ResponseHeadersState::Sent => {
-                            println!("OS8");
-                            set_future_to_none(&self.loop_, event.future).unwrap();
-                            println!(
-                                "{}",
-                                envoy_filter.inject_response_body(&event.body, !event.more_body)
-                            );
-                        }
-                        _ => match self.response_buffer {
-                            Some(ref mut buffer) => {
-                                println!("OS9");
-                                buffer.push(event);
-                            }
-                            None => {
-                                println!("OS10");
-                                let buffer = vec![event];
-                                self.response_buffer.replace(buffer);
-                            }
-                        },
+                ResponseEvent::Body(event) => match self.response_headers_state {
+                    ResponseHeadersState::Sent => {
+                        set_future_to_none(&self.loop_, event.future).unwrap();
+                        envoy_filter.inject_response_body(&event.body, !event.more_body);
                     }
-                }
+                    _ => match self.response_buffer {
+                        Some(ref mut buffer) => {
+                            buffer.push(event);
+                        }
+                        None => {
+                            let buffer = vec![event];
+                            self.response_buffer.replace(buffer);
+                        }
+                    },
+                },
             }
         }
     }
@@ -424,7 +390,6 @@ fn process_request_future<EHF: EnvoyHttpFilter>(
     future: Py<PyAny>,
     more_body: bool,
 ) -> PyResult<()> {
-    println!("prf");
     let mut body = Vec::new();
     if let Some(buffers) = envoy_filter.get_request_body() {
         for buffer in buffers {
