@@ -152,9 +152,10 @@ class PyvoyServer:
             stderr=subprocess.PIPE,
             text=True,
             env={
-                "PYTHONPATH": pythonpath,
-                "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
                 **os.environ,
+                "PYTHONPATH": pythonpath,
+                "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
+                "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
             },
         )
         admin_address = ""
