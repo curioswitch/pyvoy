@@ -119,12 +119,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        let mut trailers_accepted = false;
-        if let Some(te) = envoy_filter.get_request_header_value("te") {
-            if te.as_slice() == b"trailers" {
-                trailers_accepted = true;
-            }
-        }
+        let trailers_accepted = match envoy_filter.get_request_header_value("te") {
+            Some(te) => te.as_slice() == b"trailers",
+            None => false,
+        };
         self.execute_app(envoy_filter, trailers_accepted);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
@@ -154,7 +152,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        envoy_filter.remove_response_header("Trailer");
+        envoy_filter.remove_response_header("trailer");
         self.response_started = true;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
@@ -332,6 +330,10 @@ impl Filter {
     ) {
         envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
         for (k, v) in start_event.headers {
+            if k.eq_ignore_ascii_case("trailer") && self.response_trailers.is_none() {
+                // Skip trailers header if we won't be sending any.
+                continue;
+            }
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
