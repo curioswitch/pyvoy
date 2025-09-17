@@ -83,16 +83,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             app,
             asgi,
             extensions,
+            request_closed: false,
             response_headers_state: ResponseHeadersState::Start,
             trailers_state: TrailersState::Denied,
-            start_response_event: None,
             response_trailers: Vec::new(),
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
             response_rx: response_rx,
             response_tx: Some(response_tx),
-            response_buffer: None,
-            process_response_buffer: false,
         })
     }
 }
@@ -119,18 +117,15 @@ struct Filter {
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
 
+    request_closed: bool,
     response_headers_state: ResponseHeadersState,
     trailers_state: TrailersState,
-    start_response_event: Option<ResponseStartEvent>,
     response_trailers: Vec<(String, Vec<u8>)>,
 
     request_future_rx: Receiver<Py<PyAny>>,
     request_future_tx: Option<Sender<Py<PyAny>>>,
     response_rx: Receiver<ResponseEvent>,
     response_tx: Option<Sender<ResponseEvent>>,
-
-    response_buffer: Option<Vec<ResponseBodyEvent>>,
-    process_response_buffer: bool,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -153,6 +148,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
+        if end_of_stream {
+            self.request_closed = true;
+        }
         if has_request_body(envoy_filter) {
             match self.request_future_rx.try_recv() {
                 Ok(future) => {
@@ -170,23 +168,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        let mut header_keys: Vec<String> = Vec::new();
-        for (key, _) in envoy_filter.get_response_headers() {
-            header_keys.push(String::from_utf8_lossy(key.as_slice()).to_string());
-        }
-        for key in header_keys {
-            envoy_filter.remove_response_header(key.as_str());
-        }
-        match self.start_response_event.take() {
-            Some(start_event) => {
-                self.send_response_headers(envoy_filter, start_event);
-                abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
-            }
-            None => {
-                self.response_headers_state = ResponseHeadersState::Pending;
-                abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
-            }
-        }
+        envoy_filter.remove_response_header("Trailer");
+        self.response_headers_state = ResponseHeadersState::Pending;
+        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
     }
 
     fn on_response_trailers(
@@ -205,30 +190,25 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             if has_request_body(envoy_filter) {
                 match self.request_future_rx.try_recv() {
                     Ok(future) => {
-                        process_request_future(envoy_filter, &self.loop_, future, false).unwrap();
+                        process_request_future(
+                            envoy_filter,
+                            &self.loop_,
+                            future,
+                            !self.request_closed,
+                        )
+                        .unwrap();
                     }
                     Err(_) => {}
                 }
             }
             return;
         }
-        if self.process_response_buffer {
-            if let Some(buffer) = self.response_buffer.take() {
-                for event in buffer {
-                    // TODO: It's better to resolve the future after injecting, but if the stream
-                    // ends, the filter immediately becomes invalid including the loop_ reference.
-                    // Instead of an independent loop_, it should be possible to borrow the Config's
-                    // reference somehow.
-                    set_future_to_none(&self.loop_, event.future).unwrap();
-                    let end_stream = match &self.trailers_state {
-                        TrailersState::Sending => false,
-                        _ => !event.more_body,
-                    };
-                    envoy_filter.inject_response_body(&event.body, end_stream);
-                }
+        match self.response_headers_state {
+            ResponseHeadersState::Start => {
+                // Headers not received from upstream, wait for them before processing events.
+                return;
             }
-            self.process_response_buffer = false;
-            return;
+            _ => {}
         }
         if let Ok(event) = self.response_rx.recv() {
             match event {
@@ -243,7 +223,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     }
                     match self.response_headers_state {
                         ResponseHeadersState::Start => {
-                            self.start_response_event.replace(event);
+                            panic!("Not possible, checked above");
                         }
                         ResponseHeadersState::Pending => {
                             self.send_response_headers(envoy_filter, event);
@@ -257,25 +237,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         }
                     }
                 }
-                ResponseEvent::Body(event) => match self.response_headers_state {
-                    ResponseHeadersState::Sent => {
-                        set_future_to_none(&self.loop_, event.future).unwrap();
-                        let end_stream = match &self.trailers_state {
-                            TrailersState::Sending => false,
-                            _ => !event.more_body,
-                        };
-                        envoy_filter.inject_response_body(&event.body, end_stream);
-                    }
-                    _ => match self.response_buffer {
-                        Some(ref mut buffer) => {
-                            buffer.push(event);
-                        }
-                        None => {
-                            let buffer = vec![event];
-                            self.response_buffer.replace(buffer);
-                        }
-                    },
-                },
+                ResponseEvent::Body(event) => {
+                    set_future_to_none(&self.loop_, event.future).unwrap();
+                    let end_stream = match &self.trailers_state {
+                        TrailersState::Sending => false,
+                        _ => !event.more_body,
+                    };
+                    envoy_filter.inject_response_body(&event.body, end_stream);
+                }
                 ResponseEvent::Trailers(mut event) => match self.trailers_state {
                     TrailersState::Sending => {
                         self.response_trailers.append(&mut event.headers);
@@ -370,6 +339,7 @@ impl Filter {
                 },
                 ASGISendCallable {
                     next_event: NextASGIEvent::Start,
+                    start_response_event: None,
                     response_tx: self.response_tx.take().unwrap(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
@@ -394,7 +364,6 @@ impl Filter {
         for (k, v) in start_event.headers {
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
-        self.process_response_buffer = true;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         self.response_headers_state = ResponseHeadersState::Sent;
     }
@@ -427,10 +396,11 @@ fn set_scope_address<EHF: EnvoyHttpFilter>(
 fn set_future_to_none(loop_: &Py<PyAny>, future: Py<PyAny>) -> PyResult<()> {
     Python::attach(|py| {
         let future = future.bind(py);
-        let set_result = future.getattr("set_result")?;
-        loop_
-            .bind(py)
-            .call_method1("call_soon_threadsafe", (set_result, PyNone::get(py)))?;
+        let set_result = future.getattr(intern!(py, "set_result"))?;
+        loop_.bind(py).call_method1(
+            intern!(py, "call_soon_threadsafe"),
+            (set_result, PyNone::get(py)),
+        )?;
         Ok(())
     })
 }
@@ -510,6 +480,7 @@ enum NextASGIEvent {
 #[pyclass]
 struct ASGISendCallable {
     next_event: NextASGIEvent,
+    start_response_event: Option<ResponseStartEvent>,
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
@@ -561,14 +532,11 @@ impl ASGISendCallable {
                         true => self.next_event = NextASGIEvent::BodyWithTrailers,
                         false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
                     };
-                    self.response_tx
-                        .send(ResponseEvent::Start(ResponseStartEvent {
-                            status,
-                            headers,
-                            trailers,
-                        }))
-                        .unwrap();
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                    self.start_response_event.replace(ResponseStartEvent {
+                        status,
+                        headers: headers,
+                        trailers,
+                    });
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
                 NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
@@ -595,12 +563,19 @@ impl ASGISendCallable {
                         }
                         _ => {}
                     }
+                    let body_event = ResponseBodyEvent {
+                        body: body.clone(),
+                        more_body,
+                        future: future.clone().unbind(),
+                    };
+                    if let Some(start_event) = self.start_response_event.take() {
+                        self.response_tx
+                            .send(ResponseEvent::Start(start_event))
+                            .unwrap();
+                        self.scheduler.commit(EVENT_ID_RESPONSE);
+                    }
                     self.response_tx
-                        .send(ResponseEvent::Body(ResponseBodyEvent {
-                            body,
-                            more_body,
-                            future: future.clone().unbind(),
-                        }))
+                        .send(ResponseEvent::Body(body_event))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
