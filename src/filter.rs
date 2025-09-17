@@ -3,6 +3,7 @@ use std::thread;
 
 use envoy_proxy_dynamic_modules_rust_sdk::{abi::envoy_dynamic_module_type_attribute_id, *};
 use pyo3::{
+    exceptions::PyRuntimeError,
     intern,
     prelude::*,
     types::{PyDict, PyList, PyNone},
@@ -368,6 +369,7 @@ impl Filter {
                     loop_: self.loop_.clone_ref(py),
                 },
                 ASGISendCallable {
+                    next_event: NextASGIEvent::Start,
                     response_tx: self.response_tx.take().unwrap(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
@@ -497,8 +499,17 @@ impl ASGIReceiveCallable {
     }
 }
 
+enum NextASGIEvent {
+    Start,
+    BodyWithoutTrailers,
+    BodyWithTrailers,
+    Trailers,
+    Done,
+}
+
 #[pyclass]
 struct ASGISendCallable {
+    next_event: NextASGIEvent,
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
@@ -508,7 +519,7 @@ unsafe impl Sync for ASGISendCallable {}
 
 #[pymethods]
 impl ASGISendCallable {
-    fn __call__(&self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
+    fn __call__(&mut self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
             let future = self
                 .loop_
@@ -519,19 +530,25 @@ impl ASGISendCallable {
             let event_type: String = match event.get_item("type")? {
                 Some(v) => v.extract()?,
                 None => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        "Missing 'type' in ASGI event",
+                    return Err(PyRuntimeError::new_err(
+                        "Unexpected ASGI message, missing 'type'.",
                     ));
                 }
             };
 
-            match event_type.as_str() {
-                "http.response.start" => {
+            match &self.next_event {
+                NextASGIEvent::Start => {
+                    if event_type != "http.response.start" {
+                        return Err(PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.start', but got '{}'.",
+                            event_type
+                        )));
+                    }
                     let status: u16 = match event.get_item(intern!(py, "status"))? {
                         Some(v) => v.extract()?,
                         None => {
-                            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                                "Missing 'status' in http.response.start event",
+                            return Err(PyRuntimeError::new_err(
+                                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
                             ));
                         }
                     };
@@ -539,6 +556,10 @@ impl ASGISendCallable {
                     let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
                         Some(v) => v.extract()?,
                         None => false,
+                    };
+                    match trailers {
+                        true => self.next_event = NextASGIEvent::BodyWithTrailers,
+                        false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
                     };
                     self.response_tx
                         .send(ResponseEvent::Start(ResponseStartEvent {
@@ -550,7 +571,13 @@ impl ASGISendCallable {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
-                "http.response.body" => {
+                NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
+                    if event_type != "http.response.body" {
+                        return Err(PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.body', but got '{}'.",
+                            event_type
+                        )));
+                    }
                     let more_body: bool = match event.get_item(intern!(py, "more_body"))? {
                         Some(v) => v.extract()?,
                         None => false,
@@ -559,6 +586,15 @@ impl ASGISendCallable {
                         Some(body) => body.extract()?,
                         _ => Vec::new(),
                     };
+                    match (more_body, &self.next_event) {
+                        (false, NextASGIEvent::BodyWithTrailers) => {
+                            self.next_event = NextASGIEvent::Trailers;
+                        }
+                        (false, NextASGIEvent::BodyWithoutTrailers) => {
+                            self.next_event = NextASGIEvent::Done;
+                        }
+                        _ => {}
+                    }
                     self.response_tx
                         .send(ResponseEvent::Body(ResponseBodyEvent {
                             body,
@@ -568,12 +604,21 @@ impl ASGISendCallable {
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
-                "http.response.trailers" => {
+                NextASGIEvent::Trailers => {
+                    if event_type != "http.response.trailers" {
+                        return Err(PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.trailers', but got '{}'.",
+                            event_type
+                        )));
+                    }
                     let headers = extract_headers_from_event(py, &event)?;
                     let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
                         Some(v) => v.extract()?,
                         None => false,
                     };
+                    if !more_trailers {
+                        self.next_event = NextASGIEvent::Done;
+                    }
                     self.response_tx
                         .send(ResponseEvent::Trailers(ResponseTrailersEvent {
                             headers,
@@ -583,10 +628,11 @@ impl ASGISendCallable {
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
-                _ => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        "Unsupported ASGI event type",
-                    ));
+                NextASGIEvent::Done => {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "Unexpected ASGI message '{}' sent, after response already completed.",
+                        event_type
+                    )));
                 }
             }
             Ok(future.unbind())
