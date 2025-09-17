@@ -84,9 +84,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             asgi,
             extensions,
             request_closed: false,
-            response_headers_state: ResponseHeadersState::Start,
-            trailers_state: TrailersState::Denied,
-            response_trailers: Vec::new(),
+            response_started: false,
+            response_trailers: None,
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
             response_rx: response_rx,
@@ -98,19 +97,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
 
-enum ResponseHeadersState {
-    Start,
-    Pending,
-    Sent,
-}
-
-enum TrailersState {
-    Denied,
-    Allowed,
-    Sending,
-    NotSending,
-}
-
 struct Filter {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
@@ -118,9 +104,8 @@ struct Filter {
     extensions: Py<PyDict>,
 
     request_closed: bool,
-    response_headers_state: ResponseHeadersState,
-    trailers_state: TrailersState,
-    response_trailers: Vec<(String, Vec<u8>)>,
+    response_started: bool,
+    response_trailers: Option<Vec<(String, Vec<u8>)>>,
 
     request_future_rx: Receiver<Py<PyAny>>,
     request_future_tx: Option<Sender<Py<PyAny>>>,
@@ -134,12 +119,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        let mut trailers_accepted = false;
         if let Some(te) = envoy_filter.get_request_header_value("te") {
             if te.as_slice() == b"trailers" {
-                self.trailers_state = TrailersState::Allowed;
+                trailers_accepted = true;
             }
         }
-        self.execute_app(envoy_filter);
+        self.execute_app(envoy_filter, trailers_accepted);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
 
@@ -169,7 +155,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         envoy_filter.remove_response_header("Trailer");
-        self.response_headers_state = ResponseHeadersState::Pending;
+        self.response_started = true;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
     }
@@ -179,7 +165,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status {
         envoy_filter.remove_response_trailer("P");
-        for (k, v) in &self.response_trailers {
+        for (k, v) in self.response_trailers.take().unwrap_or_default() {
             envoy_filter.set_response_trailer(k.as_str(), v.as_slice());
         }
         abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status::Continue
@@ -203,69 +189,53 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        match self.response_headers_state {
-            ResponseHeadersState::Start => {
-                // Headers not received from upstream, wait for them before processing events.
-                return;
-            }
-            _ => {}
+        if !self.response_started {
+            // Headers not received from upstream, wait for them before processing events.
+            return;
         }
-        if let Ok(event) = self.response_rx.recv() {
-            match event {
-                ResponseEvent::Start(event) => {
-                    match (&self.trailers_state, event.trailers) {
-                        (TrailersState::Allowed, true) => {
-                            self.trailers_state = TrailersState::Sending;
+        // We delay closing the response stream when needed until the end of the function since
+        // an end stream can cause the filter to be deallocated right away, invalidating further code.
+        let mut close_response = false;
+        loop {
+            match self.response_rx.try_recv() {
+                Ok(event) => match event {
+                    ResponseEvent::Start(event) => {
+                        if event.trailers {
+                            self.response_trailers.replace(Vec::new());
                         }
-                        _ => {
-                            self.trailers_state = TrailersState::NotSending;
-                        }
+                        self.send_response_headers(envoy_filter, event);
+                        envoy_filter.continue_encoding();
                     }
-                    match self.response_headers_state {
-                        ResponseHeadersState::Start => {
-                            panic!("Not possible, checked above");
-                        }
-                        ResponseHeadersState::Pending => {
-                            self.send_response_headers(envoy_filter, event);
-                            envoy_filter.continue_encoding();
-                            return;
-                        }
-                        ResponseHeadersState::Sent => {
-                            // Headers already sent, ignore this event.
-                            // TODO: This is probably an error condition.
-                            return;
-                        }
-                    }
-                }
-                ResponseEvent::Body(event) => {
-                    set_future_to_none(&self.loop_, event.future).unwrap();
-                    let end_stream = match &self.trailers_state {
-                        TrailersState::Sending => false,
-                        _ => !event.more_body,
-                    };
-                    envoy_filter.inject_response_body(&event.body, end_stream);
-                }
-                ResponseEvent::Trailers(mut event) => match self.trailers_state {
-                    TrailersState::Sending => {
-                        self.response_trailers.append(&mut event.headers);
+                    ResponseEvent::Body(event) => {
                         set_future_to_none(&self.loop_, event.future).unwrap();
+                        envoy_filter.inject_response_body(&event.body, false);
+                        let end_stream = !event.more_body && self.response_trailers.is_none();
+                        if end_stream {
+                            close_response = true;
+                        }
+                    }
+                    ResponseEvent::Trailers(mut event) => {
+                        if let Some(trailers) = &mut self.response_trailers {
+                            trailers.append(&mut event.headers);
+                        }
                         if !event.more_trailers {
                             // Completes the request body triggering upstream to finish the response
                             // with trailer processing.
                             envoy_filter.inject_request_body(&[], true);
                         }
                     }
-                    _ => {
-                        set_future_to_none(&self.loop_, event.future).unwrap();
-                    }
                 },
+                Err(_) => break,
             }
+        }
+        if close_response {
+            envoy_filter.inject_response_body(&[], true);
         }
     }
 }
 
 impl Filter {
-    fn execute_app<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &EHF) {
+    fn execute_app<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &EHF, trailers_accepted: bool) {
         let res: PyResult<()> = Python::attach(|py| {
             let scope = PyDict::new(py);
             scope.set_item(intern!(py, "type"), intern!(py, "http"))?;
@@ -339,7 +309,7 @@ impl Filter {
                 },
                 ASGISendCallable {
                     next_event: NextASGIEvent::Start,
-                    start_response_event: None,
+                    trailers_accepted,
                     response_tx: self.response_tx.take().unwrap(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
@@ -365,7 +335,6 @@ impl Filter {
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
-        self.response_headers_state = ResponseHeadersState::Sent;
     }
 }
 
@@ -480,7 +449,7 @@ enum NextASGIEvent {
 #[pyclass]
 struct ASGISendCallable {
     next_event: NextASGIEvent,
-    start_response_event: Option<ResponseStartEvent>,
+    trailers_accepted: bool,
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
@@ -532,11 +501,14 @@ impl ASGISendCallable {
                         true => self.next_event = NextASGIEvent::BodyWithTrailers,
                         false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
                     };
-                    self.start_response_event.replace(ResponseStartEvent {
-                        status,
-                        headers: headers,
-                        trailers,
-                    });
+                    self.response_tx
+                        .send(ResponseEvent::Start(ResponseStartEvent {
+                            status,
+                            headers: headers,
+                            trailers: trailers && self.trailers_accepted,
+                        }))
+                        .unwrap();
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
                 NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
@@ -563,19 +535,12 @@ impl ASGISendCallable {
                         }
                         _ => {}
                     }
-                    let body_event = ResponseBodyEvent {
-                        body: body.clone(),
-                        more_body,
-                        future: future.clone().unbind(),
-                    };
-                    if let Some(start_event) = self.start_response_event.take() {
-                        self.response_tx
-                            .send(ResponseEvent::Start(start_event))
-                            .unwrap();
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                    }
                     self.response_tx
-                        .send(ResponseEvent::Body(body_event))
+                        .send(ResponseEvent::Body(ResponseBodyEvent {
+                            body: body.clone(),
+                            more_body,
+                            future: future.clone().unbind(),
+                        }))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
@@ -586,7 +551,6 @@ impl ASGISendCallable {
                             event_type
                         )));
                     }
-                    let headers = extract_headers_from_event(py, &event)?;
                     let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
                         Some(v) => v.extract()?,
                         None => false,
@@ -594,14 +558,17 @@ impl ASGISendCallable {
                     if !more_trailers {
                         self.next_event = NextASGIEvent::Done;
                     }
-                    self.response_tx
-                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
-                            headers,
-                            more_trailers,
-                            future: future.clone().unbind(),
-                        }))
-                        .unwrap();
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                    if self.trailers_accepted {
+                        let headers = extract_headers_from_event(py, &event)?;
+                        self.response_tx
+                            .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                                headers,
+                                more_trailers,
+                            }))
+                            .unwrap();
+                        self.scheduler.commit(EVENT_ID_RESPONSE);
+                        future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                    }
                 }
                 NextASGIEvent::Done => {
                     return Err(PyRuntimeError::new_err(format!(
@@ -630,7 +597,6 @@ struct ResponseBodyEvent {
 struct ResponseTrailersEvent {
     headers: Vec<(String, Vec<u8>)>,
     more_trailers: bool,
-    future: Py<PyAny>,
 }
 
 enum ResponseEvent {
