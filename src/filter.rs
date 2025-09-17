@@ -280,6 +280,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         self.response_trailers.append(&mut event.headers);
                         set_future_to_none(&self.loop_, event.future).unwrap();
                         if !event.more_trailers {
+                            // Completes the request body triggering upstream to finish the response
+                            // with trailer processing.
                             envoy_filter.inject_request_body(&[], true);
                         }
                     }
