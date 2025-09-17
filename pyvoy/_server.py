@@ -1,30 +1,43 @@
 import json
+import os
 import subprocess
+import sys
 import urllib.request
+from types import TracebackType
+
+from ._bin import get_envoy_path, get_pyvoy_dir_path, get_upstream_path
 
 
 class PyvoyServer:
-    listener_address: str
-    listener_port: int
+    _listener_address: str
+    _listener_port: int
 
-    def __init__(self, app: str, *, port: int = 0) -> None:
+    def __init__(self, app: str, *, address: str = "127.0.0.1", port: int = 0) -> None:
         self._app = app
+        self._address = address
         self._port = port
 
     def __enter__(self) -> "PyvoyServer":
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
         self.stop()
 
     def start(self) -> None:
-        self._upstream = subprocess.Popen(
-            ["go", "run", "server.go"],
+        self._upstream = subprocess.Popen(  # noqa: S603 - OK
+            [get_upstream_path()],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+
+        assert self._upstream.stderr is not None  # noqa: S101
         line = self._upstream.stderr.readline()
         if "Listening on port: " not in line:
             msg = "Upstream server failed to start"
@@ -41,7 +54,7 @@ class PyvoyServer:
                         "name": "listener",
                         "address": {
                             "socket_address": {
-                                "address": "0.0.0.0",
+                                "address": self._address,
                                 "port_value": self._port,
                             }
                         },
@@ -131,17 +144,24 @@ class PyvoyServer:
             },
         }
 
-        self._process = subprocess.Popen(
-            ["envoy", "--config-yaml", json.dumps(config)],
+        pythonpath = os.pathsep.join(sys.path)
+
+        self._process = subprocess.Popen(  # noqa: S603 - OK
+            [get_envoy_path(), "--config-yaml", json.dumps(config)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env={
+                "PYTHONPATH": pythonpath,
+                "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
+                **os.environ,
+            },
         )
         admin_address = ""
-        logs = []
+        assert self._process.stderr is not None  # noqa: S101
         while True:
             line = self._process.stderr.readline()
-            logs.append(line)
+            print(line, end="")
             if self._process.poll() is not None:
                 msg = "Envoy process exited unexpectedly"
                 raise RuntimeError(msg)
@@ -156,11 +176,19 @@ class PyvoyServer:
         socket_address = response_data["listener_statuses"][0]["local_address"][
             "socket_address"
         ]
-        self.listener_address = socket_address["address"]
-        self.listener_port = socket_address["port_value"]
+        self._listener_address = socket_address["address"]
+        self._listener_port = socket_address["port_value"]
 
     def stop(self) -> None:
         self._process.terminate()
         self._upstream.terminate()
         self._process.wait()
         self._upstream.wait()
+
+    @property
+    def listener_address(self) -> str:
+        return self._listener_address
+
+    @property
+    def listener_port(self) -> int:
+        return self._listener_port

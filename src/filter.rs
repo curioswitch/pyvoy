@@ -8,8 +8,6 @@ use pyo3::{
     types::{PyDict, PyList, PyNone},
 };
 
-use crate::filter;
-
 pub struct Config {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
@@ -41,7 +39,9 @@ impl Config {
 
         println!("Loading Python application from {}", filter_config);
         match Python::attach(|py| {
-            let (module, attr) = filter_config.split_once(":").unwrap_or((filter_config, "app"));
+            let (module, attr) = filter_config
+                .split_once(":")
+                .unwrap_or((filter_config, "app"));
             let module = PyModule::import(py, module)?;
             let app = module.getattr(attr)?;
             let asgi = PyDict::new(py);
@@ -83,7 +83,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             process_response_buffer: false,
         })
     }
-}   
+}
 
 const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
@@ -278,12 +278,18 @@ impl Filter {
             if let Some(method) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestMethod)
             {
-                scope.set_item(intern!(py, "method"), String::from_utf8_lossy(method.as_slice()))?;
+                scope.set_item(
+                    intern!(py, "method"),
+                    String::from_utf8_lossy(method.as_slice()),
+                )?;
             }
             if let Some(scheme) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestScheme)
             {
-                scope.set_item(intern!(py, "scheme"), String::from_utf8_lossy(scheme.as_slice()))?;
+                scope.set_item(
+                    intern!(py, "scheme"),
+                    String::from_utf8_lossy(scheme.as_slice()),
+                )?;
             }
             if let Some(path) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
@@ -342,15 +348,21 @@ impl Filter {
                 },
             ))?;
             let asyncio = PyModule::import(py, intern!(py, "asyncio"))?;
-            asyncio.call_method1(intern!(py, "run_coroutine_threadsafe"), (coro, &self.loop_.bind(py)))?;
+            asyncio.call_method1(
+                intern!(py, "run_coroutine_threadsafe"),
+                (coro, &self.loop_.bind(py)),
+            )?;
             Ok(())
         });
         res.unwrap()
     }
 
-    fn send_response_headers<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF, start_event: ResponseStartEvent) {
-        envoy_filter
-            .set_response_header(":status", start_event.status.to_string().as_bytes());
+    fn send_response_headers<EHF: EnvoyHttpFilter>(
+        &mut self,
+        envoy_filter: &mut EHF,
+        start_event: ResponseStartEvent,
+    ) {
+        envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
         for (k, v) in start_event.headers {
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
@@ -447,7 +459,10 @@ unsafe impl Sync for ASGIReceiveCallable {}
 impl ASGIReceiveCallable {
     fn __call__(&self) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
-            let future = self.loop_.bind(py).call_method0(intern!(py, "create_future"))?;
+            let future = self
+                .loop_
+                .bind(py)
+                .call_method0(intern!(py, "create_future"))?;
             self.request_future_tx
                 .send(future.clone().unbind())
                 .unwrap();
@@ -470,7 +485,10 @@ unsafe impl Sync for ASGISendCallable {}
 impl ASGISendCallable {
     fn __call__(&self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
         Python::attach(|py| {
-            let future = self.loop_.bind(py).call_method0(intern!(py, "create_future"))?;
+            let future = self
+                .loop_
+                .bind(py)
+                .call_method0(intern!(py, "create_future"))?;
 
             let event = event.bind(py);
             let event_type: String = match event.get_item("type")? {
@@ -492,7 +510,9 @@ impl ASGISendCallable {
                             ));
                         }
                     };
-                    let headers: Vec<(String, Vec<u8>)> = match event.get_item(intern!(py, "headers"))? {
+                    let headers: Vec<(String, Vec<u8>)> = match event
+                        .get_item(intern!(py, "headers"))?
+                    {
                         Some(v) => {
                             let mut headers = Vec::new();
                             for item in v.try_iter()? {

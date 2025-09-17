@@ -1,21 +1,34 @@
 import time
-from argparse import ArgumentParser
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 from ._server import PyvoyServer
 
 
+class CLIArgs:
+    app: str
+    address: str
+    port: int
+
+
 def main() -> None:
-    parser = ArgumentParser(description="Run a pyvoy server")
+    parser = ArgumentParser(
+        description="Run a pyvoy server", formatter_class=ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument(
         "app",
-        nargs=1,
-        help="the app to run as 'module:attr' or just 'module', implying 'app' for 'attr'",
+        help="the app to run as 'module:attr' or just 'module', which implies 'app' for 'attr'",
+    )
+    parser.add_argument(
+        "--address", help="the address to listen on", type=str, default="127.0.0.1"
+    )
+    parser.add_argument(
+        "--port", help="the port to listen on (0 for random)", type=int, default=8000
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=CLIArgs())
 
-    with PyvoyServer(args.app[0]) as server:
-        print(f"pyvoy listening on port: {server.listener_port}")
+    with PyvoyServer(args.app, address=args.address, port=args.port) as server:
+        print(f"pyvoy listening on {server.listener_address}:{server.listener_port}")
         try:
             while True:
                 time.sleep(4000000)

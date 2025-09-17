@@ -6,3 +6,7 @@ __pycache__
 
 .envrc
 .vscode
+
+pyvoy/_bin/envoy
+pyvoy/_bin/envoy-upstream
+pyvoy/_bin/libpyvoy.so
