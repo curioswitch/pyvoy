@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net/http"
 )
@@ -9,6 +10,7 @@ func main() {
 	reqBodyR, reqBodyW := io.Pipe()
 	req, _ := http.NewRequest("POST", "http://localhost:8000/foo", reqBodyR)
 	req.ContentLength = -1
+	req.Header.Set("TE", "trailers")
 	var prots http.Protocols
 	prots.SetUnencryptedHTTP2(true)
 	cl := &http.Client{
@@ -48,4 +50,16 @@ func main() {
 		panic(err)
 	}
 	println("response:", string(buf[:n]))
+	n, err = res.Body.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		panic(err)
+	}
+	n, err = res.Body.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		panic(err)
+	}
+	println("trailers: ")
+	for k, v := range res.Trailer {
+		println("trailer:", k, v[0])
+	}
 }

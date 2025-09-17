@@ -12,6 +12,7 @@ pub struct Config {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
     asgi: Py<PyDict>,
+    extensions: Py<PyDict>,
 }
 
 impl Config {
@@ -46,9 +47,16 @@ impl Config {
             let asgi = PyDict::new(py);
             asgi.set_item("version", "3.0")?;
             asgi.set_item("spec_version", "2.2")?;
-            Ok::<_, PyErr>((app.unbind(), asgi.unbind()))
+            let extensions = PyDict::new(py);
+            extensions.set_item("http.response.trailers", PyDict::new(py))?;
+            Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind()))
         }) {
-            Ok((app, asgi)) => Some(Self { loop_, app, asgi }),
+            Ok((app, asgi, extensions)) => Some(Self {
+                loop_,
+                app,
+                asgi,
+                extensions,
+            }),
             Err(e) => {
                 eprintln!("Failed to load Python application: {}", e);
                 None
@@ -59,11 +67,12 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (loop_, app, asgi) = Python::attach(|py| {
+        let (loop_, app, asgi, extensions) = Python::attach(|py| {
             (
                 self.loop_.clone_ref(py),
                 self.app.clone_ref(py),
                 self.asgi.clone_ref(py),
+                self.extensions.clone_ref(py),
             )
         });
         let (request_future_tx, request_future_rx) = channel::<Py<PyAny>>();
@@ -72,8 +81,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             loop_,
             app,
             asgi,
+            extensions,
             response_headers_state: ResponseHeadersState::Start,
+            trailers_state: TrailersState::Denied,
             start_response_event: None,
+            response_trailers: Vec::new(),
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
             response_rx: response_rx,
@@ -93,13 +105,23 @@ enum ResponseHeadersState {
     Sent,
 }
 
+enum TrailersState {
+    Denied,
+    Allowed,
+    Sending,
+    NotSending,
+}
+
 struct Filter {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
     asgi: Py<PyDict>,
+    extensions: Py<PyDict>,
 
     response_headers_state: ResponseHeadersState,
+    trailers_state: TrailersState,
     start_response_event: Option<ResponseStartEvent>,
+    response_trailers: Vec<(String, Vec<u8>)>,
 
     request_future_rx: Receiver<Py<PyAny>>,
     request_future_tx: Option<Sender<Py<PyAny>>>,
@@ -116,6 +138,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        if let Some(te) = envoy_filter.get_request_header_value("te") {
+            if te.as_slice() == b"trailers" {
+                self.trailers_state = TrailersState::Allowed;
+            }
+        }
         self.execute_app(envoy_filter);
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
@@ -161,13 +188,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_response_body(
+    fn on_response_trailers(
         &mut self,
-        _envoy_filter: &mut EHF,
-        _end_of_stream: bool,
-    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        // Ignore upstream's response completely.
-        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
+        envoy_filter: &mut EHF,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status {
+        envoy_filter.remove_response_trailer("P");
+        for (k, v) in &self.response_trailers {
+            envoy_filter.set_response_trailer(k.as_str(), v.as_slice());
+        }
+        abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status::Continue
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
@@ -190,7 +219,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     // Instead of an independent loop_, it should be possible to borrow the Config's
                     // reference somehow.
                     set_future_to_none(&self.loop_, event.future).unwrap();
-                    envoy_filter.inject_response_body(&event.body, !event.more_body);
+                    let end_stream = match &self.trailers_state {
+                        TrailersState::Sending => false,
+                        _ => !event.more_body,
+                    };
+                    envoy_filter.inject_response_body(&event.body, end_stream);
                 }
             }
             self.process_response_buffer = false;
@@ -199,6 +232,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if let Ok(event) = self.response_rx.recv() {
             match event {
                 ResponseEvent::Start(event) => {
+                    match (&self.trailers_state, event.trailers) {
+                        (TrailersState::Allowed, true) => {
+                            self.trailers_state = TrailersState::Sending;
+                        }
+                        _ => {
+                            self.trailers_state = TrailersState::NotSending;
+                        }
+                    }
                     match self.response_headers_state {
                         ResponseHeadersState::Start => {
                             self.start_response_event.replace(event);
@@ -218,7 +259,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 ResponseEvent::Body(event) => match self.response_headers_state {
                     ResponseHeadersState::Sent => {
                         set_future_to_none(&self.loop_, event.future).unwrap();
-                        envoy_filter.inject_response_body(&event.body, !event.more_body);
+                        let end_stream = match &self.trailers_state {
+                            TrailersState::Sending => false,
+                            _ => !event.more_body,
+                        };
+                        envoy_filter.inject_response_body(&event.body, end_stream);
                     }
                     _ => match self.response_buffer {
                         Some(ref mut buffer) => {
@@ -229,6 +274,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             self.response_buffer.replace(buffer);
                         }
                     },
+                },
+                ResponseEvent::Trailers(mut event) => match self.trailers_state {
+                    TrailersState::Sending => {
+                        self.response_trailers.append(&mut event.headers);
+                        set_future_to_none(&self.loop_, event.future).unwrap();
+                        if !event.more_trailers {
+                            envoy_filter.inject_request_body(&[], true);
+                        }
+                    }
+                    _ => {
+                        set_future_to_none(&self.loop_, event.future).unwrap();
+                    }
                 },
             }
         }
@@ -241,6 +298,7 @@ impl Filter {
             let scope = PyDict::new(py);
             scope.set_item(intern!(py, "type"), intern!(py, "http"))?;
             scope.set_item(intern!(py, "asgi"), self.asgi.bind(py))?;
+            scope.set_item(intern!(py, "extensions"), self.extensions.bind(py))?;
             if let Some(method) = envoy_filter
                 .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestMethod)
             {
@@ -475,28 +533,17 @@ impl ASGISendCallable {
                             ));
                         }
                     };
-                    let headers: Vec<(String, Vec<u8>)> = match event
-                        .get_item(intern!(py, "headers"))?
-                    {
-                        Some(v) => {
-                            let mut headers = Vec::new();
-                            for item in v.try_iter()? {
-                                let tuple = item?;
-                                let key_item = tuple.get_item(0)?;
-                                let value_item = tuple.get_item(1)?;
-                                let key_bytes = key_item.downcast::<pyo3::types::PyBytes>()?;
-                                let value_bytes = value_item.downcast::<pyo3::types::PyBytes>()?;
-                                headers.push((
-                                    String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
-                                    value_bytes.as_bytes().to_vec(),
-                                ));
-                            }
-                            headers
-                        }
-                        None => Vec::new(),
+                    let headers = extract_headers_from_event(py, &event)?;
+                    let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
+                        Some(v) => v.extract()?,
+                        None => false,
                     };
                     self.response_tx
-                        .send(ResponseEvent::Start(ResponseStartEvent { status, headers }))
+                        .send(ResponseEvent::Start(ResponseStartEvent {
+                            status,
+                            headers,
+                            trailers,
+                        }))
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
@@ -519,6 +566,21 @@ impl ASGISendCallable {
                         .unwrap();
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
+                "http.response.trailers" => {
+                    let headers = extract_headers_from_event(py, &event)?;
+                    let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
+                        Some(v) => v.extract()?,
+                        None => false,
+                    };
+                    self.response_tx
+                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                            headers,
+                            more_trailers,
+                            future: future.clone().unbind(),
+                        }))
+                        .unwrap();
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                }
                 _ => {
                     return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                         "Unsupported ASGI event type",
@@ -533,6 +595,7 @@ impl ASGISendCallable {
 struct ResponseStartEvent {
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
+    trailers: bool,
 }
 
 struct ResponseBodyEvent {
@@ -541,7 +604,38 @@ struct ResponseBodyEvent {
     future: Py<PyAny>,
 }
 
+struct ResponseTrailersEvent {
+    headers: Vec<(String, Vec<u8>)>,
+    more_trailers: bool,
+    future: Py<PyAny>,
+}
+
 enum ResponseEvent {
     Start(ResponseStartEvent),
     Body(ResponseBodyEvent),
+    Trailers(ResponseTrailersEvent),
+}
+
+fn extract_headers_from_event(
+    py: Python,
+    event: &Bound<PyDict>,
+) -> PyResult<Vec<(String, Vec<u8>)>> {
+    match event.get_item(intern!(py, "headers"))? {
+        Some(v) => {
+            let mut headers = Vec::new();
+            for item in v.try_iter()? {
+                let tuple = item?;
+                let key_item = tuple.get_item(0)?;
+                let value_item = tuple.get_item(1)?;
+                let key_bytes = key_item.downcast::<pyo3::types::PyBytes>()?;
+                let value_bytes = value_item.downcast::<pyo3::types::PyBytes>()?;
+                headers.push((
+                    String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
+                    value_bytes.as_bytes().to_vec(),
+                ));
+            }
+            Ok(headers)
+        }
+        None => Ok(Vec::new()),
+    }
 }

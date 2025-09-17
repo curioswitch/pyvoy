@@ -4,6 +4,7 @@ import subprocess
 import sys
 import urllib.request
 from types import TracebackType
+from typing import IO
 
 from ._bin import get_envoy_path, get_pyvoy_dir_path, get_upstream_path
 
@@ -12,6 +13,8 @@ class PyvoyServer:
     _listener_address: str
     _listener_port: int
     _print_startup_logs: bool
+
+    _output: IO[str]
 
     def __init__(
         self,
@@ -158,7 +161,7 @@ class PyvoyServer:
         self._process = subprocess.Popen(  # noqa: S603 - OK
             [get_envoy_path(), "--config-yaml", json.dumps(config)],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             env={
                 **os.environ,
@@ -168,10 +171,11 @@ class PyvoyServer:
             },
         )
         admin_address = ""
-        assert self._process.stderr is not None  # noqa: S101
+        assert self._process.stdout is not None  # noqa: S101
+        self._output = self._process.stdout
         startup_logs = []
         while True:
-            line = self._process.stderr.readline()
+            line = self._output.readline()
             if self._print_startup_logs:
                 print(line, end="")  # noqa: T201
             else:
@@ -208,3 +212,7 @@ class PyvoyServer:
     @property
     def listener_port(self) -> int:
         return self._listener_port
+
+    @property
+    def output(self) -> IO[str]:
+        return self._output

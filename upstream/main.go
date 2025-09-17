@@ -17,10 +17,12 @@ func main() {
 	srv := &http.Server{
 		Protocols: &prots,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Trailer", "P")
 			w.WriteHeader(200)
 			c := http.NewResponseController(w)
 			c.Flush()
-			<-r.Context().Done()
+			_, _ = r.Body.Read(nil)
+			w.Header().Set("P", "t")
 		}),
 		ReadHeaderTimeout: 3 * time.Second,
 	}

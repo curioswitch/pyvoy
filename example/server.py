@@ -8,8 +8,12 @@ async def app(
         {
             "type": "http.response.start",
             "status": 202,
-            "headers": [(b"content-type", b"text/plain"), (b"x-animal", b"bear")],
-            "trailers": False,
+            "headers": [
+                (b"content-type", b"text/plain"),
+                (b"x-animal", b"bear"),
+                (b"trailer", b"x-result,x-time"),
+            ],
+            "trailers": True,
         }
     )
     await send(
@@ -33,3 +37,17 @@ async def app(
                 "more_body": False,
             }
         )
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-result", b"great")],
+            "more_trailers": True,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-time", b"fast")],
+            "more_trailers": False,
+        }
+    )

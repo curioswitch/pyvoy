@@ -1,4 +1,3 @@
-import time
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 from ._server import PyvoyServer
@@ -33,7 +32,9 @@ def main() -> None:
         print(f"pyvoy listening on {server.listener_address}:{server.listener_port}")  # noqa: T201
         try:
             while True:
-                time.sleep(4000000)
+                line = server.output.readline()
+                if line:
+                    print(line, end="")  # noqa: T201
         except KeyboardInterrupt:
             print("Shutting down pyvoy...")  # noqa: T201
 
