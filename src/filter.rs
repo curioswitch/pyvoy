@@ -84,7 +84,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             asgi,
             extensions,
             request_closed: false,
-            response_started: false,
+            process_response: false,
             response_trailers: None,
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
@@ -97,6 +97,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
 
+enum ResponseState {
+    Pending,
+    NeedsStart,
+    Starting,
+    Started,
+}
+
 struct Filter {
     loop_: Py<PyAny>,
     app: Py<PyAny>,
@@ -104,7 +111,7 @@ struct Filter {
     extensions: Py<PyDict>,
 
     request_closed: bool,
-    response_started: bool,
+    process_response: bool,
     response_trailers: Option<Vec<(String, Vec<u8>)>>,
 
     request_future_rx: Receiver<Py<PyAny>>,
@@ -153,9 +160,24 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         envoy_filter.remove_response_header("trailer");
-        self.response_started = true;
+
+        self.process_response = true;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
+    }
+
+    fn on_response_body(
+        &mut self,
+        envoy_filter: &mut EHF,
+        _end_of_stream: bool,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
+        envoy_filter.drain_response_body(1);
+
+        self.process_response = true;
+        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+
+        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
     fn on_response_trailers(
@@ -187,43 +209,42 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        if !self.response_started {
+        if !self.process_response {
             // Headers not received from upstream, wait for them before processing events.
             return;
         }
         // We delay closing the response stream when needed until the end of the function since
         // an end stream can cause the filter to be deallocated right away, invalidating further code.
         let mut close_response = false;
-        loop {
-            match self.response_rx.try_recv() {
-                Ok(event) => match event {
-                    ResponseEvent::Start(event) => {
-                        if event.trailers {
-                            self.response_trailers.replace(Vec::new());
-                        }
-                        self.send_response_headers(envoy_filter, event);
-                        envoy_filter.continue_encoding();
+        while let Ok(event) = self.response_rx.try_recv() {
+            match event {
+                ResponseEvent::Start(event) => {
+                    if event.trailers {
+                        self.response_trailers.replace(Vec::new());
                     }
-                    ResponseEvent::Body(event) => {
-                        set_future_to_none(&self.loop_, event.future).unwrap();
-                        envoy_filter.inject_response_body(&event.body, false);
-                        let end_stream = !event.more_body && self.response_trailers.is_none();
-                        if end_stream {
-                            close_response = true;
-                        }
+                    self.send_response_headers(envoy_filter, event);
+                    envoy_filter.continue_encoding();
+                    // Flush headers before processing remaining events.
+                    return;
+                }
+                ResponseEvent::Body(event) => {
+                    set_future_to_none(&self.loop_, event.future).unwrap();
+                    envoy_filter.inject_response_body(&event.body, false);
+                    let end_stream = !event.more_body && self.response_trailers.is_none();
+                    if end_stream {
+                        close_response = true;
                     }
-                    ResponseEvent::Trailers(mut event) => {
-                        if let Some(trailers) = &mut self.response_trailers {
-                            trailers.append(&mut event.headers);
-                        }
-                        if !event.more_trailers {
-                            // Completes the request body triggering upstream to finish the response
-                            // with trailer processing.
-                            envoy_filter.inject_request_body(&[], true);
-                        }
+                }
+                ResponseEvent::Trailers(mut event) => {
+                    if let Some(trailers) = &mut self.response_trailers {
+                        trailers.append(&mut event.headers);
                     }
-                },
-                Err(_) => break,
+                    if !event.more_trailers {
+                        // Completes the request body triggering upstream to finish the response
+                        // with trailer processing.
+                        envoy_filter.inject_request_body(&[], true);
+                    }
+                }
             }
         }
         if close_response {
@@ -336,6 +357,7 @@ impl Filter {
             }
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
+        self.process_response = false;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
     }
 }

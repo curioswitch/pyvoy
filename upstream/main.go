@@ -20,6 +20,7 @@ func main() {
 			w.Header().Set("Trailer", "P")
 			w.WriteHeader(200)
 			c := http.NewResponseController(w)
+			_, _ = w.Write([]byte("B"))
 			c.Flush()
 			_, _ = r.Body.Read(nil)
 			w.Header().Set("P", "t")

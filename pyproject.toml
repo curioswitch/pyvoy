@@ -15,6 +15,7 @@ pyvoy = "pyvoy._cli:main"
 [tool.uv]
 dev-dependencies = [
     "asgiref",
+    "httpx",
     "pyright[nodejs]",
     "pytest",
     "pytest-cov",
@@ -157,3 +158,6 @@ split-on-trailing-comma = false
 [tool.ruff]
 # Don't run ruff on generated code from external plugins.
 extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
