@@ -84,7 +84,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             asgi,
             extensions,
             request_closed: false,
-            process_response: true,
+            response_state: ResponseState::Started,
             response_headers: Vec::new(),
             response_trailers: None,
             request_future_rx: request_future_rx,
@@ -97,6 +97,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 
 const EVENT_ID_REQUEST: u64 = 1;
 const EVENT_ID_RESPONSE: u64 = 2;
+const EVENT_ID_EXCEPTION: u64 = 3;
+
+enum ResponseState {
+    Started,
+    SendingHeaders,
+    SentHeaders,
+    Complete,
+}
 
 struct Filter {
     loop_: Py<PyAny>,
@@ -105,7 +113,7 @@ struct Filter {
     extensions: Py<PyDict>,
 
     request_closed: bool,
-    process_response: bool,
+    response_state: ResponseState,
 
     response_headers: Vec<(String, Vec<u8>)>,
     response_trailers: Option<Vec<(String, Vec<u8>)>>,
@@ -164,7 +172,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         for (k, v) in mem::take(&mut self.response_headers) {
             envoy_filter.set_response_header(k.as_str(), v.as_slice());
         }
-        self.process_response = true;
+        self.response_state = ResponseState::SentHeaders;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
     }
@@ -181,6 +189,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
+        println!("{}", event_id);
         if event_id == EVENT_ID_REQUEST {
             if self.request_closed || has_request_body(envoy_filter) {
                 match self.request_future_rx.try_recv() {
@@ -198,9 +207,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        if !self.process_response {
-            // Headers not received from upstream, wait for them before processing events.
-            return;
+        match self.response_state {
+            ResponseState::SendingHeaders => {
+                if event_id != EVENT_ID_EXCEPTION {
+                    // Headers not received from upstream, wait for them before processing events
+                    // unless we are closing with an exception.
+                    return;
+                }
+            }
+            _ => {}
         }
         // We delay closing the response stream when needed until the end of the function since
         // an end stream can cause the filter to be deallocated right away, invalidating further code.
@@ -225,7 +240,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     // Triggers upstream to send headers. After we encode them, we will be
                     // ready to continue processing messages to completion.
                     envoy_filter.inject_request_body(b" ", false);
-                    self.process_response = false;
+                    self.response_state = ResponseState::SendingHeaders;
                     return;
                 }
                 ResponseEvent::Body(event) => {
@@ -244,9 +259,29 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         close_response = true;
                     }
                 }
+                ResponseEvent::Exception => match self.response_state {
+                    // While technically it's possible we have a chance to interrupt the response to
+                    // trigger a client failure, not always. It is more consistent to always allow it
+                    // to be completed successfully on the client side rather than having inconsistent
+                    // behavior. The exception itself was logged from Python.
+                    ResponseState::Complete => {}
+                    _ => {
+                        self.response_state = ResponseState::Complete;
+                        envoy_filter.send_response(
+                            500,
+                            vec![
+                                ("content-type", b"text/plain; charset=utf-8"),
+                                ("connection", b"close"),
+                            ],
+                            Some(b"Internal Server Error"),
+                        );
+                        return;
+                    }
+                },
             }
         }
         if close_response {
+            self.response_state = ResponseState::Complete;
             // Closing the request stream to upstream causes it to finish the response,
             // which will also allow processing any trailers.
             envoy_filter.inject_request_body(b"", true);
@@ -320,6 +355,7 @@ impl Filter {
             )?;
 
             let app = self.app.bind(py);
+            let response_tx = self.response_tx.take().unwrap();
             let coro = app.call1((
                 scope,
                 ASGIReceiveCallable {
@@ -330,36 +366,26 @@ impl Filter {
                 ASGISendCallable {
                     next_event: NextASGIEvent::Start,
                     trailers_accepted,
-                    response_tx: self.response_tx.take().unwrap(),
+                    response_tx: response_tx.clone(),
                     scheduler: envoy_filter.new_scheduler(),
                     loop_: self.loop_.clone_ref(py),
                 },
             ))?;
             let asyncio = PyModule::import(py, intern!(py, "asyncio"))?;
-            asyncio.call_method1(
+            let future = asyncio.call_method1(
                 intern!(py, "run_coroutine_threadsafe"),
                 (coro, &self.loop_.bind(py)),
+            )?;
+            future.call_method1(
+                intern!(py, "add_done_callback"),
+                (AppFutureHandler {
+                    response_tx,
+                    scheduler: envoy_filter.new_scheduler(),
+                },),
             )?;
             Ok(())
         });
         res.unwrap()
-    }
-
-    fn send_response_headers<EHF: EnvoyHttpFilter>(
-        &mut self,
-        envoy_filter: &mut EHF,
-        start_event: ResponseStartEvent,
-    ) {
-        envoy_filter.set_response_header(":status", start_event.status.to_string().as_bytes());
-        for (k, v) in start_event.headers {
-            if k.eq_ignore_ascii_case("trailer") && self.response_trailers.is_none() {
-                // Skip trailers header if we won't be sending any.
-                continue;
-            }
-            envoy_filter.set_response_header(k.as_str(), v.as_slice());
-        }
-        self.process_response = false;
-        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
     }
 }
 
@@ -460,6 +486,36 @@ impl ASGIReceiveCallable {
             self.scheduler.commit(EVENT_ID_REQUEST);
             Ok(future.unbind())
         })
+    }
+}
+
+#[pyclass]
+struct AppFutureHandler {
+    response_tx: Sender<ResponseEvent>,
+    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+}
+
+unsafe impl Sync for AppFutureHandler {}
+
+#[pymethods]
+impl AppFutureHandler {
+    fn __call__(&mut self, future: Py<PyAny>) {
+        Python::attach(|py| {
+            let future = future.bind(py);
+            match future.call_method1(intern!(py, "result"), (0,)) {
+                Ok(_) => {}
+                Err(e) => {
+                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                    eprintln!("Exception in ASGI application\n{}{}", tb, e);
+                    self.response_tx
+                        .send(ResponseEvent::Exception)
+                        // We printed the exception, if the receiver is already gone
+                        // for whatever reason it's fine.
+                        .unwrap_or_default();
+                    self.scheduler.commit(EVENT_ID_EXCEPTION);
+                }
+            }
+        });
     }
 }
 
@@ -628,6 +684,7 @@ enum ResponseEvent {
     Start(ResponseStartEvent),
     Body(ResponseBodyEvent),
     Trailers(ResponseTrailersEvent),
+    Exception,
 }
 
 fn extract_headers_from_event(

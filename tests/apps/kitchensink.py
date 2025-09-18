@@ -146,6 +146,64 @@ async def _request_and_response_body(
     await send({"type": "http.response.body", "body": b"Bear", "more_body": False})
 
 
+async def _exception_before_response() -> None:
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+async def _exception_after_response_headers(
+    recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    # We want to order the exception after response headers have been sent
+    # so schedule some thread switches by calling recv a few times. Revisit
+    # if this is still flaky with a status code 500 - it's not the end of the
+    # world to update the test to accept both status 500 or connection reset.
+    for _ in range(10):
+        await recv()
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+async def _exception_after_response_body(send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": b"Hello World!!!", "more_body": True}
+    )
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+async def _exception_after_response_complete(send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": b"Hello World!!!", "more_body": False}
+    )
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
 async def app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -158,5 +216,13 @@ async def app(
             await _response_body(scope, send)
         case "/request-and-response-body":
             await _request_and_response_body(scope, recv, send)
+        case "/exception-before-response":
+            await _exception_before_response()
+        case "/exception-after-response-headers":
+            await _exception_after_response_headers(recv, send)
+        case "/exception-after-response-body":
+            await _exception_after_response_body(send)
+        case "/exception-after-response-complete":
+            await _exception_after_response_complete(send)
         case _:
             await _send_failure("unknown path", send)
