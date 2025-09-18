@@ -16,5 +16,5 @@ Python interpreter into a module that can be loaded by a stock envoy binary.
 - Multiple worker threads (coming soon)
 - Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead.
 
-[envoy][https://www.envoyproxy.io/]
-[envoy dynamic modules][https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules]
+[envoy]: [https://www.envoyproxy.io/]
+[envoy dynamic modules]: [https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules]
