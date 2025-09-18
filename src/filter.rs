@@ -160,23 +160,17 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
         envoy_filter.remove_response_header("trailer");
-
         self.process_response = true;
         envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
-
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::StopIteration
     }
 
     fn on_response_body(
         &mut self,
-        envoy_filter: &mut EHF,
+        _envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        envoy_filter.drain_response_body(1);
-
         self.process_response = true;
-        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
-
         abi::envoy_dynamic_module_type_on_http_filter_response_body_status::StopIterationNoBuffer
     }
 
