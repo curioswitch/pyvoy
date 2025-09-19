@@ -617,7 +617,7 @@ impl ASGISendCallable {
                     }
                     self.response_tx
                         .send(ResponseEvent::Body(ResponseBodyEvent {
-                            body: body.clone(),
+                            body: body,
                             more_body,
                             future: future.clone().unbind(),
                         }))
