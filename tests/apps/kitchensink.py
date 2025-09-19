@@ -146,6 +146,108 @@ async def _request_and_response_body(
     await send({"type": "http.response.body", "body": b"Bear", "more_body": False})
 
 
+async def _trailers_only(send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"text/plain"),
+                (b"trailer", b"x-first,x-second"),
+            ],
+            "trailers": True,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-first", b"last"), (b"x-second", b"first")],
+            "more_trailers": False,
+        }
+    )
+
+
+async def _response_and_trailers(send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"text/plain"),
+                (b"trailer", b"x-first,x-second"),
+            ],
+            "trailers": True,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"Hello ", "more_body": True})
+    await send({"type": "http.response.body", "body": b"Bear", "more_body": False})
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-first", b"last")],
+            "more_trailers": True,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-second", b"first")],
+            "more_trailers": False,
+        }
+    )
+
+
+async def _bidi_stream(recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 202,
+            "headers": [
+                (b"content-type", b"text/plain"),
+                (b"x-animal", b"bear"),
+                (b"trailer", b"x-result,x-time"),
+            ],
+            "trailers": True,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": b"Who are you?", "more_body": True}
+    )
+    msg = await recv()
+    if msg["type"] == "http.request":
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"Hi " + msg["body"] + b". What do you want to do?",
+                "more_body": True,
+            }
+        )
+    msg = await recv()
+    if msg["type"] == "http.request":
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"Let's " + msg["body"] + b"!",
+                "more_body": False,
+            }
+        )
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-result", b"great")],
+            "more_trailers": True,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-time", b"fast")],
+            "more_trailers": False,
+        }
+    )
+
+
 async def _exception_before_response() -> None:
     msg = "We have failed hard"
     raise RuntimeError(msg)
@@ -216,6 +318,12 @@ async def app(
             await _response_body(scope, send)
         case "/request-and-response-body":
             await _request_and_response_body(scope, recv, send)
+        case "/trailers-only":
+            await _trailers_only(send)
+        case "/response-and-trailers":
+            await _response_and_trailers(send)
+        case "/bidi-stream":
+            await _bidi_stream(recv, send)
         case "/exception-before-response":
             await _exception_before_response()
         case "/exception-after-response-headers":

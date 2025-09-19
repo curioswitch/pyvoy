@@ -1,4 +1,7 @@
+import signal
+import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from types import FrameType
 
 from ._server import PyvoyServer
 
@@ -26,17 +29,23 @@ def main() -> None:
 
     args = parser.parse_args(namespace=CLIArgs())
 
+    def exit_python(_s: int, _f: FrameType | None) -> None:
+        print("Shutting down pyvoy...")  # noqa: T201
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, exit_python)
+
     with PyvoyServer(
         args.app, address=args.address, port=args.port, print_startup_logs=True
     ) as server:
-        print(f"pyvoy listening on {server.listener_address}:{server.listener_port}")  # noqa: T201
-        try:
-            while True:
-                line = server.output.readline()
-                if line:
-                    print(line, end="")  # noqa: T201
-        except KeyboardInterrupt:
-            print("Shutting down pyvoy...")  # noqa: T201
+        print(  # noqa: T201
+            f"pyvoy listening on {server.listener_address}:{server.listener_port}",
+            file=sys.stderr,
+        )
+        while True:
+            line = server.output.readline()
+            if line:
+                print(line, end="", file=sys.stderr)  # noqa: T201
 
 
 if __name__ == "__main__":

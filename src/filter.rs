@@ -189,7 +189,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
-        println!("{}", event_id);
         if event_id == EVENT_ID_REQUEST {
             if self.request_closed || has_request_body(envoy_filter) {
                 match self.request_future_rx.try_recv() {

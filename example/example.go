@@ -8,7 +8,7 @@ import (
 
 func main() {
 	reqBodyR, reqBodyW := io.Pipe()
-	req, _ := http.NewRequest("POST", "http://localhost:8000/foo", reqBodyR)
+	req, _ := http.NewRequest("POST", "http://localhost:8000/bidi-stream", reqBodyR)
 	req.ContentLength = -1
 	req.Header.Set("TE", "trailers")
 	var prots http.Protocols
