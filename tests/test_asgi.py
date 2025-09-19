@@ -37,6 +37,13 @@ def test_request_and_response_body(kitchensink_url: str) -> None:
     assert response.content == b"Yogi Bear"
 
 
+def test_large_bodies(kitchensink_url: str) -> None:
+    response = httpx.post(f"{kitchensink_url}/large-bodies", content=b"A" * 1_000_000)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "text/plain"
+    assert response.content == b"B" * 1_000_000
+
+
 def test_exception_before_response(kitchensink_url: str) -> None:
     response = httpx.get(f"{kitchensink_url}/exception-before-response")
     assert response.status_code == 500

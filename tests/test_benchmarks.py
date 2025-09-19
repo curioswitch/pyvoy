@@ -124,3 +124,13 @@ def test_request_and_response_body(
         benchmark(
             client.post, f"{url}/request-and-response-body", content="Bear please"
         )
+
+
+@pytest.mark.parametrize("http2", [False, True], ids=["http/1.1", "http/2"])
+def test_large_bodies(
+    url: str, http2: bool, server: str, benchmark: BenchmarkFixture
+) -> None:
+    if server == "uvicorn" and http2:
+        pytest.skip("uvicorn does not support http/2")
+    with httpx.Client(http2=http2, http1=not http2) as client:
+        benchmark(client.post, f"{url}/large-bodies", content=b"A" * 1_000_000)

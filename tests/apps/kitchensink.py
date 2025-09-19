@@ -110,8 +110,6 @@ async def _response_body(scope: HTTPScope, send: ASGISendCallable) -> None:
     await send({"type": "http.response.body", "body": b"world!", "more_body": False})
 
 
-# Since there isn't any Python HTTP library supporting bidirectional streaming,
-# we will test it outside of Python.
 async def _request_and_response_body(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -144,6 +142,39 @@ async def _request_and_response_body(
     )
     await send({"type": "http.response.body", "body": b"Yogi ", "more_body": True})
     await send({"type": "http.response.body", "body": b"Bear", "more_body": False})
+
+
+async def _large_bodies(recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    body = b""
+
+    for _ in range(10000):
+        msg = await recv()
+        if msg["type"] != "http.request":
+            await _send_failure('msg["type"] != "http.request"', send)
+            return
+        body += msg.get("body", b"")
+        if not msg.get("more_body", False):
+            break
+
+    if body != b"A" * 1_000_000:
+        await _send_failure('body != b"A" * 1_000_000', send)
+        return
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+
+    for i in range(1000):
+        chunk = b"B" * 1000
+        more_body = i < 999
+        await send(
+            {"type": "http.response.body", "body": chunk, "more_body": more_body}
+        )
 
 
 async def _trailers_only(send: ASGISendCallable) -> None:
@@ -318,6 +349,8 @@ async def app(
             await _response_body(scope, send)
         case "/request-and-response-body":
             await _request_and_response_body(scope, recv, send)
+        case "/large-bodies":
+            await _large_bodies(recv, send)
         case "/trailers-only":
             await _trailers_only(send)
         case "/response-and-trailers":
