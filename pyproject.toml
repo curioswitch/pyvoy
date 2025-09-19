@@ -16,10 +16,14 @@ pyvoy = "pyvoy._cli:main"
 dev-dependencies = [
     "asgiref",
     "httpx",
+    "hypercorn",
     "pyright[nodejs]",
     "pytest",
+    "pytest-benchmark",
     "pytest-cov",
     "ruff",
+    "uvicorn[standard]",
+    "uvloop",
 ]
 
 [build-system]
@@ -160,4 +164,8 @@ split-on-trailing-comma = false
 extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
 
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib"]
+addopts = [
+    "--import-mode=importlib",
+    "--benchmark-disable",
+    "--benchmark-max-time=10",
+]
