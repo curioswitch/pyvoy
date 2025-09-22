@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 
 from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
@@ -337,6 +338,49 @@ async def _exception_after_response_complete(send: ASGISendCallable) -> None:
     raise RuntimeError(msg)
 
 
+async def _controlled(
+    scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    headers = scope["headers"]
+    sleep_ms = 0
+    response_bytes = 0
+    for name, value in headers:
+        match name:
+            case b"x-sleep-ms":
+                sleep_ms = int(value)
+            case b"x-response-bytes":
+                response_bytes = int(value)
+
+    body = b""
+
+    while True:
+        msg = await recv()
+        body += msg.get("body", b"")
+        if not msg.get("more_body", False):
+            break
+
+    if sleep_ms > 0:
+        await asyncio.sleep(sleep_ms / 1000.0)
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"text/plain"),
+                (b"content-length", str(response_bytes).encode()),
+            ],
+            "trailers": False,
+        }
+    )
+
+    if response_bytes > 0:
+        chunk = b"A" * response_bytes
+        await send({"type": "http.response.body", "body": chunk, "more_body": False})
+    else:
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
 async def app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -365,5 +409,7 @@ async def app(
             await _exception_after_response_body(send)
         case "/exception-after-response-complete":
             await _exception_after_response_complete(send)
+        case "/controlled":
+            await _controlled(scope, recv, send)
         case _:
             await _send_failure("unknown path", send)

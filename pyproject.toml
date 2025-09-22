@@ -15,11 +15,11 @@ pyvoy = "pyvoy._cli:main"
 [tool.uv]
 dev-dependencies = [
     "asgiref",
+    "granian",
     "httpx",
     "hypercorn",
     "pyright[nodejs]",
     "pytest",
-    "pytest-benchmark",
     "pytest-cov",
     "ruff",
     "uvicorn[standard]",
