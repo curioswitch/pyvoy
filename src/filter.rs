@@ -1,7 +1,8 @@
-use std::sync::mpsc::{Receiver, Sender, channel, sync_channel};
 use std::{mem, thread};
 
 use envoy_proxy_dynamic_modules_rust_sdk::{abi::envoy_dynamic_module_type_attribute_id, *};
+use flume;
+use flume::{Receiver, Sender};
 use pyo3::{
     exceptions::PyRuntimeError,
     intern,
@@ -18,7 +19,7 @@ pub struct Config {
 
 impl Config {
     pub fn new(filter_config: &str) -> Option<Self> {
-        let (tx, rx) = sync_channel(0);
+        let (tx, rx) = flume::bounded(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let asyncio = PyModule::import(py, "asyncio")?;
@@ -76,8 +77,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
                 self.extensions.clone_ref(py),
             )
         });
-        let (request_future_tx, request_future_rx) = channel::<Py<PyAny>>();
-        let (response_tx, response_rx) = channel::<ResponseEvent>();
+        let (request_future_tx, request_future_rx) = flume::unbounded::<Py<PyAny>>();
+        let (response_tx, response_rx) = flume::unbounded::<ResponseEvent>();
         Box::new(Filter {
             loop_,
             app,
@@ -219,7 +220,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         // We delay closing the response stream when needed until the end of the function since
         // an end stream can cause the filter to be deallocated right away, invalidating further code.
         let mut close_response = false;
-        while let Ok(event) = self.response_rx.try_recv() {
+        for event in self.response_rx.try_iter() {
             match event {
                 ResponseEvent::Start(event) => {
                     if event.trailers {
