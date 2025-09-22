@@ -131,11 +131,23 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
-        let trailers_accepted = match envoy_filter.get_request_header_value("te") {
-            Some(te) => te.as_slice() == b"trailers",
-            None => false,
-        };
+        let mut trailers_accepted = false;
+        let mut keys: Vec<String> = Vec::new();
+        for (name, value) in envoy_filter.get_request_headers() {
+            if name.as_slice().eq_ignore_ascii_case(b"te") && value.as_slice() != b"trailers" {
+                // Allow te header to upstream
+                trailers_accepted = true;
+            } else {
+                // Remove any non-pseudoheaders
+                if !name.as_slice().starts_with(b":") {
+                    keys.push(String::from_utf8_lossy(name.as_slice()).to_string());
+                }
+            }
+        }
         self.execute_app(envoy_filter, trailers_accepted);
+        for key in keys {
+            envoy_filter.remove_request_header(&key);
+        }
         if end_of_stream {
             self.request_closed = true;
             abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::ContinueAndDontEndStream

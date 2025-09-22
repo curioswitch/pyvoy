@@ -44,6 +44,13 @@ def test_large_bodies(kitchensink_url: str) -> None:
     assert response.content == b"B" * 1_000_000
 
 
+def test_empty_request_body_http2(kitchensink_url: str) -> None:
+    with httpx.Client(http2=True, http1=False) as client:
+        response = client.post(f"{kitchensink_url}/controlled", content=b"")
+    assert response.status_code == 200, response.text
+    assert response.content == b""
+
+
 def test_exception_before_response(kitchensink_url: str) -> None:
     response = httpx.get(f"{kitchensink_url}/exception-before-response")
     assert response.status_code == 500
