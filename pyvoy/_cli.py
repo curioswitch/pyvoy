@@ -10,6 +10,7 @@ class CLIArgs:
     app: str
     address: str
     port: int
+    print_envoy_config: bool
 
 
 def main() -> None:
@@ -26,6 +27,12 @@ def main() -> None:
     parser.add_argument(
         "--port", help="the port to listen on (0 for random)", type=int, default=8000
     )
+    parser.add_argument(
+        "--print-envoy-config",
+        help="print the generated Envoy config to stdout and exit",
+        action="store_true",
+        default=False,
+    )
 
     args = parser.parse_args(namespace=CLIArgs())
 
@@ -34,6 +41,17 @@ def main() -> None:
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, exit_python)
+
+    if args.print_envoy_config:
+        # TODO: Cleanup
+        PyvoyServer(
+            args.app,
+            address=args.address,
+            port=args.port,
+            print_startup_logs=True,
+            print_envoy_config=True,
+        ).start()
+        return
 
     with PyvoyServer(
         args.app, address=args.address, port=args.port, print_startup_logs=True

@@ -6,13 +6,16 @@ import urllib.request
 from types import TracebackType
 from typing import IO
 
-from ._bin import get_envoy_path, get_pyvoy_dir_path, get_upstream_path
+import yaml
+
+from ._bin import get_envoy_path, get_pyvoy_dir_path
 
 
 class PyvoyServer:
     _listener_address: str
     _listener_port: int
     _print_startup_logs: bool
+    _print_envoy_config: bool
 
     _output: IO[str]
 
@@ -23,11 +26,13 @@ class PyvoyServer:
         address: str = "127.0.0.1",
         port: int = 0,
         print_startup_logs: bool = False,
+        print_envoy_config: bool = False,
     ) -> None:
         self._app = app
         self._address = address
         self._port = port
         self._print_startup_logs = print_startup_logs
+        self._print_envoy_config = print_envoy_config
 
     def __enter__(self) -> "PyvoyServer":
         self.start()
@@ -42,20 +47,6 @@ class PyvoyServer:
         self.stop()
 
     def start(self) -> None:
-        self._upstream = subprocess.Popen(  # noqa: S603 - OK
-            [get_upstream_path()],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        assert self._upstream.stderr is not None  # noqa: S101
-        line = self._upstream.stderr.readline()
-        if "Listening on port: " not in line:
-            msg = "Upstream server failed to start"
-            raise RuntimeError(msg)
-        upstream_port = int(line.split("Listening on port: ")[1].strip())
-
         config = {
             "admin": {
                 "address": {"socket_address": {"address": "127.0.0.1", "port_value": 0}}
@@ -83,16 +74,6 @@ class PyvoyServer:
                                                     {
                                                         "name": "local_proxy_route",
                                                         "domains": ["*"],
-                                                        "routes": [
-                                                            {
-                                                                "match": {
-                                                                    "prefix": "/"
-                                                                },
-                                                                "route": {
-                                                                    "cluster": "upstream"
-                                                                },
-                                                            }
-                                                        ],
                                                     }
                                                 ]
                                             },
@@ -102,7 +83,8 @@ class PyvoyServer:
                                                     "typed_config": {
                                                         "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
                                                         "dynamic_module_config": {
-                                                            "name": "pyvoy"
+                                                            "name": "pyvoy",
+                                                            "terminal_filter": True,
                                                         },
                                                         "filter_name": "pyvoy",
                                                         "filter_config": {
@@ -110,13 +92,7 @@ class PyvoyServer:
                                                             "value": self._app,
                                                         },
                                                     },
-                                                },
-                                                {
-                                                    "name": "envoy.filters.http.router",
-                                                    "typed_config": {
-                                                        "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
-                                                    },
-                                                },
+                                                }
                                             ],
                                         },
                                     }
@@ -124,37 +100,13 @@ class PyvoyServer:
                             }
                         ],
                     }
-                ],
-                "clusters": [
-                    {
-                        "name": "upstream",
-                        "connect_timeout": "0.25s",
-                        "type": "STATIC",
-                        "lb_policy": "ROUND_ROBIN",
-                        "http2_protocol_options": {},
-                        "load_assignment": {
-                            "cluster_name": "upstream",
-                            "endpoints": [
-                                {
-                                    "lb_endpoints": [
-                                        {
-                                            "endpoint": {
-                                                "address": {
-                                                    "socket_address": {
-                                                        "address": "127.0.0.1",
-                                                        "port_value": upstream_port,
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    ]
-                                }
-                            ],
-                        },
-                    }
-                ],
+                ]
             },
         }
+
+        if self._print_envoy_config:
+            print(yaml.dump(config))  # noqa: T201
+            return
 
         pythonpath = os.pathsep.join(sys.path)
 
@@ -200,10 +152,9 @@ class PyvoyServer:
         self._listener_port = socket_address["port_value"]
 
     def stop(self) -> None:
+        self._output.close()
         self._process.terminate()
-        self._upstream.terminate()
         self._process.wait()
-        self._upstream.wait()
 
     @property
     def listener_address(self) -> str:
