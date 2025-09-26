@@ -86,7 +86,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             extensions,
             request_closed: false,
             response_state: ResponseState::Started,
-            response_headers: Vec::new(),
             response_trailers: None,
             request_future_rx: request_future_rx,
             request_future_tx: Some(request_future_tx),
@@ -102,7 +101,6 @@ const EVENT_ID_EXCEPTION: u64 = 3;
 
 enum ResponseState {
     Started,
-    SendingHeaders,
     SentHeaders,
     Complete,
 }
@@ -116,7 +114,6 @@ struct Filter {
     request_closed: bool,
     response_state: ResponseState,
 
-    response_headers: Vec<(String, Vec<u8>)>,
     response_trailers: Option<Vec<(String, Vec<u8>)>>,
 
     request_future_rx: Receiver<Py<PyAny>>,
@@ -134,7 +131,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         let mut trailers_accepted = false;
         let mut keys: Vec<String> = Vec::new();
         for (name, value) in envoy_filter.get_request_headers() {
-            if name.as_slice().eq_ignore_ascii_case(b"te") && value.as_slice() != b"trailers" {
+            if name.as_slice().eq_ignore_ascii_case(b"te") && value.as_slice() == b"trailers" {
                 // Allow te header to upstream
                 trailers_accepted = true;
             } else {
@@ -161,6 +158,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
+        println!("on_request_body end_of_stream={}", end_of_stream); // TODO: Remove
         if end_of_stream {
             self.request_closed = true;
         }
@@ -181,27 +179,33 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         _end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        envoy_filter.remove_response_header("trailer");
-        for (k, v) in mem::take(&mut self.response_headers) {
-            envoy_filter.set_response_header(k.as_str(), v.as_slice());
-        }
-        self.response_state = ResponseState::SentHeaders;
-        envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        println!("on_response_headers end_of_stream={}", _end_of_stream); // TODO: Remove
         abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
+    }
+
+    fn on_response_body(
+        &mut self,
+        _envoy_filter: &mut EHF,
+        _end_of_stream: bool,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
+        println!("on_response_body end_of_stream={}", _end_of_stream); // TODO: Remove
+        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue
     }
 
     fn on_response_trailers(
         &mut self,
         envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status {
-        envoy_filter.remove_response_trailer("P");
-        for (k, v) in self.response_trailers.take().unwrap_or_default() {
-            envoy_filter.set_response_trailer(k.as_str(), v.as_slice());
-        }
+        println!("on_response_trailers"); // TODO: Remove
         abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status::Continue
     }
 
+    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
+        println!("on_stream_complete"); // TODO: Remove
+    }
+
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
+        println!("on_scheduled, event_id={}", event_id); // TODO: Remove
         if event_id == EVENT_ID_REQUEST {
             if self.request_closed || has_request_body(envoy_filter) {
                 match self.request_future_rx.try_recv() {
@@ -219,56 +223,41 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        match self.response_state {
-            ResponseState::SendingHeaders => {
-                if event_id != EVENT_ID_EXCEPTION {
-                    // Headers not received from upstream, wait for them before processing events
-                    // unless we are closing with an exception.
-                    return;
-                }
-            }
-            _ => {}
-        }
-        // We delay closing the response stream when needed until the end of the function since
-        // an end stream can cause the filter to be deallocated right away, invalidating further code.
-        let mut close_response = false;
-        for event in self.response_rx.try_iter() {
+        println!("getting events");
+        for event in self.response_rx.drain() {
+            println!("event");
             match event {
                 ResponseEvent::Start(event) => {
                     if event.trailers {
                         self.response_trailers.replace(Vec::new());
                     }
-                    self.response_headers.push((
+                    let mut headers = event.headers;
+                    headers.push((
                         String::from(":status"),
                         event.status.to_string().into_bytes(),
                     ));
-                    for (k, v) in event.headers {
-                        if k.eq_ignore_ascii_case("trailer") && !event.trailers {
-                            // Skip trailers header if we won't be sending any.
-                            continue;
-                        }
-                        self.response_headers.push((k, v));
-                    }
-                    // Triggers upstream to send headers. After we encode them, we will be
-                    // ready to continue processing messages to completion.
-                    envoy_filter.inject_request_body(b" ", false);
-                    self.response_state = ResponseState::SendingHeaders;
-                    return;
+                    let headers_ref: Vec<(&str, &[u8])> = headers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_slice()))
+                        .collect();
+                    envoy_filter.send_response_headers(headers_ref, false);
+                    self.response_state = ResponseState::SentHeaders;
                 }
                 ResponseEvent::Body(event) => {
-                    envoy_filter.inject_response_body(&event.body, false);
                     let end_stream = !event.more_body && self.response_trailers.is_none();
-                    if end_stream {
-                        close_response = true;
-                    }
+                    envoy_filter.send_response_data(&event.body, end_stream);
                     set_future_to_none(&self.loop_, event.future).unwrap();
                 }
                 ResponseEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
                         trailers.append(&mut event.headers);
-                    }
-                    if !event.more_trailers {
-                        close_response = true;
+                        if !event.more_trailers {
+                            let trailers_ref: Vec<(&str, &[u8])> = trailers
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_slice()))
+                                .collect();
+                            envoy_filter.send_response_trailers(trailers_ref);
+                        }
                     }
                 }
                 ResponseEvent::Exception => match self.response_state {
@@ -287,17 +276,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             ],
                             Some(b"Internal Server Error"),
                         );
-                        return;
                     }
                 },
             }
         }
-        if close_response {
-            self.response_state = ResponseState::Complete;
-            // Closing the request stream to upstream causes it to finish the response,
-            // which will also allow processing any trailers.
-            envoy_filter.inject_request_body(b"", true);
-        }
+        println!("done events");
     }
 }
 

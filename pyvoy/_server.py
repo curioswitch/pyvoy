@@ -6,6 +6,8 @@ import urllib.request
 from types import TracebackType
 from typing import IO
 
+import yaml
+
 from ._bin import get_envoy_path, get_pyvoy_dir_path, get_upstream_path
 
 
@@ -13,6 +15,7 @@ class PyvoyServer:
     _listener_address: str
     _listener_port: int
     _print_startup_logs: bool
+    _print_envoy_config: bool
 
     _output: IO[str]
 
@@ -23,11 +26,13 @@ class PyvoyServer:
         address: str = "127.0.0.1",
         port: int = 0,
         print_startup_logs: bool = False,
+        print_envoy_config: bool = False,
     ) -> None:
         self._app = app
         self._address = address
         self._port = port
         self._print_startup_logs = print_startup_logs
+        self._print_envoy_config = print_envoy_config
 
     def __enter__(self) -> "PyvoyServer":
         self.start()
@@ -110,13 +115,7 @@ class PyvoyServer:
                                                             "value": self._app,
                                                         },
                                                     },
-                                                },
-                                                {
-                                                    "name": "envoy.filters.http.router",
-                                                    "typed_config": {
-                                                        "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
-                                                    },
-                                                },
+                                                }
                                             ],
                                         },
                                     }
@@ -155,6 +154,10 @@ class PyvoyServer:
                 ],
             },
         }
+
+        if self._print_envoy_config:
+            print(yaml.dump(config))  # noqa: T201
+            return
 
         pythonpath = os.pathsep.join(sys.path)
 
