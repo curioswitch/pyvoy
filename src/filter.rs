@@ -1,4 +1,4 @@
-use std::{mem, thread};
+use std::thread;
 
 use envoy_proxy_dynamic_modules_rust_sdk::{abi::envoy_dynamic_module_type_attribute_id, *};
 use flume;
@@ -158,7 +158,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
-        println!("on_request_body end_of_stream={}", end_of_stream); // TODO: Remove
         if end_of_stream {
             self.request_closed = true;
         }
@@ -174,38 +173,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
 
-    fn on_response_headers(
-        &mut self,
-        envoy_filter: &mut EHF,
-        _end_of_stream: bool,
-    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_headers_status {
-        println!("on_response_headers end_of_stream={}", _end_of_stream); // TODO: Remove
-        abi::envoy_dynamic_module_type_on_http_filter_response_headers_status::Continue
-    }
-
-    fn on_response_body(
-        &mut self,
-        _envoy_filter: &mut EHF,
-        _end_of_stream: bool,
-    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_body_status {
-        println!("on_response_body end_of_stream={}", _end_of_stream); // TODO: Remove
-        abi::envoy_dynamic_module_type_on_http_filter_response_body_status::Continue
-    }
-
-    fn on_response_trailers(
-        &mut self,
-        envoy_filter: &mut EHF,
-    ) -> abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status {
-        println!("on_response_trailers"); // TODO: Remove
-        abi::envoy_dynamic_module_type_on_http_filter_response_trailers_status::Continue
-    }
-
-    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
-        println!("on_stream_complete"); // TODO: Remove
-    }
+    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {}
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
-        println!("on_scheduled, event_id={}", event_id); // TODO: Remove
         if event_id == EVENT_ID_REQUEST {
             if self.request_closed || has_request_body(envoy_filter) {
                 match self.request_future_rx.try_recv() {
@@ -223,9 +193,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        println!("getting events");
         for event in self.response_rx.drain() {
-            println!("event");
             match event {
                 ResponseEvent::Start(event) => {
                     if event.trailers {
@@ -245,8 +213,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 }
                 ResponseEvent::Body(event) => {
                     let end_stream = !event.more_body && self.response_trailers.is_none();
-                    envoy_filter.send_response_data(&event.body, end_stream);
-                    set_future_to_none(&self.loop_, event.future).unwrap();
+                    // TODO: Possibly a bug in dynamic modules, the filter is dropped when ending stream here
+                    // right away, but it should only happen when on_scheduled exits.
+                    if end_stream {
+                        set_future_to_none(&self.loop_, event.future).unwrap();
+                        envoy_filter.send_response_data(&event.body, end_stream);
+                    } else {
+                        envoy_filter.send_response_data(&event.body, end_stream);
+                        set_future_to_none(&self.loop_, event.future).unwrap();
+                    }
                 }
                 ResponseEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
@@ -280,7 +255,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 },
             }
         }
-        println!("done events");
     }
 }
 
@@ -475,10 +449,18 @@ impl ASGIReceiveCallable {
                 .loop_
                 .bind(py)
                 .call_method0(intern!(py, "create_future"))?;
-            self.request_future_tx
-                .send(future.clone().unbind())
-                .unwrap();
-            self.scheduler.commit(EVENT_ID_REQUEST);
+            match self.request_future_tx.send(future.clone().unbind()) {
+                Ok(_) => {
+                    self.scheduler.commit(EVENT_ID_REQUEST);
+                }
+                Err(_) => {
+                    // TODO: Better to propagate stream close explicitly than assuming this error
+                    // means closed.
+                    let event = PyDict::new(py);
+                    event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
+                    future.call_method1(intern!(py, "set_result"), (event,))?;
+                }
+            }
             Ok(future.unbind())
         })
     }
@@ -611,14 +593,22 @@ impl ASGISendCallable {
                         }
                         _ => {}
                     }
-                    self.response_tx
+                    match self
+                        .response_tx
                         .send(ResponseEvent::Body(ResponseBodyEvent {
                             body: body,
                             more_body,
                             future: future.clone().unbind(),
-                        }))
-                        .unwrap();
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                        })) {
+                        Ok(_) => {
+                            self.scheduler.commit(EVENT_ID_RESPONSE);
+                        }
+                        Err(_) => {
+                            // TODO: Better to propagate stream close explicitly than assuming this error
+                            // means closed.
+                            future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                        }
+                    }
                 }
                 NextASGIEvent::Trailers => {
                     if event_type != "http.response.trailers" {
