@@ -186,33 +186,38 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         for event in self.response_rx.drain() {
             match event {
-                ResponseEvent::Start(event) => {
-                    if event.trailers {
+                ResponseEvent::Start(start_event, body_event) => {
+                    if start_event.trailers {
                         self.response_trailers.replace(Vec::new());
                     }
-                    let mut headers = event.headers;
+                    let mut headers = start_event.headers;
                     headers.push((
                         String::from(":status"),
-                        event.status.to_string().into_bytes(),
+                        start_event.status.to_string().into_bytes(),
                     ));
                     let headers_ref: Vec<(&str, &[u8])> = headers
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_slice()))
                         .collect();
-                    envoy_filter.send_response_headers(headers_ref, false);
+                    let end_stream = !body_event.more_body && self.response_trailers.is_none();
+                    set_future_to_none(&self.loop_, body_event.future).unwrap();
+                    if end_stream {
+                        if body_event.body.is_empty() {
+                            envoy_filter.send_response_headers(headers_ref, true);
+                        } else {
+                            envoy_filter.send_response_headers(headers_ref, false);
+                            envoy_filter.send_response_data(&body_event.body, true);
+                        }
+                    } else {
+                        envoy_filter.send_response_headers(headers_ref, false);
+                        envoy_filter.send_response_data(&body_event.body, false);
+                    }
                     self.response_state = ResponseState::SentHeaders;
                 }
                 ResponseEvent::Body(event) => {
                     let end_stream = !event.more_body && self.response_trailers.is_none();
-                    // TODO: Possibly a bug in dynamic modules, the filter is dropped when ending stream here
-                    // right away, but it should only happen when on_scheduled exits.
-                    if end_stream {
-                        set_future_to_none(&self.loop_, event.future).unwrap();
-                        envoy_filter.send_response_data(&event.body, end_stream);
-                    } else {
-                        envoy_filter.send_response_data(&event.body, end_stream);
-                        set_future_to_none(&self.loop_, event.future).unwrap();
-                    }
+                    set_future_to_none(&self.loop_, event.future).unwrap();
+                    envoy_filter.send_response_data(&event.body, end_stream);
                 }
                 ResponseEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
@@ -325,6 +330,7 @@ impl Filter {
                 },
                 ASGISendCallable {
                     next_event: NextASGIEvent::Start,
+                    response_start: None,
                     trailers_accepted,
                     response_tx: response_tx.clone(),
                     scheduler: envoy_filter.new_scheduler(),
@@ -498,6 +504,7 @@ enum NextASGIEvent {
 #[pyclass]
 struct ASGISendCallable {
     next_event: NextASGIEvent,
+    response_start: Option<ResponseStartEvent>,
     trailers_accepted: bool,
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
@@ -550,14 +557,11 @@ impl ASGISendCallable {
                         true => self.next_event = NextASGIEvent::BodyWithTrailers,
                         false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
                     };
-                    self.response_tx
-                        .send(ResponseEvent::Start(ResponseStartEvent {
-                            status,
-                            headers: headers,
-                            trailers: trailers && self.trailers_accepted,
-                        }))
-                        .unwrap();
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                    self.response_start.replace(ResponseStartEvent {
+                        status,
+                        headers: headers,
+                        trailers: trailers && self.trailers_accepted,
+                    });
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
                 NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
@@ -584,20 +588,27 @@ impl ASGISendCallable {
                         }
                         _ => {}
                     }
-                    match self
-                        .response_tx
-                        .send(ResponseEvent::Body(ResponseBodyEvent {
-                            body: body,
-                            more_body,
-                            future: future.clone().unbind(),
-                        })) {
-                        Ok(_) => {
-                            self.scheduler.commit(EVENT_ID_RESPONSE);
-                        }
-                        Err(_) => {
-                            // TODO: Better to propagate stream close explicitly than assuming this error
-                            // means closed.
-                            future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                    let body_event = ResponseBodyEvent {
+                        body,
+                        more_body,
+                        future: future.clone().unbind(),
+                    };
+                    if let Some(start_event) = self.response_start.take() {
+                        self.response_tx
+                            .send(ResponseEvent::Start(start_event, body_event))
+                            .unwrap();
+                        self.scheduler.commit(EVENT_ID_RESPONSE);
+                    } else {
+                        match self.response_tx.send(ResponseEvent::Body(body_event)) {
+                            Ok(_) => {
+                                self.scheduler.commit(EVENT_ID_RESPONSE);
+                            }
+                            Err(_) => {
+                                // TODO: Better to propagate stream close explicitly than assuming this error
+                                // means closed.
+                                future
+                                    .call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                            }
                         }
                     }
                 }
@@ -657,7 +668,7 @@ struct ResponseTrailersEvent {
 }
 
 enum ResponseEvent {
-    Start(ResponseStartEvent),
+    Start(ResponseStartEvent, ResponseBodyEvent),
     Body(ResponseBodyEvent),
     Trailers(ResponseTrailersEvent),
     Exception,

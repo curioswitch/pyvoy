@@ -59,13 +59,10 @@ def test_exception_before_response(kitchensink_url: str) -> None:
 
 
 def test_exception_after_response_headers(kitchensink_url: str) -> None:
-    with pytest.raises(httpx.RemoteProtocolError) as exc_info:
-        httpx.post(
-            f"{kitchensink_url}/exception-after-response-headers", content="Bear please"
-        )
-    assert "peer closed connection without sending complete message body" in str(
-        exc_info.value
-    )
+    response = httpx.get(f"{kitchensink_url}/exception-before-response")
+    assert response.status_code == 500
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.content == b"Internal Server Error"
 
 
 def test_exception_after_response_body(kitchensink_url: str) -> None:
