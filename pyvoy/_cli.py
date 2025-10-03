@@ -1,7 +1,10 @@
 import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from pathlib import Path
 from types import FrameType
+
+import yaml
 
 from ._server import PyvoyServer
 
@@ -11,6 +14,11 @@ class CLIArgs:
     address: str
     port: int
     print_envoy_config: bool
+    tls_port: int | None
+    tls_key: str | None
+    tls_cert: str | None
+    tls_ca_cert: str | None
+    tls_disable_http3: bool
 
 
 def main() -> None:
@@ -28,6 +36,38 @@ def main() -> None:
         "--port", help="the port to listen on (0 for random)", type=int, default=8000
     )
     parser.add_argument(
+        "--tls-port",
+        help="the TLS port to listen on in addition to the plaintext port (0 for random)",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--tls-key",
+        help="path to the TLS private key file or the private key in PEM format",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--tls-cert",
+        help="path to the TLS certificate file or the certificate in PEM format",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--tls-ca-cert",
+        help="path to the TLS CA certificate file or the CA certificate in PEM format",
+        type=str,
+        default=None,
+    )
+
+    parser.add_argument(
+        "--tls-disable-http3",
+        help="disable HTTP/3 support",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--print-envoy-config",
         help="print the generated Envoy config to stdout and exit",
         action="store_true",
@@ -42,22 +82,25 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, exit_python)
 
+    server = PyvoyServer(
+        args.app,
+        address=args.address,
+        port=args.port,
+        print_startup_logs=True,
+        tls_port=args.tls_port,
+        tls_key=Path(args.tls_key) if args.tls_key else None,
+        tls_cert=Path(args.tls_cert) if args.tls_cert else None,
+        tls_ca_cert=Path(args.tls_ca_cert) if args.tls_ca_cert else None,
+        tls_enable_http3=not args.tls_disable_http3,
+    )
+
     if args.print_envoy_config:
-        # TODO: Cleanup
-        PyvoyServer(
-            args.app,
-            address=args.address,
-            port=args.port,
-            print_startup_logs=True,
-            print_envoy_config=True,
-        ).start()
+        print(yaml.dump(server.get_envoy_config()))  # noqa: T201
         return
 
-    with PyvoyServer(
-        args.app, address=args.address, port=args.port, print_startup_logs=True
-    ) as server:
+    with server:
         print(  # noqa: T201
-            f"pyvoy listening on {server.listener_address}:{server.listener_port}",
+            f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
             file=sys.stderr,
         )
         while True:
