@@ -29,31 +29,31 @@ A single example from the [full set of results](bench/example_result.txt) from a
 ```
 Running benchmark for pyvoy with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3254, 650.43, 647.50
-Duration      [total, attack, wait]             5.025s, 5.003s, 22.667ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.082ms, 15.193ms, 14.717ms, 17.759ms, 19.189ms, 25.022ms, 27.323ms
-Bytes In      [total, mean]                     3254000, 1000.00
+Requests      [total, rate, throughput]         3311, 661.50, 659.51
+Duration      [total, attack, wait]             5.02s, 5.005s, 15.116ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.605ms, 14.779ms, 14.401ms, 17.044ms, 18.505ms, 22.736ms, 27.81ms
+Bytes In      [total, mean]                     3311000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3254
+Status Codes  [code:count]                      200:3311
 Error Set:
 
 Running benchmark for granian with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3851, 769.24, 767.32
-Duration      [total, attack, wait]             5.019s, 5.006s, 12.523ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.121ms, 12.877ms, 12.466ms, 14.382ms, 15.295ms, 19.708ms, 22.028ms
-Bytes In      [total, mean]                     3851000, 1000.00
+Requests      [total, rate, throughput]         3472, 693.31, 690.92
+Duration      [total, attack, wait]             5.025s, 5.008s, 17.367ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.647ms, 14.215ms, 13.515ms, 17.359ms, 19.724ms, 23.372ms, 27.866ms
+Bytes In      [total, mean]                     3472000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3851
+Status Codes  [code:count]                      200:3472
 Error Set:
 
 Running benchmark for hypercorn with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         1011, 150.98, 149.20
-Duration      [total, attack, wait]             6.709s, 6.696s, 13.094ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.983ms, 66.209ms, 16.884ms, 19.179ms, 20.055ms, 2.801s, 5.019s
+Requests      [total, rate, throughput]         1011, 150.66, 148.82
+Duration      [total, attack, wait]             6.726s, 6.71s, 15.608ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.883ms, 66.338ms, 16.483ms, 19.045ms, 21.296ms, 2.229s, 5.022s
 Bytes In      [total, mean]                     1001000, 990.11
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -65,7 +65,4 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 We see that hypercorn seems to not perform well with HTTP/2, with errors and resulting poor performance numbers. We will
 focus comparisons on granian.
 
-We see a seemingly consistent ~1ms slowdown in pyvoy vs granian. This matches the expected latency hit from using an
-external upstream as described in the [design](./DESIGN.md). Notably, this means for the `sleep=0ms` case, the performance
-is significantly worse with pyvoy, but for meaningful applications, it should be competitive. We will see if it's possible
-to work on the limitation in envoy going forward.
+Performance seems to be mostly the same between pyvoy and granian within the range of noise.
