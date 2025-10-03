@@ -226,7 +226,7 @@ impl Filter {
                 b"OPTIONS" => HttpMethod::Options,
                 b"TRACE" => HttpMethod::Trace,
                 b"PATCH" => HttpMethod::Patch,
-                other => HttpMethod::Custom(other.to_vec().into_boxed_slice()),
+                other => HttpMethod::Custom(Box::from(other)),
             },
             None => HttpMethod::Get,
         };
@@ -245,26 +245,21 @@ impl Filter {
         let raw_path = match envoy_filter
             .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
         {
-            Some(v) => v.as_slice().to_vec().into_boxed_slice(),
+            Some(v) => Box::from(v.as_slice()),
             None => b"/".to_vec().into_boxed_slice(),
         };
 
         let query_string = match envoy_filter
             .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestQuery)
         {
-            Some(v) => v.as_slice().to_vec().into_boxed_slice(),
+            Some(v) => Box::from(v.as_slice()),
             None => b"".to_vec().into_boxed_slice(),
         };
 
         let headers = envoy_filter
             .get_request_headers()
             .iter()
-            .map(|(k, v)| {
-                (
-                    k.as_slice().to_vec().into_boxed_slice(),
-                    v.as_slice().to_vec().into_boxed_slice(),
-                )
-            })
+            .map(|(k, v)| (Box::from(k.as_slice()), Box::from(v.as_slice())))
             .collect();
 
         let client = get_address(
@@ -305,7 +300,7 @@ fn get_address<EHF: EnvoyHttpFilter>(
             if let Some(colon_idx) = host.iter().position(|&c| c == b':') {
                 host = &host[..colon_idx];
             }
-            Some((String::from_utf8_lossy(host).into_owned(), port))
+            Some((String::from_utf8_lossy(host).to_string(), port))
         }
         _ => None,
     }
