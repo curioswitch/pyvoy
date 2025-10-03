@@ -83,10 +83,10 @@ class PyvoyServer:
                                                     "typed_config": {
                                                         "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
                                                         "dynamic_module_config": {
-                                                            "name": "pyvoy",
-                                                            "terminal_filter": True,
+                                                            "name": "pyvoy"
                                                         },
                                                         "filter_name": "pyvoy",
+                                                        "terminal_filter": True,
                                                         "filter_config": {
                                                             "@type": "type.googleapis.com/google.protobuf.StringValue",
                                                             "value": self._app,

@@ -1,429 +1,428 @@
-❯ uv run python bench/run_benchmark.py
 Running benchmark for pyvoy with sleep=0ms response_size=0
 
-Requests      [total, rate, throughput]         38877, 7774.69, 7773.86
-Duration      [total, attack, wait]             5.001s, 5s, 534.166µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  420.25µs, 1.272ms, 1.258ms, 1.486ms, 1.568ms, 1.76ms, 9.157ms
+Requests      [total, rate, throughput]         60097, 12019.59, 12018.11
+Duration      [total, attack, wait]             5.001s, 5s, 615.542µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  210.458µs, 814.446µs, 788.473µs, 991.982µs, 1.097ms, 1.455ms, 9.18ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:38877
+Status Codes  [code:count]                      200:60097
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=1
 
-Requests      [total, rate, throughput]         38351, 7670.27, 7669.44
-Duration      [total, attack, wait]             5s, 5s, 536.791µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  516.125µs, 1.291ms, 1.276ms, 1.498ms, 1.586ms, 1.784ms, 4.37ms
-Bytes In      [total, mean]                     38351, 1.00
+Requests      [total, rate, throughput]         50659, 10131.59, 10130.49
+Duration      [total, attack, wait]             5.001s, 5s, 541.625µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  251.875µs, 968.659µs, 844.978µs, 1.3ms, 1.866ms, 3.256ms, 8.405ms
+Bytes In      [total, mean]                     50659, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:38351
+Status Codes  [code:count]                      200:50659
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=10
 
-Requests      [total, rate, throughput]         38322, 7664.33, 7663.26
-Duration      [total, attack, wait]             5.001s, 5s, 700.666µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  486.125µs, 1.291ms, 1.274ms, 1.504ms, 1.594ms, 1.848ms, 4.713ms
-Bytes In      [total, mean]                     383220, 10.00
+Requests      [total, rate, throughput]         54916, 10983.10, 10981.95
+Duration      [total, attack, wait]             5.001s, 5s, 522.958µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  238.458µs, 892.512µs, 828.268µs, 1.085ms, 1.256ms, 2.576ms, 11.641ms
+Bytes In      [total, mean]                     549160, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:38322
+Status Codes  [code:count]                      200:54916
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=100
 
-Requests      [total, rate, throughput]         37864, 7571.53, 7570.80
-Duration      [total, attack, wait]             5.001s, 5.001s, 482.541µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  482.541µs, 1.307ms, 1.288ms, 1.518ms, 1.61ms, 1.883ms, 7.603ms
-Bytes In      [total, mean]                     3786400, 100.00
+Requests      [total, rate, throughput]         50943, 10187.84, 10187.38
+Duration      [total, attack, wait]             5.001s, 5s, 228.084µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  228.084µs, 963.307µs, 832.398µs, 1.226ms, 1.723ms, 3.642ms, 8.214ms
+Bytes In      [total, mean]                     5094300, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:37864
+Status Codes  [code:count]                      200:50943
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=1000
 
-Requests      [total, rate, throughput]         35838, 7167.62, 7166.94
-Duration      [total, attack, wait]             5s, 5s, 468.042µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  468.042µs, 1.383ms, 1.355ms, 1.618ms, 1.743ms, 2.122ms, 5.624ms
-Bytes In      [total, mean]                     35838000, 1000.00
+Requests      [total, rate, throughput]         53248, 10649.50, 10648.61
+Duration      [total, attack, wait]             5s, 5s, 418.875µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  276.417µs, 923.762µs, 880.933µs, 1.111ms, 1.237ms, 2.104ms, 8.331ms
+Bytes In      [total, mean]                     53248000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:35838
+Status Codes  [code:count]                      200:53248
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=10000
 
-Requests      [total, rate, throughput]         25914, 5182.61, 5181.61
-Duration      [total, attack, wait]             5.001s, 5s, 965.583µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  525.5µs, 1.917ms, 1.884ms, 2.241ms, 2.391ms, 3.246ms, 6.841ms
-Bytes In      [total, mean]                     259140000, 10000.00
+Requests      [total, rate, throughput]         26364, 5272.55, 5271.14
+Duration      [total, attack, wait]             5.002s, 5s, 1.341ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  369.25µs, 1.884ms, 1.743ms, 2.663ms, 3.149ms, 4.3ms, 9.128ms
+Bytes In      [total, mean]                     263640000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:25914
+Status Codes  [code:count]                      200:26364
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=0ms response_size=100000
 
-Requests      [total, rate, throughput]         6474, 1294.57, 1293.71
-Duration      [total, attack, wait]             5.004s, 5.001s, 3.341ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.523ms, 7.634ms, 7.652ms, 8.972ms, 9.783ms, 11.551ms, 14.121ms
-Bytes In      [total, mean]                     647400000, 100000.00
+Requests      [total, rate, throughput]         6572, 1314.34, 1313.20
+Duration      [total, attack, wait]             5.005s, 5s, 4.337ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.19ms, 7.535ms, 7.363ms, 9.702ms, 10.707ms, 13.136ms, 18.769ms
+Bytes In      [total, mean]                     657200000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:6474
+Status Codes  [code:count]                      200:6572
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=0
 
-Requests      [total, rate, throughput]         28177, 5635.41, 5633.70
-Duration      [total, attack, wait]             5.002s, 5s, 1.518ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.388ms, 1.77ms, 1.733ms, 1.887ms, 1.961ms, 2.911ms, 7.049ms
+Requests      [total, rate, throughput]         31005, 6200.53, 6198.61
+Duration      [total, attack, wait]             5.002s, 5s, 1.546ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.203ms, 1.603ms, 1.506ms, 1.95ms, 2.211ms, 3.024ms, 6.386ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:28177
+Status Codes  [code:count]                      200:31005
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=1
 
-Requests      [total, rate, throughput]         26441, 5287.84, 5286.28
-Duration      [total, attack, wait]             5.002s, 5s, 1.476ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.379ms, 1.886ms, 1.79ms, 2.091ms, 2.461ms, 4.093ms, 9.321ms
-Bytes In      [total, mean]                     26441, 1.00
+Requests      [total, rate, throughput]         31804, 6360.54, 6358.73
+Duration      [total, attack, wait]             5.002s, 5s, 1.422ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.186ms, 1.563ms, 1.501ms, 1.822ms, 1.963ms, 2.851ms, 5.866ms
+Bytes In      [total, mean]                     31804, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:26441
+Status Codes  [code:count]                      200:31804
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=10
 
-Requests      [total, rate, throughput]         25097, 5019.39, 5017.77
-Duration      [total, attack, wait]             5.002s, 5s, 1.611ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.349ms, 1.986ms, 1.807ms, 2.221ms, 2.667ms, 5.155ms, 42.206ms
-Bytes In      [total, mean]                     250970, 10.00
+Requests      [total, rate, throughput]         30287, 6056.49, 6054.68
+Duration      [total, attack, wait]             5.002s, 5.001s, 1.493ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.208ms, 1.64ms, 1.541ms, 1.937ms, 2.133ms, 3.326ms, 19.395ms
+Bytes In      [total, mean]                     302870, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:25097
+Status Codes  [code:count]                      200:30287
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=100
 
-Requests      [total, rate, throughput]         27884, 5576.66, 5574.88
-Duration      [total, attack, wait]             5.002s, 5s, 1.591ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.374ms, 1.788ms, 1.769ms, 1.942ms, 2.012ms, 2.254ms, 4.729ms
-Bytes In      [total, mean]                     2788400, 100.00
+Requests      [total, rate, throughput]         28080, 5615.89, 5614.36
+Duration      [total, attack, wait]             5.001s, 5s, 1.359ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.221ms, 1.768ms, 1.637ms, 2.165ms, 2.609ms, 3.993ms, 14.026ms
+Bytes In      [total, mean]                     2808000, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:27884
+Status Codes  [code:count]                      200:28080
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=1000
 
-Requests      [total, rate, throughput]         27277, 5455.20, 5453.71
-Duration      [total, attack, wait]             5.002s, 5s, 1.365ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.365ms, 1.828ms, 1.806ms, 1.98ms, 2.056ms, 2.477ms, 5.925ms
-Bytes In      [total, mean]                     27277000, 1000.00
+Requests      [total, rate, throughput]         28343, 5668.24, 5666.71
+Duration      [total, attack, wait]             5.002s, 5s, 1.353ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.214ms, 1.754ms, 1.606ms, 2.073ms, 2.46ms, 5.273ms, 9.3ms
+Bytes In      [total, mean]                     28343000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:27277
+Status Codes  [code:count]                      200:28343
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=10000
 
-Requests      [total, rate, throughput]         21474, 4294.48, 4293.15
-Duration      [total, attack, wait]             5.002s, 5s, 1.552ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.496ms, 2.321ms, 2.302ms, 2.682ms, 2.824ms, 3.127ms, 6.224ms
-Bytes In      [total, mean]                     214740000, 10000.00
+Requests      [total, rate, throughput]         18509, 3701.72, 3700.29
+Duration      [total, attack, wait]             5.002s, 5s, 1.922ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.334ms, 2.692ms, 2.485ms, 3.775ms, 4.53ms, 6.355ms, 9.697ms
+Bytes In      [total, mean]                     185090000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:21474
+Status Codes  [code:count]                      200:18509
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=1ms response_size=100000
 
-Requests      [total, rate, throughput]         5818, 1163.53, 1162.73
-Duration      [total, attack, wait]             5.004s, 5s, 3.459ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  2.188ms, 8.51ms, 8.782ms, 10.293ms, 10.91ms, 12.468ms, 15.245ms
-Bytes In      [total, mean]                     581800000, 100000.00
+Requests      [total, rate, throughput]         5903, 1180.57, 1178.76
+Duration      [total, attack, wait]             5.008s, 5s, 7.695ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.161ms, 8.396ms, 8.789ms, 10.754ms, 11.662ms, 14.127ms, 34.535ms
+Bytes In      [total, mean]                     590300000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:5818
+Status Codes  [code:count]                      200:5903
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=0
 
-Requests      [total, rate, throughput]         3125, 624.52, 622.91
-Duration      [total, attack, wait]             5.017s, 5.004s, 12.936ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.211ms, 15.894ms, 15.598ms, 17.636ms, 19.487ms, 27.885ms, 66.104ms
+Requests      [total, rate, throughput]         3374, 673.38, 671.61
+Duration      [total, attack, wait]             5.024s, 5.011s, 13.157ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.897ms, 14.655ms, 14.076ms, 17.076ms, 20.531ms, 24.603ms, 28.458ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3125
+Status Codes  [code:count]                      200:3374
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=1
 
-Requests      [total, rate, throughput]         3295, 657.59, 655.65
-Duration      [total, attack, wait]             5.026s, 5.011s, 14.834ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.863ms, 15.093ms, 15.008ms, 17.056ms, 17.868ms, 22.582ms, 26.047ms
-Bytes In      [total, mean]                     3295, 1.00
+Requests      [total, rate, throughput]         3323, 664.11, 662.50
+Duration      [total, attack, wait]             5.016s, 5.004s, 12.208ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.001ms, 14.854ms, 14.359ms, 17.19ms, 19.142ms, 24.887ms, 27.096ms
+Bytes In      [total, mean]                     3323, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3295
+Status Codes  [code:count]                      200:3323
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=10
 
-Requests      [total, rate, throughput]         3181, 635.31, 633.49
-Duration      [total, attack, wait]             5.021s, 5.007s, 14.379ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.085ms, 15.664ms, 15.302ms, 18.476ms, 20.818ms, 26.721ms, 29.691ms
-Bytes In      [total, mean]                     31810, 10.00
+Requests      [total, rate, throughput]         3491, 696.73, 695.03
+Duration      [total, attack, wait]             5.023s, 5.011s, 12.211ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.839ms, 14.202ms, 13.925ms, 15.289ms, 16.539ms, 22.303ms, 30.382ms
+Bytes In      [total, mean]                     34910, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3181
+Status Codes  [code:count]                      200:3491
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=100
 
-Requests      [total, rate, throughput]         3111, 621.21, 619.73
-Duration      [total, attack, wait]             5.02s, 5.008s, 11.948ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.002ms, 16.022ms, 15.766ms, 18.622ms, 20.726ms, 24.682ms, 35.529ms
-Bytes In      [total, mean]                     311100, 100.00
+Requests      [total, rate, throughput]         3501, 699.67, 697.89
+Duration      [total, attack, wait]             5.017s, 5.004s, 12.827ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.235ms, 14.136ms, 13.953ms, 15.401ms, 16.317ms, 18.587ms, 23.893ms
+Bytes In      [total, mean]                     350100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3111
+Status Codes  [code:count]                      200:3501
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3172, 634.13, 632.44
-Duration      [total, attack, wait]             5.015s, 5.002s, 13.346ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.082ms, 15.677ms, 15.377ms, 18.017ms, 19.703ms, 29.42ms, 35.404ms
-Bytes In      [total, mean]                     3172000, 1000.00
+Requests      [total, rate, throughput]         3254, 650.43, 647.50
+Duration      [total, attack, wait]             5.025s, 5.003s, 22.667ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.082ms, 15.193ms, 14.717ms, 17.759ms, 19.189ms, 25.022ms, 27.323ms
+Bytes In      [total, mean]                     3254000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3172
+Status Codes  [code:count]                      200:3254
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         3559, 710.24, 708.49
-Duration      [total, attack, wait]             5.023s, 5.011s, 12.36ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.6ms, 14.053ms, 13.774ms, 16.372ms, 16.93ms, 20.469ms, 22.946ms
-Bytes In      [total, mean]                     35590000, 10000.00
+Requests      [total, rate, throughput]         3146, 628.84, 627.29
+Duration      [total, attack, wait]             5.015s, 5.003s, 12.305ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.575ms, 15.812ms, 15.681ms, 17.788ms, 19.622ms, 25.272ms, 30.615ms
+Bytes In      [total, mean]                     31460000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3559
+Status Codes  [code:count]                      200:3146
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=10ms response_size=100000
 
-Requests      [total, rate, throughput]         2843, 568.19, 566.19
-Duration      [total, attack, wait]             5.021s, 5.004s, 17.708ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.049ms, 17.557ms, 17.609ms, 18.707ms, 19.376ms, 23.143ms, 26.046ms
-Bytes In      [total, mean]                     284300000, 100000.00
+Requests      [total, rate, throughput]         2746, 548.68, 546.67
+Duration      [total, attack, wait]             5.023s, 5.005s, 18.39ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.096ms, 18.147ms, 18.323ms, 19.666ms, 20.728ms, 23.349ms, 27.391ms
+Bytes In      [total, mean]                     274600000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:2843
+Status Codes  [code:count]                      200:2746
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=50ms response_size=0
 
-Requests      [total, rate, throughput]         862, 171.44, 169.54
-Duration      [total, attack, wait]             5.084s, 5.028s, 56.281ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.362ms, 58.293ms, 57.947ms, 61.425ms, 63.45ms, 66.746ms, 68.672ms
+Requests      [total, rate, throughput]         911, 181.46, 179.51
+Duration      [total, attack, wait]             5.075s, 5.02s, 54.659ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  52.014ms, 54.973ms, 54.425ms, 56.835ms, 57.502ms, 64.06ms, 64.899ms
 Bytes In      [total, mean]                     0, 0.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:862
-Error Set:
-
-
-Running benchmark for pyvoy with sleep=50ms response_size=1
-
-Requests      [total, rate, throughput]         861, 170.25, 168.38
-Duration      [total, attack, wait]             5.113s, 5.057s, 56.09ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.506ms, 58.697ms, 57.846ms, 62.642ms, 65.968ms, 78.898ms, 79.18ms
-Bytes In      [total, mean]                     861, 1.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:861
-Error Set:
-
-
-Running benchmark for pyvoy with sleep=50ms response_size=10
-
-Requests      [total, rate, throughput]         871, 173.25, 171.36
-Duration      [total, attack, wait]             5.083s, 5.027s, 55.653ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.268ms, 57.677ms, 57.214ms, 60.599ms, 64.462ms, 68.836ms, 69.209ms
-Bytes In      [total, mean]                     8710, 10.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:871
-Error Set:
-
-
-Running benchmark for pyvoy with sleep=50ms response_size=100
-
-Requests      [total, rate, throughput]         901, 179.48, 177.49
-Duration      [total, attack, wait]             5.076s, 5.02s, 56.284ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.065ms, 55.666ms, 55.299ms, 58.411ms, 59.331ms, 62.936ms, 63.161ms
-Bytes In      [total, mean]                     90100, 100.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:901
-Error Set:
-
-
-Running benchmark for pyvoy with sleep=50ms response_size=1000
-
-Requests      [total, rate, throughput]         911, 182.00, 180.00
-Duration      [total, attack, wait]             5.061s, 5.006s, 55.459ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.035ms, 55.309ms, 54.866ms, 57.867ms, 58.313ms, 62.459ms, 63.167ms
-Bytes In      [total, mean]                     911000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
 Status Codes  [code:count]                      200:911
 Error Set:
 
 
-Running benchmark for pyvoy with sleep=50ms response_size=10000
+Running benchmark for pyvoy with sleep=50ms response_size=1
 
-Requests      [total, rate, throughput]         871, 172.44, 170.49
-Duration      [total, attack, wait]             5.109s, 5.051s, 57.848ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  53.428ms, 58.004ms, 57.562ms, 60.564ms, 61.344ms, 68.566ms, 69.525ms
-Bytes In      [total, mean]                     8710000, 10000.00
+Requests      [total, rate, throughput]         921, 182.20, 180.30
+Duration      [total, attack, wait]             5.108s, 5.055s, 53.263ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.944ms, 54.723ms, 54.528ms, 56.553ms, 57.219ms, 61.823ms, 62.638ms
+Bytes In      [total, mean]                     921, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:871
+Status Codes  [code:count]                      200:921
+Error Set:
+
+
+Running benchmark for pyvoy with sleep=50ms response_size=10
+
+Requests      [total, rate, throughput]         911, 181.85, 179.89
+Duration      [total, attack, wait]             5.064s, 5.01s, 54.491ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.8ms, 54.855ms, 54.352ms, 56.706ms, 58.823ms, 65.722ms, 66.581ms
+Bytes In      [total, mean]                     9110, 10.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:911
+Error Set:
+
+
+Running benchmark for pyvoy with sleep=50ms response_size=100
+
+Requests      [total, rate, throughput]         921, 183.98, 182.10
+Duration      [total, attack, wait]             5.058s, 5.006s, 51.698ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.396ms, 54.265ms, 53.913ms, 56.173ms, 57.273ms, 59.244ms, 61.725ms
+Bytes In      [total, mean]                     92100, 100.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:921
+Error Set:
+
+
+Running benchmark for pyvoy with sleep=50ms response_size=1000
+
+Requests      [total, rate, throughput]         921, 182.30, 180.44
+Duration      [total, attack, wait]             5.104s, 5.052s, 51.935ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.524ms, 54.73ms, 54.321ms, 56.255ms, 58.356ms, 59.915ms, 61.631ms
+Bytes In      [total, mean]                     921000, 1000.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:921
+Error Set:
+
+
+Running benchmark for pyvoy with sleep=50ms response_size=10000
+
+Requests      [total, rate, throughput]         881, 175.09, 173.27
+Duration      [total, attack, wait]             5.085s, 5.032s, 52.96ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  52.572ms, 57.056ms, 56.688ms, 59.655ms, 61.165ms, 65.466ms, 66.234ms
+Bytes In      [total, mean]                     8810000, 10000.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:881
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=50ms response_size=100000
 
-Requests      [total, rate, throughput]         819, 162.47, 160.46
-Duration      [total, attack, wait]             5.104s, 5.041s, 62.978ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.411ms, 61.666ms, 62.265ms, 66.005ms, 67.854ms, 70.64ms, 76.922ms
-Bytes In      [total, mean]                     81900000, 100000.00
+Requests      [total, rate, throughput]         791, 157.15, 155.49
+Duration      [total, attack, wait]             5.087s, 5.033s, 53.739ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.138ms, 63.623ms, 63.412ms, 69.407ms, 70.894ms, 73.774ms, 78.512ms
+Bytes In      [total, mean]                     79100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:819
+Status Codes  [code:count]                      200:791
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=100ms response_size=0
 
-Requests      [total, rate, throughput]         471, 93.00, 91.13
-Duration      [total, attack, wait]             5.168s, 5.065s, 103.668ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.115ms, 107.621ms, 107.309ms, 110.637ms, 113.602ms, 114.948ms, 115.144ms
+Requests      [total, rate, throughput]         481, 94.80, 92.92
+Duration      [total, attack, wait]             5.177s, 5.074s, 103.042ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.952ms, 105.476ms, 105.206ms, 107.413ms, 108.152ms, 116.211ms, 116.389ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:481
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=100ms response_size=1
 
-Requests      [total, rate, throughput]         471, 93.38, 91.50
-Duration      [total, attack, wait]             5.148s, 5.044s, 103.643ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.19ms, 107.211ms, 106.822ms, 110.395ms, 112.481ms, 116.159ms, 116.262ms
-Bytes In      [total, mean]                     471, 1.00
+Requests      [total, rate, throughput]         481, 94.94, 93.04
+Duration      [total, attack, wait]             5.17s, 5.066s, 103.438ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.61ms, 105.305ms, 105.216ms, 107.235ms, 107.952ms, 109.82ms, 110.306ms
+Bytes In      [total, mean]                     481, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:481
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=100ms response_size=10
 
-Requests      [total, rate, throughput]         471, 93.48, 91.61
-Duration      [total, attack, wait]             5.141s, 5.038s, 103.157ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.631ms, 107.101ms, 106.975ms, 109.189ms, 110.12ms, 116.758ms, 116.98ms
-Bytes In      [total, mean]                     4710, 10.00
+Requests      [total, rate, throughput]         481, 94.57, 92.69
+Duration      [total, attack, wait]             5.19s, 5.086s, 103.142ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.486ms, 105.719ms, 105.007ms, 107.867ms, 108.934ms, 116.341ms, 116.576ms
+Bytes In      [total, mean]                     4810, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:481
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=100ms response_size=100
 
-Requests      [total, rate, throughput]         471, 92.36, 90.40
-Duration      [total, attack, wait]             5.21s, 5.1s, 110.62ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.324ms, 108.407ms, 108ms, 112.717ms, 113.556ms, 116.725ms, 116.823ms
-Bytes In      [total, mean]                     47100, 100.00
+Requests      [total, rate, throughput]         481, 94.94, 93.04
+Duration      [total, attack, wait]             5.17s, 5.066s, 103.707ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  103.071ms, 105.342ms, 105.346ms, 107.067ms, 107.358ms, 108.5ms, 111.003ms
+Bytes In      [total, mean]                     48100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:481
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=100ms response_size=1000
 
-Requests      [total, rate, throughput]         471, 92.85, 90.99
-Duration      [total, attack, wait]             5.177s, 5.073s, 104.12ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.145ms, 107.824ms, 107.521ms, 110.404ms, 111.852ms, 115.901ms, 115.999ms
-Bytes In      [total, mean]                     471000, 1000.00
+Requests      [total, rate, throughput]         481, 94.91, 92.99
+Duration      [total, attack, wait]             5.173s, 5.068s, 104.829ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  103.065ms, 105.38ms, 105.088ms, 107.047ms, 108.215ms, 112.159ms, 112.287ms
+Bytes In      [total, mean]                     481000, 1000.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:481
+Error Set:
+
+
+Running benchmark for pyvoy with sleep=100ms response_size=10000
+
+Requests      [total, rate, throughput]         471, 93.77, 91.88
+Duration      [total, attack, wait]             5.127s, 5.023s, 103.541ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.751ms, 106.737ms, 106.615ms, 108.891ms, 109.463ms, 111.732ms, 112.634ms
+Bytes In      [total, mean]                     4710000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
 Status Codes  [code:count]                      200:471
 Error Set:
 
 
-Running benchmark for pyvoy with sleep=100ms response_size=10000
-
-Requests      [total, rate, throughput]         461, 91.90, 89.98
-Duration      [total, attack, wait]             5.124s, 5.016s, 107.39ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.161ms, 109.004ms, 108.81ms, 111.677ms, 112.769ms, 120.225ms, 120.483ms
-Bytes In      [total, mean]                     4610000, 10000.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:461
-Error Set:
-
-
 Running benchmark for pyvoy with sleep=100ms response_size=100000
 
-Requests      [total, rate, throughput]         432, 85.60, 83.83
-Duration      [total, attack, wait]             5.153s, 5.047s, 106.522ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.006ms, 116.987ms, 117.789ms, 122.989ms, 123.871ms, 128.229ms, 132.848ms
-Bytes In      [total, mean]                     43200000, 100000.00
+Requests      [total, rate, throughput]         441, 87.09, 85.32
+Duration      [total, attack, wait]             5.169s, 5.064s, 104.664ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  104.132ms, 115.032ms, 113.35ms, 119.9ms, 121.934ms, 151.24ms, 152.078ms
+Bytes In      [total, mean]                     44100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:432
+Status Codes  [code:count]                      200:441
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=200ms response_size=0
 
-Requests      [total, rate, throughput]         251, 48.64, 46.78
-Duration      [total, attack, wait]             5.365s, 5.161s, 204.61ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  203.458ms, 206.312ms, 206.125ms, 208.145ms, 209.89ms, 210.396ms, 210.95ms
+Requests      [total, rate, throughput]         251, 48.84, 46.99
+Duration      [total, attack, wait]             5.341s, 5.139s, 202.668ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  202.668ms, 205.251ms, 204.771ms, 207.28ms, 207.535ms, 207.792ms, 207.958ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -433,21 +432,21 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=200ms response_size=1
 
-Requests      [total, rate, throughput]         241, 48.12, 46.23
-Duration      [total, attack, wait]             5.213s, 5.008s, 204.329ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  204.329ms, 208.558ms, 207.986ms, 213.338ms, 214.412ms, 214.595ms, 214.711ms
-Bytes In      [total, mean]                     241, 1.00
+Requests      [total, rate, throughput]         251, 48.81, 46.96
+Duration      [total, attack, wait]             5.345s, 5.143s, 202.409ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  202.409ms, 205.472ms, 205.083ms, 208.496ms, 208.595ms, 208.795ms, 209.094ms
+Bytes In      [total, mean]                     251, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=200ms response_size=10
 
-Requests      [total, rate, throughput]         251, 48.26, 46.41
-Duration      [total, attack, wait]             5.409s, 5.201s, 207.898ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  205.4ms, 207.92ms, 207.798ms, 209.677ms, 210.003ms, 213.095ms, 213.143ms
+Requests      [total, rate, throughput]         251, 48.79, 46.95
+Duration      [total, attack, wait]             5.346s, 5.144s, 201.97ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.97ms, 205.552ms, 205.515ms, 207.197ms, 209.791ms, 210.169ms, 210.49ms
 Bytes In      [total, mean]                     2510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -457,33 +456,33 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=200ms response_size=100
 
-Requests      [total, rate, throughput]         249, 49.79, 47.83
-Duration      [total, attack, wait]             5.206s, 5.001s, 205.687ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  203.66ms, 208.151ms, 207.691ms, 212.726ms, 214.272ms, 214.447ms, 214.564ms
-Bytes In      [total, mean]                     24900, 100.00
+Requests      [total, rate, throughput]         251, 48.88, 47.02
+Duration      [total, attack, wait]             5.339s, 5.135s, 203.531ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  202.858ms, 205.232ms, 204.933ms, 207.188ms, 207.575ms, 207.85ms, 207.894ms
+Bytes In      [total, mean]                     25100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:249
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=200ms response_size=1000
 
-Requests      [total, rate, throughput]         241, 48.15, 46.25
-Duration      [total, attack, wait]             5.211s, 5.006s, 205.257ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  203.493ms, 208.431ms, 208.501ms, 211.972ms, 213.011ms, 213.117ms, 213.269ms
-Bytes In      [total, mean]                     241000, 1000.00
+Requests      [total, rate, throughput]         251, 48.64, 46.79
+Duration      [total, attack, wait]             5.365s, 5.16s, 204.697ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  202.446ms, 206.199ms, 205.967ms, 207.597ms, 209.341ms, 215.795ms, 216.215ms
+Bytes In      [total, mean]                     251000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=200ms response_size=10000
 
-Requests      [total, rate, throughput]         251, 48.43, 46.59
-Duration      [total, attack, wait]             5.388s, 5.183s, 204.619ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.335ms, 207.291ms, 206.992ms, 209.978ms, 211.636ms, 212.09ms, 212.856ms
+Requests      [total, rate, throughput]         251, 48.27, 46.44
+Duration      [total, attack, wait]             5.405s, 5.2s, 204.77ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  204.77ms, 207.985ms, 207.935ms, 209.499ms, 210.47ms, 213.076ms, 213.23ms
 Bytes In      [total, mean]                     2510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -493,21 +492,21 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=200ms response_size=100000
 
-Requests      [total, rate, throughput]         231, 46.00, 44.18
-Duration      [total, attack, wait]             5.229s, 5.022s, 206.411ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  206.411ms, 218.253ms, 219.894ms, 222.961ms, 224.012ms, 227.883ms, 233.702ms
-Bytes In      [total, mean]                     23100000, 100000.00
+Requests      [total, rate, throughput]         241, 46.33, 44.58
+Duration      [total, attack, wait]             5.406s, 5.202s, 203.903ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  203.903ms, 216.61ms, 215.365ms, 223.117ms, 224.118ms, 226.062ms, 235.734ms
+Bytes In      [total, mean]                     24100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:231
+Status Codes  [code:count]                      200:241
 Error Set:
 
 
 Running benchmark for pyvoy with sleep=500ms response_size=0
 
-Requests      [total, rate, throughput]         101, 19.87, 18.08
-Duration      [total, attack, wait]             5.588s, 5.082s, 505.248ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.003ms, 508.041ms, 508.148ms, 510.067ms, 510.145ms, 510.466ms, 510.742ms
+Requests      [total, rate, throughput]         101, 19.98, 18.17
+Duration      [total, attack, wait]             5.558s, 5.056s, 502.091ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.091ms, 505.247ms, 505.18ms, 506.818ms, 506.87ms, 506.903ms, 506.906ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -517,9 +516,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=1
 
-Requests      [total, rate, throughput]         101, 19.88, 18.08
-Duration      [total, attack, wait]             5.587s, 5.081s, 505.273ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  503.93ms, 508ms, 507.604ms, 510.871ms, 511.629ms, 511.746ms, 511.808ms
+Requests      [total, rate, throughput]         101, 19.99, 18.18
+Duration      [total, attack, wait]             5.556s, 5.052s, 504.002ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  503.047ms, 504.972ms, 504.667ms, 506.893ms, 507.067ms, 507.368ms, 507.528ms
 Bytes In      [total, mean]                     101, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -529,9 +528,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=10
 
-Requests      [total, rate, throughput]         101, 19.83, 18.04
-Duration      [total, attack, wait]             5.6s, 5.093s, 507.11ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.819ms, 509.146ms, 508.484ms, 513.261ms, 516.037ms, 516.253ms, 516.293ms
+Requests      [total, rate, throughput]         101, 19.95, 18.15
+Duration      [total, attack, wait]             5.565s, 5.062s, 503.433ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  503.433ms, 505.965ms, 505.264ms, 508.928ms, 511.788ms, 511.997ms, 512.047ms
 Bytes In      [total, mean]                     1010, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -541,9 +540,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=100
 
-Requests      [total, rate, throughput]         101, 19.93, 18.12
-Duration      [total, attack, wait]             5.574s, 5.067s, 506.75ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  504.124ms, 506.544ms, 505.436ms, 510.833ms, 511.049ms, 511.276ms, 511.373ms
+Requests      [total, rate, throughput]         101, 19.95, 18.15
+Duration      [total, attack, wait]             5.564s, 5.061s, 502.872ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.872ms, 505.819ms, 505.848ms, 507.884ms, 508.343ms, 508.67ms, 508.774ms
 Bytes In      [total, mean]                     10100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -553,9 +552,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=1000
 
-Requests      [total, rate, throughput]         101, 19.87, 18.06
-Duration      [total, attack, wait]             5.592s, 5.082s, 509.638ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.457ms, 508.16ms, 508.098ms, 510.206ms, 511.406ms, 511.636ms, 511.65ms
+Requests      [total, rate, throughput]         101, 19.97, 18.16
+Duration      [total, attack, wait]             5.561s, 5.059s, 502.276ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.273ms, 505.536ms, 505.258ms, 508.086ms, 508.369ms, 508.975ms, 509.488ms
 Bytes In      [total, mean]                     101000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -565,9 +564,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=10000
 
-Requests      [total, rate, throughput]         101, 19.84, 18.04
-Duration      [total, attack, wait]             5.6s, 5.092s, 507.774ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.389ms, 509.208ms, 508.534ms, 513.206ms, 513.492ms, 514.362ms, 514.411ms
+Requests      [total, rate, throughput]         101, 19.90, 18.11
+Duration      [total, attack, wait]             5.578s, 5.076s, 502.732ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.732ms, 507.279ms, 507.441ms, 508.696ms, 508.775ms, 509.164ms, 509.177ms
 Bytes In      [total, mean]                     1010000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -577,9 +576,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=500ms response_size=100000
 
-Requests      [total, rate, throughput]         101, 19.50, 17.76
-Duration      [total, attack, wait]             5.687s, 5.179s, 508.807ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  506.695ms, 517.807ms, 517.385ms, 526.384ms, 526.94ms, 530.119ms, 531.926ms
+Requests      [total, rate, throughput]         101, 19.53, 17.79
+Duration      [total, attack, wait]             5.678s, 5.173s, 505.745ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  505.745ms, 517.132ms, 517.728ms, 522.146ms, 523.247ms, 525.786ms, 528.06ms
 Bytes In      [total, mean]                     10100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -589,9 +588,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=0
 
-Requests      [total, rate, throughput]         51, 10.13, 8.44
-Duration      [total, attack, wait]             6.042s, 5.035s, 1.007s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.007s, 1.005s, 1.01s, 1.011s, 1.011s, 1.011s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.036s, 5.033s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.006s, 1.006s, 1.009s, 1.009s, 1.009s, 1.009s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -601,9 +600,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=1
 
-Requests      [total, rate, throughput]         51, 10.12, 8.44
-Duration      [total, attack, wait]             6.046s, 5.041s, 1.006s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.008s, 1.007s, 1.014s, 1.014s, 1.015s, 1.015s
+Requests      [total, rate, throughput]         51, 10.14, 8.45
+Duration      [total, attack, wait]             6.033s, 5.031s, 1.002s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.006s, 1.006s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     51, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -613,9 +612,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=10
 
-Requests      [total, rate, throughput]         51, 10.13, 8.44
-Duration      [total, attack, wait]             6.041s, 5.035s, 1.006s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.007s, 1.007s, 1.01s, 1.01s, 1.01s, 1.01s
+Requests      [total, rate, throughput]         51, 10.14, 8.45
+Duration      [total, attack, wait]             6.035s, 5.029s, 1.006s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.006s, 1.005s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -625,9 +624,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=100
 
-Requests      [total, rate, throughput]         51, 10.12, 8.44
-Duration      [total, attack, wait]             6.043s, 5.038s, 1.005s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.007s, 1.008s, 1.008s, 1.008s, 1.009s, 1.009s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.039s, 5.033s, 1.006s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.006s, 1.006s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     5100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -637,9 +636,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=1000
 
-Requests      [total, rate, throughput]         51, 10.13, 8.44
-Duration      [total, attack, wait]             6.043s, 5.034s, 1.009s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.008s, 1.007s, 1.013s, 1.018s, 1.018s, 1.018s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.036s, 5.033s, 1.003s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.006s, 1.006s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     51000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -649,9 +648,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=10000
 
-Requests      [total, rate, throughput]         51, 10.11, 8.43
-Duration      [total, attack, wait]             6.049s, 5.046s, 1.004s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.009s, 1.01s, 1.012s, 1.012s, 1.012s, 1.012s
+Requests      [total, rate, throughput]         51, 10.10, 8.42
+Duration      [total, attack, wait]             6.057s, 5.051s, 1.006s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.01s, 1.01s, 1.015s, 1.016s, 1.016s, 1.016s
 Bytes In      [total, mean]                     510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -661,9 +660,9 @@ Error Set:
 
 Running benchmark for pyvoy with sleep=1000ms response_size=100000
 
-Requests      [total, rate, throughput]         51, 10.03, 8.37
-Duration      [total, attack, wait]             6.096s, 5.084s, 1.012s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.009s, 1.017s, 1.016s, 1.024s, 1.024s, 1.033s, 1.033s
+Requests      [total, rate, throughput]         51, 9.99, 8.32
+Duration      [total, attack, wait]             6.129s, 5.107s, 1.022s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.008s, 1.022s, 1.023s, 1.031s, 1.032s, 1.033s, 1.033s
 Bytes In      [total, mean]                     5100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -673,159 +672,146 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=0ms response_size=0
 
-Requests      [total, rate, throughput]         4030, 726.11, 720.24
-Duration      [total, attack, wait]             5.555s, 5.55s, 5.02ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  625.166µs, 13.766ms, 1.198ms, 1.374ms, 1.46ms, 2.334ms, 5.005s
+Requests      [total, rate, throughput]         10041, 1562.06, 1551.93
+Duration      [total, attack, wait]             6.433s, 6.428s, 4.587ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  610.833µs, 6.39ms, 1.268ms, 1.467ms, 1.551ms, 2.117ms, 5.006s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.28%
-Status Codes  [code:count]                      0:29  200:4001
+Success       [ratio]                           99.42%
+Status Codes  [code:count]                      0:58  200:9983
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2011, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2015, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2013, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=1
 
-Requests      [total, rate, throughput]         8053, 1327.90, 1316.90
-Duration      [total, attack, wait]             6.07s, 6.064s, 5.121ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  668.375µs, 7.527ms, 1.278ms, 1.427ms, 1.519ms, 2.013ms, 5.005s
-Bytes In      [total, mean]                     7993, 0.99
+Requests      [total, rate, throughput]         1011, 196.76, 194.72
+Duration      [total, attack, wait]             5.141s, 5.138s, 2.568ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.043ms, 50.818ms, 1.28ms, 1.488ms, 1.63ms, 2.19s, 5.004s
+Bytes In      [total, mean]                     1001, 0.99
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.25%
-Status Codes  [code:count]                      0:60  200:7993
+Success       [ratio]                           99.01%
+Status Codes  [code:count]                      0:10  200:1001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2015, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2013, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=10
 
-Requests      [total, rate, throughput]         3029, 560.80, 555.29
-Duration      [total, attack, wait]             5.404s, 5.401s, 3.138ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  675.333µs, 17.827ms, 1.274ms, 1.434ms, 1.524ms, 2.58ms, 5.003s
-Bytes In      [total, mean]                     30010, 9.91
+Requests      [total, rate, throughput]         1011, 196.59, 194.47
+Duration      [total, attack, wait]             5.147s, 5.143s, 4.71ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.142ms, 50.868ms, 1.308ms, 1.653ms, 1.987ms, 2.19s, 5.004s
+Bytes In      [total, mean]                     10010, 9.90
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.08%
-Status Codes  [code:count]                      0:28  200:3001
+Success       [ratio]                           99.01%
+Status Codes  [code:count]                      0:10  200:1001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=100
 
-Requests      [total, rate, throughput]         15071, 2153.45, 2139.41
-Duration      [total, attack, wait]             7.004s, 6.999s, 5.27ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  528.459µs, 4.641ms, 1.289ms, 1.464ms, 1.562ms, 2.016ms, 5.009s
-Bytes In      [total, mean]                     1498400, 99.42
+Requests      [total, rate, throughput]         2006, 379.56, 376.69
+Duration      [total, attack, wait]             5.288s, 5.285s, 3.085ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  539.875µs, 26.345ms, 1.352ms, 1.622ms, 1.733ms, 2.873ms, 5.004s
+Bytes In      [total, mean]                     199200, 99.30
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.42%
-Status Codes  [code:count]                      0:87  200:14984
+Success       [ratio]                           99.30%
+Status Codes  [code:count]                      0:14  200:1992
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2011, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=1000
 
-Requests      [total, rate, throughput]         3011, 554.25, 550.44
-Duration      [total, attack, wait]             5.436s, 5.433s, 3.011ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  623.792µs, 18.041ms, 1.382ms, 1.625ms, 1.725ms, 3.055ms, 5.005s
-Bytes In      [total, mean]                     2992000, 993.69
+Requests      [total, rate, throughput]         4011, 720.33, 715.75
+Duration      [total, attack, wait]             5.572s, 5.568s, 3.451ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  742.208µs, 13.88ms, 1.384ms, 1.649ms, 1.737ms, 2.203ms, 5.003s
+Bytes In      [total, mean]                     3988000, 994.27
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.37%
-Status Codes  [code:count]                      0:19  200:2992
+Success       [ratio]                           99.43%
+Status Codes  [code:count]                      0:23  200:3988
 Error Set:
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2011, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=10000
 
-Requests      [total, rate, throughput]         6014, 1004.90, 997.59
-Duration      [total, attack, wait]             5.989s, 5.985s, 4.771ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  646.25µs, 9.945ms, 1.604ms, 1.865ms, 1.997ms, 2.676ms, 5.006s
-Bytes In      [total, mean]                     59750000, 9935.15
+Requests      [total, rate, throughput]         16041, 2072.16, 2060.12
+Duration      [total, attack, wait]             7.745s, 7.741s, 3.515ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  677.833µs, 4.82ms, 1.678ms, 1.969ms, 2.099ms, 2.653ms, 5.005s
+Bytes In      [total, mean]                     159550000, 9946.39
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.35%
-Status Codes  [code:count]                      0:39  200:5975
+Success       [ratio]                           99.46%
+Status Codes  [code:count]                      0:86  200:15955
 Error Set:
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=0ms response_size=100000
 
-Requests      [total, rate, throughput]         13139, 2627.27, 2606.06
-Duration      [total, attack, wait]             5.003s, 5.001s, 1.95ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.159ms, 3.69ms, 3.646ms, 4.255ms, 4.652ms, 5.82ms, 8.364ms
-Bytes In      [total, mean]                     1303800000, 99231.30
+Requests      [total, rate, throughput]         4013, 609.34, 603.93
+Duration      [total, attack, wait]             6.59s, 6.586s, 4.338ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.192ms, 16.299ms, 3.823ms, 4.461ms, 4.688ms, 5.251ms, 5.006s
+Bytes In      [total, mean]                     398000000, 99177.67
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.23%
-Status Codes  [code:count]                      0:101  200:13038
+Success       [ratio]                           99.18%
+Status Codes  [code:count]                      0:33  200:3980
 Error Set:
-http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
-http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
-http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2015, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2013, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
+http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=0
 
-Requests      [total, rate, throughput]         5020, 823.50, 815.63
-Duration      [total, attack, wait]             6.103s, 6.096s, 7.297ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  565.75µs, 12.139ms, 2.312ms, 2.454ms, 2.525ms, 3.033ms, 5.007s
+Requests      [total, rate, throughput]         1011, 192.18, 190.07
+Duration      [total, attack, wait]             5.266s, 5.261s, 5.672ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.217ms, 52.031ms, 2.483ms, 2.684ms, 2.787ms, 2.192s, 5.006s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.16%
-Status Codes  [code:count]                      0:42  200:4978
+Success       [ratio]                           99.01%
+Status Codes  [code:count]                      0:10  200:1001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2013, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2015, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=1
 
-Requests      [total, rate, throughput]         7032, 1059.74, 1049.80
-Duration      [total, attack, wait]             6.64s, 6.636s, 4.748ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  525.5µs, 9.433ms, 2.438ms, 2.627ms, 2.702ms, 3.515ms, 5.009s
-Bytes In      [total, mean]                     6971, 0.99
+Requests      [total, rate, throughput]         2020, 364.12, 360.28
+Duration      [total, attack, wait]             5.554s, 5.548s, 6.294ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  714.041µs, 27.461ms, 2.582ms, 2.89ms, 3.709ms, 4.688ms, 5.005s
+Bytes In      [total, mean]                     2001, 0.99
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.13%
-Status Codes  [code:count]                      0:61  200:6971
+Success       [ratio]                           99.06%
+Status Codes  [code:count]                      0:19  200:2001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2015, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=10
 
-Requests      [total, rate, throughput]         1011, 191.57, 189.17
-Duration      [total, attack, wait]             5.292s, 5.277s, 14.056ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  2.152ms, 52.202ms, 2.634ms, 2.92ms, 3.043ms, 2.195s, 5.005s
+Requests      [total, rate, throughput]         1011, 191.78, 189.44
+Duration      [total, attack, wait]             5.284s, 5.272s, 12.357ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.312ms, 52.147ms, 2.612ms, 2.781ms, 2.839ms, 2.194s, 5.006s
 Bytes In      [total, mean]                     10010, 9.90
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -836,65 +822,64 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=1ms response_size=100
 
-Requests      [total, rate, throughput]         3015, 515.93, 510.93
-Duration      [total, attack, wait]             5.848s, 5.844s, 4.419ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  599.291µs, 19.377ms, 2.768ms, 3.309ms, 3.475ms, 3.929ms, 5.01s
-Bytes In      [total, mean]                     298800, 99.10
+Requests      [total, rate, throughput]         2020, 363.07, 359.28
+Duration      [total, attack, wait]             5.569s, 5.564s, 5.825ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  768.583µs, 27.539ms, 2.696ms, 2.957ms, 3.337ms, 4.919ms, 5.007s
+Bytes In      [total, mean]                     200100, 99.06
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.10%
-Status Codes  [code:count]                      0:27  200:2988
+Success       [ratio]                           99.06%
+Status Codes  [code:count]                      0:19  200:2001
 Error Set:
 Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2005, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=1000
 
-Requests      [total, rate, throughput]         3013, 515.64, 510.51
-Duration      [total, attack, wait]             5.847s, 5.843s, 3.838ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  725.667µs, 19.391ms, 2.698ms, 3.43ms, 4.188ms, 4.893ms, 5.012s
-Bytes In      [total, mean]                     2985000, 990.71
+Requests      [total, rate, throughput]         1011, 191.10, 189.03
+Duration      [total, attack, wait]             5.295s, 5.29s, 5.125ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.374ms, 52.33ms, 2.772ms, 3.028ms, 3.193ms, 2.194s, 5.009s
+Bytes In      [total, mean]                     1001000, 990.11
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.07%
-Status Codes  [code:count]                      0:28  200:2985
+Success       [ratio]                           99.01%
+Status Codes  [code:count]                      0:10  200:1001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2017, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=10000
 
-Requests      [total, rate, throughput]         1003, 191.36, 188.84
-Duration      [total, attack, wait]             5.258s, 5.241s, 17.036ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.646ms, 52.271ms, 2.314ms, 2.784ms, 3.166ms, 2.301s, 5.006s
-Bytes In      [total, mean]                     9930000, 9900.30
+Requests      [total, rate, throughput]         2004, 366.47, 362.94
+Duration      [total, attack, wait]             5.475s, 5.468s, 6.316ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  615µs, 27.288ms, 2.205ms, 2.813ms, 3.114ms, 4.971ms, 5.006s
+Bytes In      [total, mean]                     19870000, 9915.17
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.00%
-Status Codes  [code:count]                      0:10  200:993
+Success       [ratio]                           99.15%
+Status Codes  [code:count]                      0:17  200:1987
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=1ms response_size=100000
 
-Requests      [total, rate, throughput]         1005, 182.36, 180.30
-Duration      [total, attack, wait]             5.519s, 5.511s, 7.552ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  2.082ms, 54.509ms, 4.7ms, 5.46ms, 6.438ms, 2.275s, 5.005s
-Bytes In      [total, mean]                     99500000, 99004.98
+Requests      [total, rate, throughput]         2010, 338.88, 335.88
+Duration      [total, attack, wait]             5.937s, 5.931s, 5.317ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.922ms, 29.375ms, 4.44ms, 5.284ms, 5.699ms, 6.827ms, 5.005s
+Bytes In      [total, mean]                     199400000, 99203.98
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.00%
-Status Codes  [code:count]                      0:10  200:995
+Success       [ratio]                           99.20%
+Status Codes  [code:count]                      0:16  200:1994
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2013, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=10ms response_size=0
 
-Requests      [total, rate, throughput]         1011, 150.87, 148.99
-Duration      [total, attack, wait]             6.719s, 6.701s, 17.801ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  12.282ms, 66.239ms, 17.01ms, 19.075ms, 20.629ms, 2.209s, 5.018s
+Requests      [total, rate, throughput]         1011, 149.85, 147.84
+Duration      [total, attack, wait]             6.771s, 6.747s, 24.047ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  12.669ms, 66.694ms, 17.43ms, 20.241ms, 21.676ms, 2.21s, 5.025s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -905,9 +890,9 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=10ms response_size=1
 
-Requests      [total, rate, throughput]         1011, 149.82, 147.99
-Duration      [total, attack, wait]             6.764s, 6.748s, 15.648ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  12.256ms, 66.728ms, 17.179ms, 20.6ms, 22.135ms, 2.679s, 5.022s
+Requests      [total, rate, throughput]         1011, 150.18, 148.28
+Duration      [total, attack, wait]             6.751s, 6.732s, 18.788ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  12.027ms, 66.54ms, 17.223ms, 19.482ms, 20.32ms, 2.212s, 5.026s
 Bytes In      [total, mean]                     1001, 0.99
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -918,9 +903,9 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=10ms response_size=10
 
-Requests      [total, rate, throughput]         1011, 148.52, 146.74
-Duration      [total, attack, wait]             6.822s, 6.807s, 14.577ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  12.091ms, 67.308ms, 17.69ms, 21.189ms, 23.32ms, 2.212s, 5.023s
+Requests      [total, rate, throughput]         1011, 149.86, 148.01
+Duration      [total, attack, wait]             6.763s, 6.746s, 16.714ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  12.737ms, 66.712ms, 17.488ms, 19.398ms, 21.044ms, 2.21s, 5.022s
 Bytes In      [total, mean]                     10010, 9.90
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -931,9 +916,9 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=10ms response_size=100
 
-Requests      [total, rate, throughput]         1011, 149.14, 147.27
-Duration      [total, attack, wait]             6.797s, 6.779s, 18.059ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.675ms, 67.036ms, 17.633ms, 20.618ms, 23.329ms, 2.208s, 5.019s
+Requests      [total, rate, throughput]         1011, 150.18, 148.31
+Duration      [total, attack, wait]             6.749s, 6.732s, 17.218ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  13.182ms, 66.573ms, 16.924ms, 20.66ms, 22.888ms, 2.678s, 5.021s
 Bytes In      [total, mean]                     100100, 99.01
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -944,9 +929,9 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         1011, 148.78, 146.94
-Duration      [total, attack, wait]             6.812s, 6.795s, 17.312ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  12.401ms, 67.199ms, 17.644ms, 21.632ms, 23.505ms, 2.213s, 5.019s
+Requests      [total, rate, throughput]         1011, 150.98, 149.20
+Duration      [total, attack, wait]             6.709s, 6.696s, 13.094ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.983ms, 66.209ms, 16.884ms, 19.179ms, 20.055ms, 2.801s, 5.019s
 Bytes In      [total, mean]                     1001000, 990.11
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
@@ -957,98 +942,96 @@ Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the
 
 Running benchmark for hypercorn with sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         2740, 547.62, 544.11
-Duration      [total, attack, wait]             5.019s, 5.004s, 15.675ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.866ms, 18.195ms, 17.997ms, 21.521ms, 23.068ms, 26.661ms, 32.339ms
-Bytes In      [total, mean]                     27310000, 9967.15
+Requests      [total, rate, throughput]         2012, 236.89, 234.35
+Duration      [total, attack, wait]             8.509s, 8.493s, 15.295ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.975ms, 42.106ms, 17.144ms, 20.31ms, 22.824ms, 29.997ms, 5.02s
+Bytes In      [total, mean]                     19940000, 9910.54
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.67%
-Status Codes  [code:count]                      0:9  200:2731
+Success       [ratio]                           99.11%
+Status Codes  [code:count]                      0:18  200:1994
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2007, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=10ms response_size=100000
 
-Requests      [total, rate, throughput]         2907, 580.97, 577.21
-Duration      [total, attack, wait]             5.017s, 5.004s, 13.515ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  971µs, 16.932ms, 17.109ms, 17.74ms, 17.977ms, 20.384ms, 22.13ms
-Bytes In      [total, mean]                     289600000, 99621.60
+Requests      [total, rate, throughput]         1011, 150.40, 148.45
+Duration      [total, attack, wait]             6.743s, 6.722s, 20.909ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  13.448ms, 66.219ms, 16.643ms, 18.218ms, 19.076ms, 2.207s, 5.019s
+Bytes In      [total, mean]                     100100000, 99010.88
 Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           99.62%
-Status Codes  [code:count]                      0:11  200:2896
+Success       [ratio]                           99.01%
+Status Codes  [code:count]                      0:10  200:1001
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2009, ErrCode=PROTOCOL_ERROR, debug=""
-http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=PROTOCOL_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2019, ErrCode=NO_ERROR, debug=""
 
 
 Running benchmark for hypercorn with sleep=50ms response_size=0
 
-Requests      [total, rate, throughput]         841, 167.79, 165.99
-Duration      [total, attack, wait]             5.067s, 5.012s, 54.464ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  53.01ms, 59.59ms, 59.214ms, 62.794ms, 65.723ms, 74.524ms, 74.751ms
+Requests      [total, rate, throughput]         861, 170.80, 168.92
+Duration      [total, attack, wait]             5.097s, 5.041s, 55.889ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  53.711ms, 58.512ms, 58.468ms, 61.192ms, 62.843ms, 65.029ms, 65.373ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:841
+Status Codes  [code:count]                      200:861
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=50ms response_size=1
 
-Requests      [total, rate, throughput]         871, 172.82, 170.87
-Duration      [total, attack, wait]             5.097s, 5.04s, 57.377ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.879ms, 57.89ms, 57.925ms, 60.405ms, 60.93ms, 62.703ms, 63.157ms
-Bytes In      [total, mean]                     871, 1.00
+Requests      [total, rate, throughput]         851, 169.53, 167.79
+Duration      [total, attack, wait]             5.072s, 5.02s, 52.237ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  52.237ms, 59.002ms, 58.501ms, 63.677ms, 65.488ms, 67.884ms, 68.111ms
+Bytes In      [total, mean]                     851, 1.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:851
+Error Set:
+
+
+Running benchmark for hypercorn with sleep=50ms response_size=10
+
+Requests      [total, rate, throughput]         871, 173.30, 171.31
+Duration      [total, attack, wait]             5.084s, 5.026s, 58.366ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  52.991ms, 57.724ms, 57.304ms, 60.421ms, 61.669ms, 66.439ms, 67.223ms
+Bytes In      [total, mean]                     8710, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
 Status Codes  [code:count]                      200:871
 Error Set:
 
 
-Running benchmark for hypercorn with sleep=50ms response_size=10
-
-Requests      [total, rate, throughput]         861, 172.18, 170.33
-Duration      [total, attack, wait]             5.055s, 5.001s, 54.361ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  53.276ms, 58.1ms, 57.578ms, 61.259ms, 63.324ms, 68.381ms, 69.204ms
-Bytes In      [total, mean]                     8610, 10.00
-Bytes Out     [total, mean]                     0, 0.00
-Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:861
-Error Set:
-
-
 Running benchmark for hypercorn with sleep=50ms response_size=100
 
-Requests      [total, rate, throughput]         861, 170.97, 169.15
-Duration      [total, attack, wait]             5.09s, 5.036s, 54.189ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  52.859ms, 58.498ms, 58.215ms, 61.359ms, 63.869ms, 67.864ms, 68.327ms
-Bytes In      [total, mean]                     86100, 100.00
+Requests      [total, rate, throughput]         871, 173.99, 172.09
+Duration      [total, attack, wait]             5.061s, 5.006s, 55.264ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  53.971ms, 57.482ms, 57.161ms, 59.858ms, 60.912ms, 64.49ms, 66.107ms
+Bytes In      [total, mean]                     87100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:861
+Status Codes  [code:count]                      200:871
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=50ms response_size=1000
 
-Requests      [total, rate, throughput]         841, 168.03, 166.20
-Duration      [total, attack, wait]             5.06s, 5.005s, 55.031ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.922ms, 59.545ms, 59.038ms, 62.522ms, 66.119ms, 73.146ms, 74.568ms
-Bytes In      [total, mean]                     841000, 1000.00
+Requests      [total, rate, throughput]         851, 169.59, 167.79
+Duration      [total, attack, wait]             5.072s, 5.018s, 54.013ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  53.819ms, 58.916ms, 58.716ms, 61.272ms, 62.913ms, 73.268ms, 74.328ms
+Bytes In      [total, mean]                     851000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:841
+Status Codes  [code:count]                      200:851
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=50ms response_size=10000
 
-Requests      [total, rate, throughput]         841, 166.38, 164.61
-Duration      [total, attack, wait]             5.109s, 5.055s, 54.23ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  54.044ms, 60.052ms, 59.406ms, 63.467ms, 66.591ms, 80.18ms, 81.669ms
+Requests      [total, rate, throughput]         841, 166.72, 164.92
+Duration      [total, attack, wait]             5.099s, 5.045s, 54.866ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  52.058ms, 59.96ms, 59.079ms, 63.99ms, 67.165ms, 88.022ms, 89.321ms
 Bytes In      [total, mean]                     8410000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1058,21 +1041,21 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=50ms response_size=100000
 
-Requests      [total, rate, throughput]         791, 156.73, 155.10
-Duration      [total, attack, wait]             5.1s, 5.047s, 53.084ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  53.084ms, 63.48ms, 63.462ms, 67.754ms, 70.058ms, 74.456ms, 75.575ms
-Bytes In      [total, mean]                     79100000, 100000.00
+Requests      [total, rate, throughput]         802, 160.40, 158.56
+Duration      [total, attack, wait]             5.058s, 5s, 57.839ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  55.607ms, 62.076ms, 62.145ms, 64.903ms, 65.559ms, 74.672ms, 76.197ms
+Bytes In      [total, mean]                     80200000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:791
+Status Codes  [code:count]                      200:802
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=100ms response_size=0
 
-Requests      [total, rate, throughput]         471, 93.15, 91.27
-Duration      [total, attack, wait]             5.161s, 5.056s, 104.436ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  104.436ms, 107.495ms, 106.699ms, 112.084ms, 113.705ms, 118.067ms, 118.24ms
+Requests      [total, rate, throughput]         471, 93.75, 91.87
+Duration      [total, attack, wait]             5.127s, 5.024s, 102.984ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.984ms, 106.805ms, 106.572ms, 108.885ms, 109.501ms, 113.053ms, 113.188ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1082,9 +1065,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=100ms response_size=1
 
-Requests      [total, rate, throughput]         471, 93.30, 91.40
-Duration      [total, attack, wait]             5.153s, 5.048s, 104.943ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.897ms, 107.371ms, 106.732ms, 110.898ms, 111.735ms, 112.528ms, 113.677ms
+Requests      [total, rate, throughput]         471, 93.19, 91.30
+Duration      [total, attack, wait]             5.159s, 5.054s, 104.23ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  104.23ms, 107.478ms, 107.39ms, 108.942ms, 110.162ms, 112.538ms, 112.734ms
 Bytes In      [total, mean]                     471, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1094,33 +1077,33 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=100ms response_size=10
 
-Requests      [total, rate, throughput]         461, 91.47, 89.61
-Duration      [total, attack, wait]             5.144s, 5.04s, 104.594ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.949ms, 109.509ms, 109.446ms, 112.027ms, 114.29ms, 115.449ms, 115.615ms
-Bytes In      [total, mean]                     4610, 10.00
+Requests      [total, rate, throughput]         471, 92.99, 91.12
+Duration      [total, attack, wait]             5.169s, 5.065s, 104.087ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  103.091ms, 107.713ms, 107.625ms, 110.401ms, 111.231ms, 113.557ms, 113.864ms
+Bytes In      [total, mean]                     4710, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:461
+Status Codes  [code:count]                      200:471
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=100ms response_size=100
 
-Requests      [total, rate, throughput]         461, 91.57, 89.71
-Duration      [total, attack, wait]             5.139s, 5.034s, 104.567ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  104.567ms, 109.36ms, 108.478ms, 113.254ms, 118.298ms, 121.387ms, 122.663ms
-Bytes In      [total, mean]                     46100, 100.00
+Requests      [total, rate, throughput]         471, 92.32, 90.31
+Duration      [total, attack, wait]             5.215s, 5.102s, 113.478ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  104.1ms, 108.491ms, 108.305ms, 110.987ms, 112.22ms, 113.966ms, 114.34ms
+Bytes In      [total, mean]                     47100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:461
+Status Codes  [code:count]                      200:471
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=100ms response_size=1000
 
-Requests      [total, rate, throughput]         461, 91.37, 89.39
-Duration      [total, attack, wait]             5.157s, 5.046s, 111.409ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  104.516ms, 109.663ms, 109.362ms, 111.588ms, 113.197ms, 123.944ms, 124.408ms
+Requests      [total, rate, throughput]         461, 92.08, 90.22
+Duration      [total, attack, wait]             5.109s, 5.007s, 102.913ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.913ms, 108.769ms, 108.704ms, 110.67ms, 112.469ms, 113.537ms, 114.837ms
 Bytes In      [total, mean]                     461000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1130,45 +1113,45 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=100ms response_size=10000
 
-Requests      [total, rate, throughput]         471, 93.13, 91.21
-Duration      [total, attack, wait]             5.164s, 5.058s, 106.217ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  103.446ms, 107.473ms, 106.987ms, 109.972ms, 112.474ms, 115.639ms, 116.674ms
-Bytes In      [total, mean]                     4710000, 10000.00
+Requests      [total, rate, throughput]         461, 92.04, 90.17
+Duration      [total, attack, wait]             5.112s, 5.008s, 103.845ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.382ms, 108.738ms, 108.504ms, 112.561ms, 114.319ms, 115.666ms, 116.904ms
+Bytes In      [total, mean]                     4610000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:461
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=100ms response_size=100000
 
-Requests      [total, rate, throughput]         441, 88.02, 86.14
-Duration      [total, attack, wait]             5.12s, 5.01s, 109.172ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  107.491ms, 113.45ms, 113.692ms, 117.459ms, 118.207ms, 121.651ms, 122.302ms
-Bytes In      [total, mean]                     44100000, 100000.00
+Requests      [total, rate, throughput]         463, 90.79, 88.91
+Duration      [total, attack, wait]             5.208s, 5.099s, 108.039ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.453ms, 110.021ms, 110.215ms, 113.98ms, 115.745ms, 119.199ms, 120.057ms
+Bytes In      [total, mean]                     46300000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:441
+Status Codes  [code:count]                      200:463
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=200ms response_size=0
 
-Requests      [total, rate, throughput]         241, 48.19, 46.17
-Duration      [total, attack, wait]             5.22s, 5.001s, 218.64ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  205.292ms, 208.342ms, 208.17ms, 210.267ms, 210.826ms, 216.587ms, 218.64ms
+Requests      [total, rate, throughput]         251, 48.39, 46.55
+Duration      [total, attack, wait]             5.393s, 5.186s, 206.01ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  204.329ms, 207.363ms, 206.801ms, 209.478ms, 209.964ms, 217.125ms, 217.251ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=200ms response_size=1
 
-Requests      [total, rate, throughput]         241, 48.05, 46.17
-Duration      [total, attack, wait]             5.22s, 5.015s, 204.351ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  204.351ms, 208.923ms, 208.64ms, 212.699ms, 213.282ms, 215.501ms, 215.541ms
+Requests      [total, rate, throughput]         241, 48.16, 46.26
+Duration      [total, attack, wait]             5.21s, 5.004s, 205.387ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  204.492ms, 208.418ms, 207.774ms, 210.535ms, 213.938ms, 220.762ms, 221.013ms
 Bytes In      [total, mean]                     241, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1178,33 +1161,33 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=200ms response_size=10
 
-Requests      [total, rate, throughput]         241, 47.96, 46.06
-Duration      [total, attack, wait]             5.232s, 5.026s, 206.711ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  206.471ms, 209.34ms, 209.011ms, 210.828ms, 215.217ms, 215.888ms, 216.065ms
-Bytes In      [total, mean]                     2410, 10.00
+Requests      [total, rate, throughput]         251, 48.25, 46.42
+Duration      [total, attack, wait]             5.408s, 5.202s, 205.577ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  205.421ms, 208.008ms, 208.052ms, 209.38ms, 210.056ms, 210.268ms, 210.307ms
+Bytes In      [total, mean]                     2510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=200ms response_size=100
 
-Requests      [total, rate, throughput]         241, 48.12, 46.25
-Duration      [total, attack, wait]             5.211s, 5.008s, 203.214ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  203.214ms, 208.611ms, 208.844ms, 210.921ms, 211.692ms, 214.419ms, 214.749ms
-Bytes In      [total, mean]                     24100, 100.00
+Requests      [total, rate, throughput]         251, 48.24, 46.41
+Duration      [total, attack, wait]             5.409s, 5.204s, 205.238ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  205.091ms, 208.071ms, 207.538ms, 211.227ms, 211.907ms, 213.394ms, 213.521ms
+Bytes In      [total, mean]                     25100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=200ms response_size=1000
 
-Requests      [total, rate, throughput]         251, 48.22, 46.39
-Duration      [total, attack, wait]             5.41s, 5.205s, 204.94ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  204.739ms, 208.17ms, 207.513ms, 212.68ms, 214.68ms, 215.475ms, 215.825ms
+Requests      [total, rate, throughput]         251, 48.42, 46.57
+Duration      [total, attack, wait]             5.39s, 5.184s, 205.752ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  202.95ms, 207.29ms, 206.823ms, 210.308ms, 211.617ms, 212.891ms, 214.215ms
 Bytes In      [total, mean]                     251000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1214,21 +1197,21 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=200ms response_size=10000
 
-Requests      [total, rate, throughput]         241, 47.91, 46.04
-Duration      [total, attack, wait]             5.235s, 5.03s, 204.924ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  204.924ms, 209.519ms, 209.418ms, 212.242ms, 213.214ms, 214.451ms, 215.569ms
-Bytes In      [total, mean]                     2410000, 10000.00
+Requests      [total, rate, throughput]         251, 48.23, 46.36
+Duration      [total, attack, wait]             5.414s, 5.205s, 209.58ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  204.019ms, 208.085ms, 207.266ms, 211.882ms, 212.494ms, 218.281ms, 218.909ms
+Bytes In      [total, mean]                     2510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for hypercorn with sleep=200ms response_size=100000
 
-Requests      [total, rate, throughput]         241, 47.15, 45.31
-Duration      [total, attack, wait]             5.319s, 5.112s, 207.562ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  205.377ms, 212.612ms, 212.517ms, 216.813ms, 217.633ms, 218.871ms, 219.535ms
+Requests      [total, rate, throughput]         241, 47.38, 45.53
+Duration      [total, attack, wait]             5.294s, 5.087s, 206.777ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  206.035ms, 211.513ms, 211.101ms, 215.06ms, 216.117ms, 220.2ms, 221.075ms
 Bytes In      [total, mean]                     24100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1238,9 +1221,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=0
 
-Requests      [total, rate, throughput]         101, 19.86, 18.07
-Duration      [total, attack, wait]             5.59s, 5.086s, 504.501ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  504.501ms, 508.458ms, 508.43ms, 509.385ms, 510.37ms, 511.287ms, 511.312ms
+Requests      [total, rate, throughput]         101, 19.87, 18.07
+Duration      [total, attack, wait]             5.588s, 5.082s, 506.009ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  504.519ms, 508.1ms, 508.251ms, 510.923ms, 510.976ms, 511.283ms, 511.39ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1250,9 +1233,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=1
 
-Requests      [total, rate, throughput]         101, 19.86, 18.07
-Duration      [total, attack, wait]             5.589s, 5.087s, 502.636ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  502.636ms, 508.514ms, 508.408ms, 511.041ms, 511.698ms, 511.95ms, 511.975ms
+Requests      [total, rate, throughput]         101, 19.77, 17.96
+Duration      [total, attack, wait]             5.622s, 5.109s, 512.884ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  506.168ms, 510.895ms, 510.698ms, 514.142ms, 514.832ms, 515.175ms, 515.214ms
 Bytes In      [total, mean]                     101, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1262,9 +1245,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=10
 
-Requests      [total, rate, throughput]         101, 19.88, 18.08
-Duration      [total, attack, wait]             5.587s, 5.08s, 507.372ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.215ms, 507.946ms, 507.669ms, 510.344ms, 510.433ms, 510.51ms, 510.545ms
+Requests      [total, rate, throughput]         101, 19.92, 18.12
+Duration      [total, attack, wait]             5.574s, 5.071s, 503.296ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  503.296ms, 507.014ms, 506.736ms, 509.625ms, 509.757ms, 510.107ms, 510.344ms
 Bytes In      [total, mean]                     1010, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1274,9 +1257,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=100
 
-Requests      [total, rate, throughput]         101, 19.85, 18.06
-Duration      [total, attack, wait]             5.592s, 5.089s, 503.215ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  503.215ms, 508.821ms, 508.785ms, 511.502ms, 511.748ms, 511.901ms, 511.919ms
+Requests      [total, rate, throughput]         101, 19.95, 18.14
+Duration      [total, attack, wait]             5.569s, 5.064s, 505.109ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  504.499ms, 506.343ms, 506.042ms, 507.366ms, 507.458ms, 508.078ms, 508.439ms
 Bytes In      [total, mean]                     10100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1286,9 +1269,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=1000
 
-Requests      [total, rate, throughput]         101, 19.81, 18.02
-Duration      [total, attack, wait]             5.603s, 5.099s, 504.411ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  504.411ms, 509.804ms, 508.94ms, 514.814ms, 516.701ms, 516.808ms, 516.826ms
+Requests      [total, rate, throughput]         101, 19.89, 18.09
+Duration      [total, attack, wait]             5.584s, 5.077s, 506.398ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  505.322ms, 507.907ms, 507.406ms, 511.06ms, 513.917ms, 514.693ms, 515.367ms
 Bytes In      [total, mean]                     101000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1298,9 +1281,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=10000
 
-Requests      [total, rate, throughput]         101, 19.79, 18.00
-Duration      [total, attack, wait]             5.61s, 5.104s, 505.916ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  505.916ms, 510.422ms, 510.453ms, 512.569ms, 513.414ms, 514.677ms, 515.013ms
+Requests      [total, rate, throughput]         101, 19.86, 18.06
+Duration      [total, attack, wait]             5.594s, 5.086s, 508.003ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.664ms, 508.764ms, 508.834ms, 511.371ms, 511.63ms, 512.345ms, 512.55ms
 Bytes In      [total, mean]                     1010000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1310,9 +1293,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=500ms response_size=100000
 
-Requests      [total, rate, throughput]         101, 19.71, 17.94
-Duration      [total, attack, wait]             5.628s, 5.124s, 504.499ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  504.499ms, 511.832ms, 512.589ms, 514.836ms, 515.185ms, 515.746ms, 516.029ms
+Requests      [total, rate, throughput]         101, 19.68, 17.91
+Duration      [total, attack, wait]             5.638s, 5.132s, 505.704ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  505.704ms, 512.685ms, 512.349ms, 516.161ms, 516.387ms, 517.267ms, 517.541ms
 Bytes In      [total, mean]                     10100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1322,9 +1305,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=0
 
-Requests      [total, rate, throughput]         51, 10.13, 8.45
-Duration      [total, attack, wait]             6.038s, 5.035s, 1.003s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.007s, 1.007s, 1.008s, 1.008s, 1.008s, 1.008s
+Requests      [total, rate, throughput]         51, 10.14, 8.45
+Duration      [total, attack, wait]             6.034s, 5.029s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.006s, 1.006s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1334,9 +1317,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=1
 
-Requests      [total, rate, throughput]         51, 10.10, 8.41
-Duration      [total, attack, wait]             6.061s, 5.052s, 1.009s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.007s, 1.01s, 1.01s, 1.014s, 1.015s, 1.015s, 1.015s
+Requests      [total, rate, throughput]         51, 10.13, 8.44
+Duration      [total, attack, wait]             6.041s, 5.036s, 1.005s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.007s, 1.007s, 1.009s, 1.009s, 1.009s, 1.009s
 Bytes In      [total, mean]                     51, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1346,9 +1329,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=10
 
-Requests      [total, rate, throughput]         51, 10.11, 8.43
-Duration      [total, attack, wait]             6.047s, 5.043s, 1.004s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.008s, 1.008s, 1.012s, 1.012s, 1.013s, 1.013s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.035s, 5.032s, 1.003s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.006s, 1.006s, 1.008s, 1.009s, 1.009s, 1.009s
 Bytes In      [total, mean]                     510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1358,9 +1341,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=100
 
-Requests      [total, rate, throughput]         51, 10.08, 8.41
-Duration      [total, attack, wait]             6.062s, 5.057s, 1.005s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.005s, 1.011s, 1.012s, 1.016s, 1.017s, 1.017s, 1.017s
+Requests      [total, rate, throughput]         51, 10.12, 8.44
+Duration      [total, attack, wait]             6.042s, 5.038s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.008s, 1.006s, 1.013s, 1.013s, 1.013s, 1.013s
 Bytes In      [total, mean]                     5100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1370,9 +1353,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=1000
 
-Requests      [total, rate, throughput]         51, 10.12, 8.44
-Duration      [total, attack, wait]             6.046s, 5.042s, 1.004s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.008s, 1.008s, 1.01s, 1.01s, 1.011s, 1.011s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.037s, 5.034s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.007s, 1.007s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     51000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1382,9 +1365,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=10000
 
-Requests      [total, rate, throughput]         51, 10.12, 8.44
-Duration      [total, attack, wait]             6.041s, 5.038s, 1.004s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.007s, 1.007s, 1.009s, 1.009s, 1.01s, 1.01s
+Requests      [total, rate, throughput]         51, 10.11, 8.43
+Duration      [total, attack, wait]             6.05s, 5.046s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.009s, 1.009s, 1.011s, 1.012s, 1.013s, 1.013s
 Bytes In      [total, mean]                     510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1394,9 +1377,9 @@ Error Set:
 
 Running benchmark for hypercorn with sleep=1000ms response_size=100000
 
-Requests      [total, rate, throughput]         51, 10.07, 8.40
-Duration      [total, attack, wait]             6.071s, 5.064s, 1.007s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.007s, 1.012s, 1.013s, 1.016s, 1.016s, 1.016s, 1.016s
+Requests      [total, rate, throughput]         51, 10.09, 8.41
+Duration      [total, attack, wait]             6.067s, 5.056s, 1.01s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.008s, 1.011s, 1.011s, 1.014s, 1.015s, 1.015s, 1.015s
 Bytes In      [total, mean]                     5100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1406,285 +1389,285 @@ Error Set:
 
 Running benchmark for granian with sleep=0ms response_size=0
 
-Requests      [total, rate, throughput]         158623, 31724.77, 31723.59
-Duration      [total, attack, wait]             5s, 5s, 185.291µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  115.583µs, 303.132µs, 289.918µs, 371.417µs, 404.018µs, 513.438µs, 94.508ms
+Requests      [total, rate, throughput]         159934, 31986.96, 31985.44
+Duration      [total, attack, wait]             5s, 5s, 236.583µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  114µs, 301.048µs, 287.201µs, 365.968µs, 397.257µs, 510.696µs, 91.756ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:158623
+Status Codes  [code:count]                      200:159934
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=1
 
-Requests      [total, rate, throughput]         156641, 31327.75, 31326.80
-Duration      [total, attack, wait]             5s, 5s, 152.292µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  115.208µs, 307.61µs, 298.943µs, 384.518µs, 421.771µs, 550.677µs, 1.539ms
-Bytes In      [total, mean]                     156641, 1.00
+Requests      [total, rate, throughput]         158411, 31682.18, 31680.74
+Duration      [total, attack, wait]             5s, 5s, 227.042µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  122.125µs, 304.464µs, 295.573µs, 378.768µs, 415.013µs, 548.939µs, 4.461ms
+Bytes In      [total, mean]                     158411, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:156641
+Status Codes  [code:count]                      200:158411
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=10
 
-Requests      [total, rate, throughput]         155625, 31125.06, 31123.50
-Duration      [total, attack, wait]             5s, 5s, 249.958µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  125.417µs, 309.647µs, 301.243µs, 384.999µs, 421.986µs, 555.884µs, 1.447ms
-Bytes In      [total, mean]                     1556250, 10.00
+Requests      [total, rate, throughput]         147927, 29585.53, 29584.07
+Duration      [total, attack, wait]             5s, 5s, 248.125µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  129.083µs, 325.546µs, 312.333µs, 413.993µs, 463.563µs, 616.198µs, 6.595ms
+Bytes In      [total, mean]                     1479270, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:155625
+Status Codes  [code:count]                      200:147927
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=100
 
-Requests      [total, rate, throughput]         149983, 29996.55, 29995.04
-Duration      [total, attack, wait]             5s, 5s, 252.166µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  122µs, 321.636µs, 304.897µs, 395.528µs, 440.659µs, 601.64µs, 34.606ms
-Bytes In      [total, mean]                     14998300, 100.00
+Requests      [total, rate, throughput]         149438, 29887.51, 29886.05
+Duration      [total, attack, wait]             5s, 5s, 243.584µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  132.042µs, 322.475µs, 310.595µs, 408.677µs, 455.802µs, 603.531µs, 2.8ms
+Bytes In      [total, mean]                     14943800, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:149983
+Status Codes  [code:count]                      200:149438
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=1000
 
-Requests      [total, rate, throughput]         146463, 29291.70, 29290.62
-Duration      [total, attack, wait]             5s, 5s, 184.833µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  134.25µs, 329.838µs, 319.611µs, 413.117µs, 457.332µs, 599.217µs, 2.737ms
-Bytes In      [total, mean]                     146463000, 1000.00
+Requests      [total, rate, throughput]         145390, 29078.00, 29075.77
+Duration      [total, attack, wait]             5s, 5s, 383.042µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  137µs, 332.761µs, 318.654µs, 419.006µs, 473.347µs, 637.952µs, 10.007ms
+Bytes In      [total, mean]                     145390000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:146463
+Status Codes  [code:count]                      200:145390
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=10000
 
-Requests      [total, rate, throughput]         78845, 15769.16, 15768.18
-Duration      [total, attack, wait]             5s, 5s, 310.083µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  141.459µs, 623.505µs, 602.666µs, 884.714µs, 970.907µs, 1.136ms, 5.988ms
-Bytes In      [total, mean]                     788450000, 10000.00
+Requests      [total, rate, throughput]         77114, 15422.62, 15421.12
+Duration      [total, attack, wait]             5.001s, 5s, 484.916µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  171µs, 636.926µs, 615.683µs, 907.512µs, 992.533µs, 1.156ms, 3.426ms
+Bytes In      [total, mean]                     771140000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:78845
+Status Codes  [code:count]                      200:77114
 Error Set:
 
 
 Running benchmark for granian with sleep=0ms response_size=100000
 
-Requests      [total, rate, throughput]         24518, 4903.44, 4902.39
-Duration      [total, attack, wait]             5.001s, 5s, 1.074ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  251.916µs, 1.911ms, 1.828ms, 2.803ms, 3.133ms, 4.006ms, 6.889ms
-Bytes In      [total, mean]                     2451800000, 100000.00
+Requests      [total, rate, throughput]         23862, 4772.32, 4770.17
+Duration      [total, attack, wait]             5.002s, 5s, 2.256ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  242.958µs, 1.893ms, 1.812ms, 2.814ms, 3.147ms, 3.924ms, 7.389ms
+Bytes In      [total, mean]                     2386200000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:24518
+Status Codes  [code:count]                      200:23862
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=0
 
-Requests      [total, rate, throughput]         19309, 3860.98, 3859.72
-Duration      [total, attack, wait]             5.003s, 5.001s, 1.627ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  251.584µs, 2.509ms, 2.387ms, 3.276ms, 3.838ms, 6.769ms, 32.636ms
+Requests      [total, rate, throughput]         20875, 4174.47, 4173.04
+Duration      [total, attack, wait]             5.002s, 5.001s, 1.705ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  254.75µs, 2.319ms, 2.142ms, 3.063ms, 3.571ms, 6.827ms, 23.45ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:19309
+Status Codes  [code:count]                      200:20875
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=1
 
-Requests      [total, rate, throughput]         17974, 3593.61, 3592.24
-Duration      [total, attack, wait]             5.004s, 5.002s, 1.911ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  298.958µs, 2.698ms, 2.471ms, 3.506ms, 4.161ms, 9.496ms, 40.52ms
-Bytes In      [total, mean]                     17974, 1.00
+Requests      [total, rate, throughput]         21413, 4282.60, 4280.96
+Duration      [total, attack, wait]             5.002s, 5s, 1.914ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  302.625µs, 2.268ms, 2.108ms, 2.844ms, 3.411ms, 6.957ms, 17.296ms
+Bytes In      [total, mean]                     21413, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:17974
+Status Codes  [code:count]                      200:21413
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=10
 
-Requests      [total, rate, throughput]         18416, 3682.10, 3680.69
-Duration      [total, attack, wait]             5.003s, 5.001s, 1.924ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  275.458µs, 2.613ms, 2.463ms, 3.522ms, 4.228ms, 6.921ms, 34.119ms
-Bytes In      [total, mean]                     184160, 10.00
+Requests      [total, rate, throughput]         18965, 3792.26, 3784.72
+Duration      [total, attack, wait]             5.011s, 5.001s, 9.963ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  298.375µs, 2.552ms, 2.23ms, 3.662ms, 5.031ms, 8.91ms, 30.827ms
+Bytes In      [total, mean]                     189650, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:18416
+Status Codes  [code:count]                      200:18965
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=100
 
-Requests      [total, rate, throughput]         17701, 3535.30, 3534.05
-Duration      [total, attack, wait]             5.009s, 5.007s, 1.771ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  265.25µs, 2.735ms, 2.4ms, 3.731ms, 4.761ms, 9.984ms, 29.045ms
-Bytes In      [total, mean]                     1770100, 100.00
+Requests      [total, rate, throughput]         19212, 3841.91, 3838.91
+Duration      [total, attack, wait]             5.005s, 5.001s, 3.905ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  258.166µs, 2.525ms, 2.184ms, 3.512ms, 4.778ms, 9.732ms, 27.049ms
+Bytes In      [total, mean]                     1921200, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:17701
+Status Codes  [code:count]                      200:19212
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=1000
 
-Requests      [total, rate, throughput]         18100, 3619.99, 3618.51
-Duration      [total, attack, wait]             5.002s, 5s, 2.054ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  273.875µs, 2.682ms, 2.483ms, 3.499ms, 4.207ms, 8.556ms, 27.043ms
-Bytes In      [total, mean]                     18100000, 1000.00
+Requests      [total, rate, throughput]         19636, 3926.82, 3925.15
+Duration      [total, attack, wait]             5.003s, 5s, 2.133ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  279.208µs, 2.47ms, 2.208ms, 3.711ms, 4.875ms, 7.703ms, 18.237ms
+Bytes In      [total, mean]                     19636000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:18100
+Status Codes  [code:count]                      200:19636
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=10000
 
-Requests      [total, rate, throughput]         18560, 3711.53, 3710.40
-Duration      [total, attack, wait]             5.002s, 5.001s, 1.531ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  340.583µs, 2.63ms, 2.506ms, 3.687ms, 4.078ms, 5.31ms, 23.689ms
-Bytes In      [total, mean]                     185600000, 10000.00
+Requests      [total, rate, throughput]         20237, 4046.81, 4045.50
+Duration      [total, attack, wait]             5.002s, 5.001s, 1.615ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  318.666µs, 2.413ms, 2.183ms, 3.525ms, 4.039ms, 5.527ms, 14.264ms
+Bytes In      [total, mean]                     202370000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:18560
+Status Codes  [code:count]                      200:20237
 Error Set:
 
 
 Running benchmark for granian with sleep=1ms response_size=100000
 
-Requests      [total, rate, throughput]         21913, 4382.51, 4380.19
-Duration      [total, attack, wait]             5.003s, 5s, 2.655ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  420.834µs, 2.16ms, 2.048ms, 2.975ms, 3.436ms, 4.148ms, 6.004ms
-Bytes In      [total, mean]                     2191300000, 100000.00
+Requests      [total, rate, throughput]         20906, 4181.15, 4179.29
+Duration      [total, attack, wait]             5.002s, 5s, 2.227ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  412.708µs, 2.23ms, 2.098ms, 3.154ms, 3.579ms, 4.244ms, 6.762ms
+Bytes In      [total, mean]                     2090600000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:21913
+Status Codes  [code:count]                      200:20906
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=0
 
-Requests      [total, rate, throughput]         3388, 676.27, 674.48
-Duration      [total, attack, wait]             5.023s, 5.01s, 13.319ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.642ms, 14.596ms, 13.898ms, 17.172ms, 19.356ms, 28.989ms, 46.521ms
+Requests      [total, rate, throughput]         3761, 750.98, 748.65
+Duration      [total, attack, wait]             5.024s, 5.008s, 15.552ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.199ms, 13.182ms, 12.827ms, 14.875ms, 16.785ms, 21.54ms, 24.964ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3388
+Status Codes  [code:count]                      200:3761
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=1
 
-Requests      [total, rate, throughput]         3396, 679.14, 677.47
-Duration      [total, attack, wait]             5.013s, 5s, 12.33ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.195ms, 14.566ms, 13.905ms, 16.632ms, 18.803ms, 28.541ms, 52.142ms
-Bytes In      [total, mean]                     3396, 1.00
+Requests      [total, rate, throughput]         3702, 739.76, 737.83
+Duration      [total, attack, wait]             5.017s, 5.004s, 13.153ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.315ms, 13.352ms, 12.827ms, 15.285ms, 17.956ms, 22.98ms, 33.787ms
+Bytes In      [total, mean]                     3702, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3396
+Status Codes  [code:count]                      200:3702
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=10
 
-Requests      [total, rate, throughput]         3377, 675.40, 673.87
-Duration      [total, attack, wait]             5.011s, 5s, 11.325ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.81ms, 14.641ms, 14.074ms, 16.909ms, 19.365ms, 30.831ms, 42.554ms
-Bytes In      [total, mean]                     33770, 10.00
+Requests      [total, rate, throughput]         3682, 735.77, 734.01
+Duration      [total, attack, wait]             5.016s, 5.004s, 11.999ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.408ms, 13.433ms, 12.876ms, 15.033ms, 17.082ms, 29.115ms, 40.25ms
+Bytes In      [total, mean]                     36820, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3377
+Status Codes  [code:count]                      200:3682
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=100
 
-Requests      [total, rate, throughput]         3531, 704.82, 702.96
-Duration      [total, attack, wait]             5.023s, 5.01s, 13.304ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.5ms, 14.028ms, 13.441ms, 16.388ms, 18.722ms, 22.638ms, 27.375ms
-Bytes In      [total, mean]                     353100, 100.00
+Requests      [total, rate, throughput]         3791, 756.61, 754.01
+Duration      [total, attack, wait]             5.028s, 5.011s, 17.268ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.39ms, 13.051ms, 12.478ms, 15.068ms, 17.021ms, 21.767ms, 30.35ms
+Bytes In      [total, mean]                     379100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3531
+Status Codes  [code:count]                      200:3791
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3321, 663.73, 661.97
-Duration      [total, attack, wait]             5.017s, 5.004s, 13.263ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.618ms, 14.843ms, 14.368ms, 17.228ms, 19.564ms, 26.045ms, 30.606ms
-Bytes In      [total, mean]                     3321000, 1000.00
+Requests      [total, rate, throughput]         3851, 769.24, 767.32
+Duration      [total, attack, wait]             5.019s, 5.006s, 12.523ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.121ms, 12.877ms, 12.466ms, 14.382ms, 15.295ms, 19.708ms, 22.028ms
+Bytes In      [total, mean]                     3851000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3321
+Status Codes  [code:count]                      200:3851
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         3172, 633.31, 631.53
-Duration      [total, attack, wait]             5.023s, 5.009s, 14.148ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  9.837ms, 15.457ms, 15.077ms, 17.979ms, 19.94ms, 25.548ms, 37.466ms
-Bytes In      [total, mean]                     31720000, 10000.00
+Requests      [total, rate, throughput]         3416, 682.86, 681.32
+Duration      [total, attack, wait]             5.014s, 5.003s, 11.24ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  9.977ms, 14.398ms, 13.741ms, 17.812ms, 19.255ms, 25.934ms, 51.116ms
+Bytes In      [total, mean]                     34160000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3172
+Status Codes  [code:count]                      200:3416
 Error Set:
 
 
 Running benchmark for granian with sleep=10ms response_size=100000
 
-Requests      [total, rate, throughput]         3473, 693.66, 691.87
-Duration      [total, attack, wait]             5.02s, 5.007s, 13.002ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.476ms, 14.309ms, 13.724ms, 17.187ms, 18.249ms, 22.417ms, 31.651ms
-Bytes In      [total, mean]                     347300000, 100000.00
+Requests      [total, rate, throughput]         4035, 805.36, 803.49
+Duration      [total, attack, wait]             5.022s, 5.01s, 11.653ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  9.703ms, 12.351ms, 12.156ms, 13.576ms, 14.335ms, 18.103ms, 22.73ms
+Bytes In      [total, mean]                     403500000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3473
+Status Codes  [code:count]                      200:4035
 Error Set:
 
 
 Running benchmark for granian with sleep=50ms response_size=0
 
-Requests      [total, rate, throughput]         921, 182.76, 180.82
-Duration      [total, attack, wait]             5.093s, 5.039s, 54.083ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.276ms, 54.558ms, 54.219ms, 56.783ms, 57.333ms, 61.684ms, 63.351ms
+Requests      [total, rate, throughput]         931, 184.55, 182.62
+Duration      [total, attack, wait]             5.098s, 5.045s, 53.09ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.918ms, 54.043ms, 53.291ms, 57.31ms, 59.142ms, 60.911ms, 61.89ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:921
+Status Codes  [code:count]                      200:931
 Error Set:
 
 
 Running benchmark for granian with sleep=50ms response_size=1
 
-Requests      [total, rate, throughput]         941, 186.21, 184.24
-Duration      [total, attack, wait]             5.107s, 5.054s, 53.861ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  50.69ms, 53.62ms, 53.252ms, 54.774ms, 55.319ms, 65.404ms, 67.334ms
-Bytes In      [total, mean]                     941, 1.00
+Requests      [total, rate, throughput]         951, 189.51, 187.57
+Duration      [total, attack, wait]             5.07s, 5.018s, 51.98ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.161ms, 52.701ms, 52.351ms, 53.69ms, 54.832ms, 63.238ms, 72.392ms
+Bytes In      [total, mean]                     951, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:941
+Status Codes  [code:count]                      200:951
 Error Set:
 
 
 Running benchmark for granian with sleep=50ms response_size=10
 
-Requests      [total, rate, throughput]         941, 187.46, 185.57
-Duration      [total, attack, wait]             5.071s, 5.02s, 50.906ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  50.353ms, 53.469ms, 53.174ms, 55.041ms, 56.231ms, 59.273ms, 60.748ms
+Requests      [total, rate, throughput]         941, 187.57, 185.65
+Duration      [total, attack, wait]             5.069s, 5.017s, 51.822ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.83ms, 53.199ms, 52.734ms, 55.278ms, 56.101ms, 57.609ms, 58.548ms
 Bytes In      [total, mean]                     9410, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1694,21 +1677,21 @@ Error Set:
 
 Running benchmark for granian with sleep=50ms response_size=100
 
-Requests      [total, rate, throughput]         911, 181.03, 179.16
-Duration      [total, attack, wait]             5.085s, 5.032s, 52.52ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.96ms, 55.082ms, 54.29ms, 58.186ms, 61.665ms, 70.85ms, 72.667ms
-Bytes In      [total, mean]                     91100, 100.00
+Requests      [total, rate, throughput]         931, 184.54, 182.64
+Duration      [total, attack, wait]             5.097s, 5.045s, 52.47ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.683ms, 54.018ms, 53.553ms, 56.391ms, 57.757ms, 61.499ms, 68.752ms
+Bytes In      [total, mean]                     93100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:911
+Status Codes  [code:count]                      200:931
 Error Set:
 
 
 Running benchmark for granian with sleep=50ms response_size=1000
 
-Requests      [total, rate, throughput]         911, 181.13, 179.25
-Duration      [total, attack, wait]             5.082s, 5.03s, 52.782ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.977ms, 55.064ms, 54.24ms, 56.643ms, 59.13ms, 86.221ms, 87.831ms
+Requests      [total, rate, throughput]         911, 181.91, 179.72
+Duration      [total, attack, wait]             5.069s, 5.008s, 61.151ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.353ms, 54.793ms, 53.808ms, 58.325ms, 61.799ms, 65.262ms, 72.285ms
 Bytes In      [total, mean]                     911000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1718,57 +1701,57 @@ Error Set:
 
 Running benchmark for granian with sleep=50ms response_size=10000
 
-Requests      [total, rate, throughput]         901, 179.08, 177.19
-Duration      [total, attack, wait]             5.085s, 5.031s, 53.715ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  50.662ms, 55.627ms, 55.298ms, 57.824ms, 59.306ms, 71.148ms, 76.169ms
-Bytes In      [total, mean]                     9010000, 10000.00
+Requests      [total, rate, throughput]         912, 181.73, 179.83
+Duration      [total, attack, wait]             5.071s, 5.018s, 52.967ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  51.189ms, 54.812ms, 54.007ms, 57.307ms, 60.189ms, 70.101ms, 75.165ms
+Bytes In      [total, mean]                     9120000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:901
+Status Codes  [code:count]                      200:912
 Error Set:
 
 
 Running benchmark for granian with sleep=50ms response_size=100000
 
-Requests      [total, rate, throughput]         869, 173.80, 171.90
-Duration      [total, attack, wait]             5.055s, 5s, 55.251ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  51.137ms, 57.733ms, 57.529ms, 60.655ms, 62.461ms, 65.872ms, 67.853ms
-Bytes In      [total, mean]                     86900000, 100000.00
+Requests      [total, rate, throughput]         883, 175.19, 173.40
+Duration      [total, attack, wait]             5.092s, 5.04s, 52.176ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  50.481ms, 56.893ms, 55.481ms, 59.546ms, 61.167ms, 130.78ms, 142.076ms
+Bytes In      [total, mean]                     88300000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:869
+Status Codes  [code:count]                      200:883
 Error Set:
 
 
 Running benchmark for granian with sleep=100ms response_size=0
 
-Requests      [total, rate, throughput]         481, 95.93, 94.00
-Duration      [total, attack, wait]             5.117s, 5.014s, 103.076ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  101.606ms, 104.228ms, 104.146ms, 105.705ms, 107.811ms, 111.515ms, 111.636ms
+Requests      [total, rate, throughput]         491, 96.22, 94.32
+Duration      [total, attack, wait]             5.206s, 5.103s, 102.585ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.139ms, 103.912ms, 103.332ms, 106.442ms, 108.207ms, 113.01ms, 113.447ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:481
+Status Codes  [code:count]                      200:491
 Error Set:
 
 
 Running benchmark for granian with sleep=100ms response_size=1
 
-Requests      [total, rate, throughput]         481, 94.88, 92.96
-Duration      [total, attack, wait]             5.174s, 5.07s, 104.675ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  101.615ms, 105.233ms, 104.475ms, 108.581ms, 113.398ms, 114.366ms, 120.431ms
-Bytes In      [total, mean]                     481, 1.00
+Requests      [total, rate, throughput]         491, 96.92, 95.00
+Duration      [total, attack, wait]             5.169s, 5.066s, 102.674ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.228ms, 103.235ms, 102.854ms, 104.836ms, 106.167ms, 108.019ms, 108.55ms
+Bytes In      [total, mean]                     491, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:481
+Status Codes  [code:count]                      200:491
 Error Set:
 
 
 Running benchmark for granian with sleep=100ms response_size=10
 
-Requests      [total, rate, throughput]         481, 95.48, 93.56
-Duration      [total, attack, wait]             5.141s, 5.038s, 103.781ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.446ms, 104.721ms, 104.632ms, 106.301ms, 106.967ms, 108.329ms, 109.108ms
+Requests      [total, rate, throughput]         481, 96.18, 94.09
+Duration      [total, attack, wait]             5.112s, 5.001s, 111.567ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  100.33ms, 104.984ms, 103.6ms, 108.377ms, 111.766ms, 125.012ms, 125.095ms
 Bytes In      [total, mean]                     4810, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1778,9 +1761,9 @@ Error Set:
 
 Running benchmark for granian with sleep=100ms response_size=100
 
-Requests      [total, rate, throughput]         481, 95.22, 93.30
-Duration      [total, attack, wait]             5.155s, 5.051s, 103.866ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.753ms, 104.978ms, 104.799ms, 106.469ms, 107.181ms, 112.17ms, 112.798ms
+Requests      [total, rate, throughput]         481, 95.29, 93.40
+Duration      [total, attack, wait]             5.15s, 5.048s, 102.291ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  102.141ms, 104.87ms, 103.965ms, 109.361ms, 111.088ms, 115.239ms, 115.377ms
 Bytes In      [total, mean]                     48100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1790,21 +1773,21 @@ Error Set:
 
 Running benchmark for granian with sleep=100ms response_size=1000
 
-Requests      [total, rate, throughput]         481, 95.15, 93.22
-Duration      [total, attack, wait]             5.16s, 5.055s, 104.951ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.499ms, 105.041ms, 104.936ms, 106.204ms, 106.604ms, 115.631ms, 115.687ms
-Bytes In      [total, mean]                     481000, 1000.00
+Requests      [total, rate, throughput]         491, 96.37, 94.43
+Duration      [total, attack, wait]             5.199s, 5.095s, 104.576ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  100.913ms, 103.797ms, 103.564ms, 105.842ms, 107.086ms, 108.235ms, 108.399ms
+Bytes In      [total, mean]                     491000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:481
+Status Codes  [code:count]                      200:491
 Error Set:
 
 
 Running benchmark for granian with sleep=100ms response_size=10000
 
-Requests      [total, rate, throughput]         481, 95.86, 93.66
-Duration      [total, attack, wait]             5.135s, 5.018s, 117.438ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  101.076ms, 104.421ms, 103.935ms, 106.504ms, 108.099ms, 115.803ms, 117.438ms
+Requests      [total, rate, throughput]         481, 96.04, 94.10
+Duration      [total, attack, wait]             5.111s, 5.008s, 103.246ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.103ms, 104.081ms, 103.501ms, 106.878ms, 108.272ms, 110.398ms, 111.344ms
 Bytes In      [total, mean]                     4810000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1814,21 +1797,21 @@ Error Set:
 
 Running benchmark for granian with sleep=100ms response_size=100000
 
-Requests      [total, rate, throughput]         471, 92.93, 90.98
-Duration      [total, attack, wait]             5.177s, 5.068s, 108.616ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  102.095ms, 107.585ms, 107.418ms, 110.493ms, 111.506ms, 113.891ms, 115.682ms
-Bytes In      [total, mean]                     47100000, 100000.00
+Requests      [total, rate, throughput]         481, 94.44, 92.50
+Duration      [total, attack, wait]             5.2s, 5.093s, 106.727ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  101.148ms, 105.874ms, 105.517ms, 108.914ms, 110.06ms, 114.001ms, 117.095ms
+Bytes In      [total, mean]                     48100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:471
+Status Codes  [code:count]                      200:481
 Error Set:
 
 
 Running benchmark for granian with sleep=200ms response_size=0
 
-Requests      [total, rate, throughput]         251, 49.04, 47.16
-Duration      [total, attack, wait]             5.322s, 5.118s, 203.794ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.371ms, 204.392ms, 204.203ms, 205.452ms, 207.379ms, 208.391ms, 209.512ms
+Requests      [total, rate, throughput]         251, 49.26, 47.38
+Duration      [total, attack, wait]             5.297s, 5.095s, 202.2ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.121ms, 204.709ms, 203.238ms, 211.068ms, 213.633ms, 221.854ms, 221.863ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1838,9 +1821,9 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=1
 
-Requests      [total, rate, throughput]         251, 49.00, 47.10
-Duration      [total, attack, wait]             5.33s, 5.123s, 206.692ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.436ms, 204.693ms, 204.509ms, 206.756ms, 207.452ms, 208.136ms, 208.951ms
+Requests      [total, rate, throughput]         251, 49.10, 47.24
+Duration      [total, attack, wait]             5.314s, 5.112s, 201.832ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.302ms, 204.22ms, 203.981ms, 206.236ms, 207.147ms, 207.86ms, 208.06ms
 Bytes In      [total, mean]                     251, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1850,9 +1833,9 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=10
 
-Requests      [total, rate, throughput]         251, 48.91, 47.03
-Duration      [total, attack, wait]             5.337s, 5.131s, 205.353ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  201.962ms, 205.051ms, 204.902ms, 206.671ms, 207.21ms, 212.41ms, 212.418ms
+Requests      [total, rate, throughput]         251, 48.85, 46.99
+Duration      [total, attack, wait]             5.341s, 5.138s, 202.996ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.493ms, 205.28ms, 204.204ms, 211.836ms, 212.363ms, 213.898ms, 213.99ms
 Bytes In      [total, mean]                     2510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1862,9 +1845,9 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=100
 
-Requests      [total, rate, throughput]         251, 48.93, 47.08
-Duration      [total, attack, wait]             5.331s, 5.13s, 201.546ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  201.224ms, 204.946ms, 204.281ms, 209.374ms, 210.356ms, 214.56ms, 214.955ms
+Requests      [total, rate, throughput]         251, 49.40, 47.48
+Duration      [total, attack, wait]             5.286s, 5.081s, 205.175ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.477ms, 203.137ms, 202.933ms, 204.337ms, 205.073ms, 208.469ms, 208.616ms
 Bytes In      [total, mean]                     25100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1874,9 +1857,9 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=1000
 
-Requests      [total, rate, throughput]         251, 49.08, 47.19
-Duration      [total, attack, wait]             5.318s, 5.114s, 204.117ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.512ms, 204.333ms, 204.478ms, 205.359ms, 206.063ms, 207.018ms, 207.63ms
+Requests      [total, rate, throughput]         251, 49.46, 47.57
+Duration      [total, attack, wait]             5.276s, 5.075s, 201.262ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  200.73ms, 203.267ms, 202.626ms, 204.169ms, 205.042ms, 219.714ms, 220.004ms
 Bytes In      [total, mean]                     251000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1886,9 +1869,9 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=10000
 
-Requests      [total, rate, throughput]         251, 48.76, 46.89
-Duration      [total, attack, wait]             5.353s, 5.148s, 205.013ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.305ms, 205.635ms, 205.527ms, 207.295ms, 208.361ms, 211.9ms, 212.825ms
+Requests      [total, rate, throughput]         251, 48.93, 47.06
+Duration      [total, attack, wait]             5.334s, 5.129s, 204.825ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.563ms, 204.968ms, 203.9ms, 206.654ms, 207.755ms, 224.448ms, 225.296ms
 Bytes In      [total, mean]                     2510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1898,21 +1881,21 @@ Error Set:
 
 Running benchmark for granian with sleep=200ms response_size=100000
 
-Requests      [total, rate, throughput]         241, 48.13, 46.23
-Duration      [total, attack, wait]             5.213s, 5.007s, 205.549ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  202.138ms, 208.503ms, 208.558ms, 211.565ms, 212.735ms, 215.704ms, 216.508ms
-Bytes In      [total, mean]                     24100000, 100000.00
+Requests      [total, rate, throughput]         251, 48.48, 46.62
+Duration      [total, attack, wait]             5.384s, 5.177s, 207.134ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  201.863ms, 207.037ms, 206.547ms, 210.437ms, 213.118ms, 215.893ms, 217.843ms
+Bytes In      [total, mean]                     25100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:241
+Status Codes  [code:count]                      200:251
 Error Set:
 
 
 Running benchmark for granian with sleep=500ms response_size=0
 
-Requests      [total, rate, throughput]         101, 20.00, 18.19
-Duration      [total, attack, wait]             5.553s, 5.049s, 504.23ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  503.166ms, 504.626ms, 504.512ms, 506.163ms, 506.537ms, 506.67ms, 506.753ms
+Requests      [total, rate, throughput]         101, 20.05, 18.23
+Duration      [total, attack, wait]             5.54s, 5.038s, 502.806ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.154ms, 503.525ms, 503.442ms, 504.715ms, 504.828ms, 505.502ms, 505.826ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1922,9 +1905,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=1
 
-Requests      [total, rate, throughput]         101, 19.98, 18.17
-Duration      [total, attack, wait]             5.558s, 5.055s, 502.2ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  502.2ms, 505.14ms, 504.761ms, 507.683ms, 509.997ms, 510.474ms, 510.795ms
+Requests      [total, rate, throughput]         101, 20.05, 18.23
+Duration      [total, attack, wait]             5.539s, 5.036s, 503.105ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.024ms, 503.404ms, 502.999ms, 505.439ms, 505.86ms, 506.006ms, 506.045ms
 Bytes In      [total, mean]                     101, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1934,9 +1917,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=10
 
-Requests      [total, rate, throughput]         101, 19.95, 18.15
-Duration      [total, attack, wait]             5.565s, 5.062s, 503.737ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  502.511ms, 505.927ms, 504.508ms, 512.114ms, 517.609ms, 518.083ms, 518.124ms
+Requests      [total, rate, throughput]         101, 20.05, 18.24
+Duration      [total, attack, wait]             5.538s, 5.036s, 501.497ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  501.497ms, 503.355ms, 503.325ms, 504.812ms, 505.759ms, 505.917ms, 505.919ms
 Bytes In      [total, mean]                     1010, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1946,9 +1929,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=100
 
-Requests      [total, rate, throughput]         101, 20.03, 18.21
-Duration      [total, attack, wait]             5.545s, 5.042s, 502.662ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  502.246ms, 503.913ms, 503.902ms, 505.134ms, 505.326ms, 505.548ms, 505.75ms
+Requests      [total, rate, throughput]         101, 20.04, 18.22
+Duration      [total, attack, wait]             5.543s, 5.041s, 502.596ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  501.864ms, 503.828ms, 503.853ms, 505.06ms, 505.136ms, 505.987ms, 506.638ms
 Bytes In      [total, mean]                     10100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1958,9 +1941,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=1000
 
-Requests      [total, rate, throughput]         101, 20.00, 18.18
-Duration      [total, attack, wait]             5.555s, 5.051s, 504.472ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  503.416ms, 504.848ms, 504.123ms, 507.521ms, 510.082ms, 510.137ms, 510.173ms
+Requests      [total, rate, throughput]         101, 19.98, 18.16
+Duration      [total, attack, wait]             5.561s, 5.056s, 504.813ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.664ms, 505.431ms, 503.979ms, 511.139ms, 516.516ms, 516.696ms, 516.699ms
 Bytes In      [total, mean]                     101000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1970,9 +1953,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=10000
 
-Requests      [total, rate, throughput]         101, 19.99, 18.17
-Duration      [total, attack, wait]             5.559s, 5.053s, 506.247ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  502.434ms, 505.067ms, 505.065ms, 506.655ms, 506.798ms, 507.677ms, 508.362ms
+Requests      [total, rate, throughput]         101, 19.96, 18.16
+Duration      [total, attack, wait]             5.562s, 5.06s, 502.199ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.199ms, 505.63ms, 505.536ms, 509.001ms, 510.046ms, 511.097ms, 511.368ms
 Bytes In      [total, mean]                     1010000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1982,9 +1965,9 @@ Error Set:
 
 Running benchmark for granian with sleep=500ms response_size=100000
 
-Requests      [total, rate, throughput]         101, 19.88, 18.09
-Duration      [total, attack, wait]             5.585s, 5.08s, 504.714ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  501.871ms, 507.693ms, 507.79ms, 511.724ms, 514.088ms, 516.076ms, 516.97ms
+Requests      [total, rate, throughput]         101, 19.96, 18.14
+Duration      [total, attack, wait]             5.568s, 5.061s, 507.141ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  502.117ms, 505.809ms, 505.27ms, 509.413ms, 510.141ms, 511.269ms, 511.506ms
 Bytes In      [total, mean]                     10100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -1994,9 +1977,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=0
 
-Requests      [total, rate, throughput]         51, 10.16, 8.47
-Duration      [total, attack, wait]             6.02s, 5.018s, 1.003s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.003s, 1.003s, 1.004s, 1.004s, 1.004s, 1.004s
+Requests      [total, rate, throughput]         51, 10.17, 8.47
+Duration      [total, attack, wait]             6.019s, 5.016s, 1.002s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.001s, 1.003s, 1.003s, 1.004s, 1.004s, 1.004s, 1.004s
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2006,9 +1989,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=1
 
-Requests      [total, rate, throughput]         51, 10.16, 8.46
-Duration      [total, attack, wait]             6.029s, 5.022s, 1.007s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.001s, 1.004s, 1.005s, 1.006s, 1.006s, 1.007s, 1.007s
+Requests      [total, rate, throughput]         51, 10.16, 8.47
+Duration      [total, attack, wait]             6.022s, 5.019s, 1.003s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.004s, 1.003s, 1.005s, 1.005s, 1.005s, 1.005s
 Bytes In      [total, mean]                     51, 1.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2018,9 +2001,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=10
 
-Requests      [total, rate, throughput]         51, 10.16, 8.47
-Duration      [total, attack, wait]             6.024s, 5.021s, 1.003s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.004s, 1.004s, 1.005s, 1.005s, 1.005s, 1.005s
+Requests      [total, rate, throughput]         51, 10.14, 8.46
+Duration      [total, attack, wait]             6.03s, 5.028s, 1.002s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.001s, 1.005s, 1.004s, 1.014s, 1.015s, 1.015s, 1.015s
 Bytes In      [total, mean]                     510, 10.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2031,8 +2014,8 @@ Error Set:
 Running benchmark for granian with sleep=1000ms response_size=100
 
 Requests      [total, rate, throughput]         51, 10.15, 8.46
-Duration      [total, attack, wait]             6.029s, 5.025s, 1.003s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.005s, 1.005s, 1.006s, 1.006s, 1.006s, 1.006s
+Duration      [total, attack, wait]             6.026s, 5.024s, 1.002s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.001s, 1.005s, 1.005s, 1.008s, 1.008s, 1.008s, 1.008s
 Bytes In      [total, mean]                     5100, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2042,9 +2025,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=1000
 
-Requests      [total, rate, throughput]         51, 10.16, 8.47
-Duration      [total, attack, wait]             6.024s, 5.021s, 1.003s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.004s, 1.003s, 1.006s, 1.006s, 1.006s, 1.006s
+Requests      [total, rate, throughput]         51, 10.18, 8.48
+Duration      [total, attack, wait]             6.014s, 5.011s, 1.003s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.001s, 1.002s, 1.002s, 1.003s, 1.003s, 1.003s, 1.003s
 Bytes In      [total, mean]                     51000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2054,9 +2037,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=10000
 
-Requests      [total, rate, throughput]         51, 10.14, 8.45
-Duration      [total, attack, wait]             6.034s, 5.03s, 1.004s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.004s, 1.006s, 1.006s, 1.007s, 1.007s, 1.007s, 1.008s
+Requests      [total, rate, throughput]         51, 10.14, 8.46
+Duration      [total, attack, wait]             6.031s, 5.028s, 1.003s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.005s, 1.006s, 1.007s, 1.007s, 1.007s, 1.007s
 Bytes In      [total, mean]                     510000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
@@ -2066,9 +2049,9 @@ Error Set:
 
 Running benchmark for granian with sleep=1000ms response_size=100000
 
-Requests      [total, rate, throughput]         51, 10.12, 8.44
-Duration      [total, attack, wait]             6.045s, 5.039s, 1.007s
-Latencies     [min, mean, 50, 90, 95, 99, max]  1.003s, 1.008s, 1.008s, 1.014s, 1.015s, 1.015s, 1.015s
+Requests      [total, rate, throughput]         51, 10.13, 8.45
+Duration      [total, attack, wait]             6.037s, 5.032s, 1.004s
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.002s, 1.008s, 1.009s, 1.012s, 1.012s, 1.014s, 1.014s
 Bytes In      [total, mean]                     5100000, 100000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%

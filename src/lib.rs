@@ -2,7 +2,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
-mod filter;
+mod asgi;
 
 declare_init_functions!(init, new_http_filter_config_fn);
 
@@ -30,7 +30,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     filter_config: &[u8],
 ) -> Option<Box<dyn HttpFilterConfig<EHF>>> {
     let filter_config = std::str::from_utf8(filter_config).unwrap();
-    match filter::Config::new(filter_config) {
+    match asgi::filter::Config::new(filter_config) {
         Some(cfg) => Some(Box::new(cfg)),
         None => None,
     }

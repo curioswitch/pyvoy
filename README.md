@@ -29,31 +29,31 @@ A single example from the [full set of results](bench/example_result.txt) from a
 ```
 Running benchmark for pyvoy with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3172, 634.13, 632.44
-Duration      [total, attack, wait]             5.015s, 5.002s, 13.346ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.082ms, 15.677ms, 15.377ms, 18.017ms, 19.703ms, 29.42ms, 35.404ms
-Bytes In      [total, mean]                     3172000, 1000.00
+Requests      [total, rate, throughput]         3254, 650.43, 647.50
+Duration      [total, attack, wait]             5.025s, 5.003s, 22.667ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.082ms, 15.193ms, 14.717ms, 17.759ms, 19.189ms, 25.022ms, 27.323ms
+Bytes In      [total, mean]                     3254000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3172
+Status Codes  [code:count]                      200:3254
 Error Set:
 
 Running benchmark for granian with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         3321, 663.73, 661.97
-Duration      [total, attack, wait]             5.017s, 5.004s, 13.263ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  10.618ms, 14.843ms, 14.368ms, 17.228ms, 19.564ms, 26.045ms, 30.606ms
-Bytes In      [total, mean]                     3321000, 1000.00
+Requests      [total, rate, throughput]         3851, 769.24, 767.32
+Duration      [total, attack, wait]             5.019s, 5.006s, 12.523ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.121ms, 12.877ms, 12.466ms, 14.382ms, 15.295ms, 19.708ms, 22.028ms
+Bytes In      [total, mean]                     3851000, 1000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:3321
+Status Codes  [code:count]                      200:3851
 Error Set:
 
 Running benchmark for hypercorn with sleep=10ms response_size=1000
 
-Requests      [total, rate, throughput]         1011, 148.78, 146.94
-Duration      [total, attack, wait]             6.812s, 6.795s, 17.312ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  12.401ms, 67.199ms, 17.644ms, 21.632ms, 23.505ms, 2.213s, 5.019s
+Requests      [total, rate, throughput]         1011, 150.98, 149.20
+Duration      [total, attack, wait]             6.709s, 6.696s, 13.094ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  11.983ms, 66.209ms, 16.884ms, 19.179ms, 20.055ms, 2.801s, 5.019s
 Bytes In      [total, mean]                     1001000, 990.11
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           99.01%
