@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+import time
+import urllib.request
 from dataclasses import dataclass
 
 
@@ -22,6 +24,17 @@ def main() -> None:
         with subprocess.Popen(  # noqa: S603
             app_server.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         ) as server:
+            # Wait for server to start
+            for _ in range(100):
+                try:
+                    with urllib.request.urlopen(
+                        "http://localhost:8000/controlled"
+                    ) as resp:
+                        if resp.status == 200:
+                            break
+                except Exception:  # noqa: S110
+                    pass
+                time.sleep(0.1)
             for sleep in (0, 1, 10, 50, 100, 200, 500, 1000):
                 for response_size in (0, 1, 10, 100, 1000, 10000, 100000):
                     print(  # noqa: T201
