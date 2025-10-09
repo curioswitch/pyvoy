@@ -16,6 +16,9 @@ def chdir(monkeypatch: pytest.MonkeyPatch) -> None:
 # While ideally we can separate execution per test, the overhead isn't worth it.
 def test_advanced_http2() -> None:
     result = subprocess.run(
-        ["go", "test", "-v", "."], check=False, capture_output=True, text=True
+        ["go", "test", "-count=1", "-v", "."],
+        check=False,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stdout + "\n" + result.stderr

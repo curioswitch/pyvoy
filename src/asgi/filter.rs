@@ -1,6 +1,6 @@
+use crossbeam_channel;
+use crossbeam_channel::{Receiver, Sender};
 use envoy_proxy_dynamic_modules_rust_sdk::{abi::envoy_dynamic_module_type_attribute_id, *};
-use flume;
-use flume::{Receiver, Sender};
 use pyo3::{Py, PyAny};
 
 use super::types::*;
@@ -29,8 +29,8 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (request_future_tx, request_future_rx) = flume::unbounded::<Py<PyAny>>();
-        let (response_tx, response_rx) = flume::unbounded::<ResponseEvent>();
+        let (request_future_tx, request_future_rx) = crossbeam_channel::unbounded::<Py<PyAny>>();
+        let (response_tx, response_rx) = crossbeam_channel::unbounded::<ResponseEvent>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
@@ -137,7 +137,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        for event in self.response_rx.drain() {
+        for event in self.response_rx.try_iter().collect::<Vec<_>>() {
             match event {
                 ResponseEvent::Start(start_event, body_event) => {
                     if start_event.trailers {
