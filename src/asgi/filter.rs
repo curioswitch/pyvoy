@@ -77,6 +77,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 trailers_accepted = true;
             }
         }
+        println!("Trailers accepted: {}", trailers_accepted);
         let scope = self.new_scope(envoy_filter);
         self.executor.execute_app(
             scope,
