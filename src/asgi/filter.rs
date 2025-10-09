@@ -5,6 +5,7 @@ use pyo3::{Py, PyAny};
 
 use super::types::*;
 use crate::asgi::python;
+use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,

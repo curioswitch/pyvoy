@@ -2,7 +2,6 @@ use pyo3::prelude::{Py, PyAny};
 
 pub(crate) struct ResponseStartEvent {
     pub headers: Vec<(String, Box<[u8]>)>,
-    pub trailers: bool,
 }
 
 pub(crate) struct ResponseBodyEvent {
@@ -11,15 +10,9 @@ pub(crate) struct ResponseBodyEvent {
     pub future: Py<PyAny>,
 }
 
-pub(crate) struct ResponseTrailersEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
-    pub more_trailers: bool,
-}
-
 pub(crate) enum ResponseEvent {
     Start(ResponseStartEvent, ResponseBodyEvent),
     Body(ResponseBodyEvent),
-    Trailers(ResponseTrailersEvent),
     Exception,
 }
 

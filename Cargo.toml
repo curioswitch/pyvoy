@@ -8,6 +8,7 @@ repository = "https://github.com/curioswitch/pyvoy"
 
 [dependencies]
 envoy-proxy-dynamic-modules-rust-sdk = { path = "../envoy/source/extensions/dynamic_modules/sdk/rust" }
+executors = "0.10.0"
 flume = "0.11.1"
 pyo3 = { version = "0.26.0", features = ["experimental-async"] }
 urlencoding = "2.1.3"

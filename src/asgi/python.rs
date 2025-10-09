@@ -1,6 +1,7 @@
 use std::thread;
 
 use super::types::*;
+use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use flume;
 use flume::Sender;
@@ -38,7 +39,7 @@ pub(crate) struct Executor {
 }
 
 impl Executor {
-    pub(crate) fn new(app_module: &str, app_attr: &str) -> Result<Self, PyErr> {
+    pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
         let (loop_tx, loop_rx) = flume::bounded(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
