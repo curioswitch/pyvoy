@@ -445,7 +445,19 @@ impl SendCallable {
                             event_type
                         )));
                     }
-                    let headers = extract_headers_from_event(py, &event)?;
+                    let mut headers = extract_headers_from_event(py, &event, 1)?;
+                    let status: u16 = match event.get_item(intern!(py, "status"))? {
+                        Some(v) => v.extract()?,
+                        None => {
+                            return Err(PyRuntimeError::new_err(
+                                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
+                            ));
+                        }
+                    };
+                    headers.push((
+                        String::from(":status"),
+                        Box::from(status.to_string().as_bytes()),
+                    ));
                     let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
                         Some(v) => v.extract()?,
                         None => false,
@@ -523,7 +535,7 @@ impl SendCallable {
                         self.next_event = NextASGIEvent::Done;
                     }
                     if self.trailers_accepted {
-                        let headers = extract_headers_from_event(py, &event)?;
+                        let headers = extract_headers_from_event(py, &event, 0)?;
                         self.response_tx
                             .send(ResponseEvent::Trailers(ResponseTrailersEvent {
                                 headers,
@@ -549,20 +561,13 @@ impl SendCallable {
 fn extract_headers_from_event<'py>(
     py: Python<'py>,
     event: &Bound<'py, PyDict>,
+    extra_capacity: usize,
 ) -> PyResult<Vec<(String, Box<[u8]>)>> {
-    let status: u16 = match event.get_item(intern!(py, "status"))? {
-        Some(v) => v.extract()?,
-        None => {
-            return Err(PyRuntimeError::new_err(
-                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
-            ));
-        }
-    };
-    let mut headers = match event.get_item(intern!(py, "headers"))? {
+    match event.get_item(intern!(py, "headers"))? {
         Some(v) => {
             let cap = match v.len() {
-                Ok(len) => len + 1,
-                Err(_) => 1,
+                Ok(len) => len + extra_capacity,
+                Err(_) => extra_capacity,
             };
             let mut headers = Vec::with_capacity(cap);
             for item in v.try_iter()? {
@@ -576,13 +581,8 @@ fn extract_headers_from_event<'py>(
                     Box::from(value_bytes.as_bytes()),
                 ));
             }
-            headers
+            Ok(headers)
         }
-        None => Vec::with_capacity(1),
-    };
-    headers.push((
-        String::from(":status"),
-        Box::from(status.to_string().as_bytes()),
-    ));
-    Ok(headers)
+        None => Ok(Vec::with_capacity(extra_capacity)),
+    }
 }
