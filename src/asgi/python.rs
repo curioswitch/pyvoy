@@ -194,39 +194,9 @@ impl ExecutorInner {
                 HttpVersion::Http3 => intern!(py, "3"),
             },
         )?;
-        match scope.method {
-            HttpMethod::Get => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "GET"))?;
-            }
-            HttpMethod::Head => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "HEAD"))?;
-            }
-            HttpMethod::Post => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "POST"))?;
-            }
-            HttpMethod::Put => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "PUT"))?;
-            }
-            HttpMethod::Delete => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "DELETE"))?;
-            }
-            HttpMethod::Connect => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "CONNECT"))?;
-            }
-            HttpMethod::Options => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "OPTIONS"))?;
-            }
-            HttpMethod::Trace => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "TRACE"))?;
-            }
-            HttpMethod::Patch => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "PATCH"))?;
-            }
-            HttpMethod::Custom(m) => {
-                let method = String::from_utf8_lossy(&m);
-                scope_dict.set_item(intern!(py, "method"), &method)?;
-            }
-        }
+        scope
+            .method
+            .set_in_dict(py, &scope_dict, intern!(py, "method"))?;
         scope_dict.set_item(
             intern!(py, "scheme"),
             match scope.scheme {

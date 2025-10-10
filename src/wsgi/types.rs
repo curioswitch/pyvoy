@@ -1,5 +1,3 @@
-use pyo3::prelude::{Py, PyAny};
-
 pub(crate) struct ResponseStartEvent {
     pub headers: Vec<(String, Box<[u8]>)>,
 }
@@ -7,13 +5,18 @@ pub(crate) struct ResponseStartEvent {
 pub(crate) struct ResponseBodyEvent {
     pub body: Box<[u8]>,
     pub more_body: bool,
-    pub future: Py<PyAny>,
+    pub notify: Option<oneshot::Sender<()>>,
 }
 
 pub(crate) enum ResponseEvent {
     Start(ResponseStartEvent, ResponseBodyEvent),
     Body(ResponseBodyEvent),
     Exception,
+}
+
+pub(crate) struct RequestBody {
+    pub body: Box<[u8]>,
+    pub closed: bool,
 }
 
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
