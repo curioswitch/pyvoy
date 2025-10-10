@@ -6,7 +6,7 @@ from types import FrameType
 
 import yaml
 
-from ._server import PyvoyServer
+from ._server import Interface, PyvoyServer
 
 
 class CLIArgs:
@@ -19,6 +19,7 @@ class CLIArgs:
     tls_cert: str | None
     tls_ca_cert: str | None
     tls_disable_http3: bool
+    interface: Interface
 
 
 def main() -> None:
@@ -68,6 +69,14 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--interface",
+        help="the Python application interface to use",
+        choices=["asgi", "wsgi"],
+        type=str,
+        default="asgi",
+    )
+
+    parser.add_argument(
         "--print-envoy-config",
         help="print the generated Envoy config to stdout and exit",
         action="store_true",
@@ -92,6 +101,7 @@ def main() -> None:
         tls_cert=Path(args.tls_cert) if args.tls_cert else None,
         tls_ca_cert=Path(args.tls_ca_cert) if args.tls_ca_cert else None,
         tls_enable_http3=not args.tls_disable_http3,
+        interface=args.interface,
     )
 
     if args.print_envoy_config:

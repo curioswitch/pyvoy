@@ -5,11 +5,13 @@ import subprocess
 import sys
 import urllib.request
 from types import TracebackType
-from typing import IO
+from typing import IO, Literal
 
 import yaml
 
 from ._bin import get_envoy_path, get_pyvoy_dir_path
+
+Interface = Literal["asgi", "wsgi"]
 
 
 class PyvoyServer:
@@ -18,6 +20,7 @@ class PyvoyServer:
     _listener_port_tls: int | None
     _print_startup_logs: bool
     _print_envoy_config: bool
+    _interface: Interface
 
     _output: IO[str]
 
@@ -32,6 +35,7 @@ class PyvoyServer:
         tls_cert: bytes | os.PathLike | None = None,
         tls_ca_cert: bytes | os.PathLike | None = None,
         tls_enable_http3: bool = True,
+        interface: Interface = "asgi",
         print_startup_logs: bool = False,
         print_envoy_config: bool = False,
     ) -> None:
@@ -43,6 +47,7 @@ class PyvoyServer:
         self._tls_cert = tls_cert
         self._tls_ca_cert = tls_ca_cert
         self._tls_enable_http3 = tls_enable_http3
+        self._interface = interface
         self._print_startup_logs = print_startup_logs
         self._print_envoy_config = print_envoy_config
 
@@ -150,7 +155,9 @@ class PyvoyServer:
                     "terminal_filter": True,
                     "filter_config": {
                         "@type": "type.googleapis.com/google.protobuf.StringValue",
-                        "value": self._app,
+                        "value": json.dumps(
+                            {"app": self._app, "interface": self._interface}
+                        ),
                     },
                 },
             }

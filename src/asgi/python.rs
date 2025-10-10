@@ -1,9 +1,9 @@
 use std::thread;
 
 use super::types::*;
+use crate::types::*;
+use crossbeam_channel::Sender;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
-use flume;
-use flume::Sender;
 use pyo3::{
     exceptions::PyRuntimeError,
     intern,
@@ -38,8 +38,8 @@ pub(crate) struct Executor {
 }
 
 impl Executor {
-    pub(crate) fn new(app_module: &str, app_attr: &str) -> Result<Self, PyErr> {
-        let (loop_tx, loop_rx) = flume::bounded(0);
+    pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
+        let (loop_tx, loop_rx) = crossbeam_channel::bounded(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let asyncio = PyModule::import(py, "asyncio")?;
@@ -77,12 +77,12 @@ impl Executor {
             loop_,
         };
 
-        let (tx, rx) = flume::unbounded::<Event>();
+        let (tx, rx) = crossbeam_channel::unbounded::<Event>();
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
                     inner.handle_event(py, event)?;
-                    for event in rx.drain() {
+                    for event in rx.try_iter().collect::<Vec<_>>() {
                         inner.handle_event(py, event)?;
                     }
                     Ok::<_, PyErr>(())
@@ -194,39 +194,9 @@ impl ExecutorInner {
                 HttpVersion::Http3 => intern!(py, "3"),
             },
         )?;
-        match scope.method {
-            HttpMethod::Get => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "GET"))?;
-            }
-            HttpMethod::Head => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "HEAD"))?;
-            }
-            HttpMethod::Post => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "POST"))?;
-            }
-            HttpMethod::Put => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "PUT"))?;
-            }
-            HttpMethod::Delete => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "DELETE"))?;
-            }
-            HttpMethod::Connect => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "CONNECT"))?;
-            }
-            HttpMethod::Options => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "OPTIONS"))?;
-            }
-            HttpMethod::Trace => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "TRACE"))?;
-            }
-            HttpMethod::Patch => {
-                scope_dict.set_item(intern!(py, "method"), intern!(py, "PATCH"))?;
-            }
-            HttpMethod::Custom(m) => {
-                let method = String::from_utf8_lossy(&m);
-                scope_dict.set_item(intern!(py, "method"), &method)?;
-            }
-        }
+        scope
+            .method
+            .set_in_dict(py, &scope_dict, intern!(py, "method"))?;
         scope_dict.set_item(
             intern!(py, "scheme"),
             match scope.scheme {
@@ -345,26 +315,24 @@ unsafe impl Sync for ReceiveCallable {}
 
 #[pymethods]
 impl ReceiveCallable {
-    fn __call__(&self) -> PyResult<Py<PyAny>> {
-        Python::attach(|py| {
-            let future = self
-                .loop_
-                .bind(py)
-                .call_method0(intern!(py, "create_future"))?;
-            match self.request_future_tx.send(future.clone().unbind()) {
-                Ok(_) => {
-                    self.scheduler.commit(EVENT_ID_REQUEST);
-                }
-                Err(_) => {
-                    // TODO: Better to propagate stream close explicitly than assuming this error
-                    // means closed.
-                    let event = PyDict::new(py);
-                    event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
-                    future.call_method1(intern!(py, "set_result"), (event,))?;
-                }
+    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Py<PyAny>> {
+        let future = self
+            .loop_
+            .bind(py)
+            .call_method0(intern!(py, "create_future"))?;
+        match self.request_future_tx.send(future.clone().unbind()) {
+            Ok(_) => {
+                self.scheduler.commit(EVENT_ID_REQUEST);
             }
-            Ok(future.unbind())
-        })
+            Err(_) => {
+                // TODO: Better to propagate stream close explicitly than assuming this error
+                // means closed.
+                let event = PyDict::new(py);
+                event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
+                future.call_method1(intern!(py, "set_result"), (event,))?;
+            }
+        }
+        Ok(future.unbind())
     }
 }
 
@@ -378,23 +346,20 @@ unsafe impl Sync for AppFutureHandler {}
 
 #[pymethods]
 impl AppFutureHandler {
-    fn __call__(&mut self, future: Py<PyAny>) {
-        Python::attach(|py| {
-            let future = future.bind(py);
-            match future.call_method1(intern!(py, "result"), (0,)) {
-                Ok(_) => {}
-                Err(e) => {
-                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-                    eprintln!("Exception in ASGI application\n{}{}", tb, e);
-                    self.response_tx
-                        .send(ResponseEvent::Exception)
-                        // We printed the exception, if the receiver is already gone
-                        // for whatever reason it's fine.
-                        .unwrap_or_default();
-                    self.scheduler.commit(EVENT_ID_EXCEPTION);
-                }
+    fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
+        match future.call_method1(intern!(py, "result"), (0,)) {
+            Ok(_) => {}
+            Err(e) => {
+                let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                eprintln!("Exception in ASGI application\n{}{}", tb, e);
+                self.response_tx
+                    .send(ResponseEvent::Exception)
+                    // We printed the exception, if the receiver is already gone
+                    // for whatever reason it's fine.
+                    .unwrap_or_default();
+                self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
-        });
+        }
     }
 }
 
@@ -420,141 +385,137 @@ unsafe impl Sync for SendCallable {}
 
 #[pymethods]
 impl SendCallable {
-    fn __call__(&mut self, event: Py<PyDict>) -> PyResult<Py<PyAny>> {
-        Python::attach(|py| {
-            let future = self
-                .loop_
-                .bind(py)
-                .call_method0(intern!(py, "create_future"))?;
+    fn __call__<'py>(&mut self, py: Python<'py>, event: Bound<'py, PyDict>) -> PyResult<Py<PyAny>> {
+        let future = self
+            .loop_
+            .bind(py)
+            .call_method0(intern!(py, "create_future"))?;
 
-            let event = event.bind(py);
-            let event_type: String = match event.get_item("type")? {
-                Some(v) => v.extract()?,
-                None => {
-                    return Err(PyRuntimeError::new_err(
-                        "Unexpected ASGI message, missing 'type'.",
-                    ));
-                }
-            };
+        let event_type: String = match event.get_item("type")? {
+            Some(v) => v.extract()?,
+            None => {
+                return Err(PyRuntimeError::new_err(
+                    "Unexpected ASGI message, missing 'type'.",
+                ));
+            }
+        };
 
-            match &self.next_event {
-                NextASGIEvent::Start => {
-                    if event_type != "http.response.start" {
-                        return Err(PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.start', but got '{}'.",
-                            event_type
-                        )));
-                    }
-                    let mut headers = extract_headers_from_event(py, &event, 1)?;
-                    let status: u16 = match event.get_item(intern!(py, "status"))? {
-                        Some(v) => v.extract()?,
-                        None => {
-                            return Err(PyRuntimeError::new_err(
-                                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
-                            ));
-                        }
-                    };
-                    headers.push((
-                        String::from(":status"),
-                        Box::from(status.to_string().as_bytes()),
-                    ));
-                    let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
-                        Some(v) => v.extract()?,
-                        None => false,
-                    };
-                    match trailers {
-                        true => self.next_event = NextASGIEvent::BodyWithTrailers,
-                        false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
-                    };
-                    self.response_start.replace(ResponseStartEvent {
-                        headers: headers,
-                        trailers: trailers && self.trailers_accepted,
-                    });
-                    future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
-                }
-                NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
-                    if event_type != "http.response.body" {
-                        return Err(PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.body', but got '{}'.",
-                            event_type
-                        )));
-                    }
-                    let more_body: bool = match event.get_item(intern!(py, "more_body"))? {
-                        Some(v) => v.extract()?,
-                        None => false,
-                    };
-                    let body: Box<[u8]> = match event.get_item(intern!(py, "body"))? {
-                        Some(body) => Box::from(body.downcast::<PyBytes>()?.as_bytes()),
-                        _ => Box::new([]),
-                    };
-                    match (more_body, &self.next_event) {
-                        (false, NextASGIEvent::BodyWithTrailers) => {
-                            self.next_event = NextASGIEvent::Trailers;
-                        }
-                        (false, NextASGIEvent::BodyWithoutTrailers) => {
-                            self.next_event = NextASGIEvent::Done;
-                        }
-                        _ => {}
-                    }
-                    let body_event = ResponseBodyEvent {
-                        body,
-                        more_body,
-                        future: future.clone().unbind(),
-                    };
-                    if let Some(start_event) = self.response_start.take() {
-                        self.response_tx
-                            .send(ResponseEvent::Start(start_event, body_event))
-                            .unwrap();
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                    } else {
-                        match self.response_tx.send(ResponseEvent::Body(body_event)) {
-                            Ok(_) => {
-                                self.scheduler.commit(EVENT_ID_RESPONSE);
-                            }
-                            Err(_) => {
-                                // TODO: Better to propagate stream close explicitly than assuming this error
-                                // means closed.
-                                future
-                                    .call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
-                            }
-                        }
-                    }
-                }
-                NextASGIEvent::Trailers => {
-                    if event_type != "http.response.trailers" {
-                        return Err(PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.trailers', but got '{}'.",
-                            event_type
-                        )));
-                    }
-                    let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
-                        Some(v) => v.extract()?,
-                        None => false,
-                    };
-                    if !more_trailers {
-                        self.next_event = NextASGIEvent::Done;
-                    }
-                    if self.trailers_accepted {
-                        let headers = extract_headers_from_event(py, &event, 0)?;
-                        self.response_tx
-                            .send(ResponseEvent::Trailers(ResponseTrailersEvent {
-                                headers,
-                                more_trailers,
-                            }))
-                            .unwrap();
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                        future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
-                    }
-                }
-                NextASGIEvent::Done => {
+        match &self.next_event {
+            NextASGIEvent::Start => {
+                if event_type != "http.response.start" {
                     return Err(PyRuntimeError::new_err(format!(
-                        "Unexpected ASGI message '{}' sent, after response already completed.",
+                        "Expected ASGI message 'http.response.start', but got '{}'.",
                         event_type
                     )));
                 }
+                let mut headers = extract_headers_from_event(py, &event, 1)?;
+                let status: u16 = match event.get_item(intern!(py, "status"))? {
+                    Some(v) => v.extract()?,
+                    None => {
+                        return Err(PyRuntimeError::new_err(
+                            "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
+                        ));
+                    }
+                };
+                headers.push((
+                    String::from(":status"),
+                    Box::from(status.to_string().as_bytes()),
+                ));
+                let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
+                    Some(v) => v.extract()?,
+                    None => false,
+                };
+                match trailers {
+                    true => self.next_event = NextASGIEvent::BodyWithTrailers,
+                    false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
+                };
+                self.response_start.replace(ResponseStartEvent {
+                    headers: headers,
+                    trailers: trailers && self.trailers_accepted,
+                });
+                future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
             }
-            Ok(future.unbind())
-        })
+            NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
+                if event_type != "http.response.body" {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "Expected ASGI message 'http.response.body', but got '{}'.",
+                        event_type
+                    )));
+                }
+                let more_body: bool = match event.get_item(intern!(py, "more_body"))? {
+                    Some(v) => v.extract()?,
+                    None => false,
+                };
+                let body: Box<[u8]> = match event.get_item(intern!(py, "body"))? {
+                    Some(body) => Box::from(body.downcast::<PyBytes>()?.as_bytes()),
+                    _ => Box::new([]),
+                };
+                match (more_body, &self.next_event) {
+                    (false, NextASGIEvent::BodyWithTrailers) => {
+                        self.next_event = NextASGIEvent::Trailers;
+                    }
+                    (false, NextASGIEvent::BodyWithoutTrailers) => {
+                        self.next_event = NextASGIEvent::Done;
+                    }
+                    _ => {}
+                }
+                let body_event = ResponseBodyEvent {
+                    body,
+                    more_body,
+                    future: future.clone().unbind(),
+                };
+                if let Some(start_event) = self.response_start.take() {
+                    self.response_tx
+                        .send(ResponseEvent::Start(start_event, body_event))
+                        .unwrap();
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                } else {
+                    match self.response_tx.send(ResponseEvent::Body(body_event)) {
+                        Ok(_) => {
+                            self.scheduler.commit(EVENT_ID_RESPONSE);
+                        }
+                        Err(_) => {
+                            // TODO: Better to propagate stream close explicitly than assuming this error
+                            // means closed.
+                            future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                        }
+                    }
+                }
+            }
+            NextASGIEvent::Trailers => {
+                if event_type != "http.response.trailers" {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "Expected ASGI message 'http.response.trailers', but got '{}'.",
+                        event_type
+                    )));
+                }
+                let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
+                    Some(v) => v.extract()?,
+                    None => false,
+                };
+                if !more_trailers {
+                    self.next_event = NextASGIEvent::Done;
+                }
+                if self.trailers_accepted {
+                    let headers = extract_headers_from_event(py, &event, 0)?;
+                    self.response_tx
+                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                            headers,
+                            more_trailers,
+                        }))
+                        .unwrap();
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                    future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                }
+            }
+            NextASGIEvent::Done => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "Unexpected ASGI message '{}' sent, after response already completed.",
+                    event_type
+                )));
+            }
+        }
+        Ok(future.unbind())
     }
 }
 
