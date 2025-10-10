@@ -1,3 +1,3 @@
-__all__ = ["PyvoyServer"]
+__all__ = ["Interface", "PyvoyServer"]
 
-from ._server import PyvoyServer
+from ._server import Interface, PyvoyServer

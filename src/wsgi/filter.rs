@@ -106,9 +106,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     // TODO: Handle
                 }
             }
-            if has_request_body(envoy_filter) || self.request_closed {
-                self.process_read(envoy_filter);
-            }
+            self.process_read(envoy_filter);
         }
         for event in self.response_rx.try_iter().collect::<Vec<_>>() {
             match event {
@@ -161,6 +159,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
 impl Filter {
     fn process_read<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+        if !has_request_body(envoy_filter) && !self.request_closed {
+            return;
+        }
         match self.pending_read {
             0 => return,
             n if n > 0 => {

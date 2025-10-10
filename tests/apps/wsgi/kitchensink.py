@@ -1,3 +1,4 @@
+import time
 from collections.abc import Iterable
 from typing import cast
 from wsgiref.types import InputStream as WSGIInputStream
@@ -85,6 +86,90 @@ def _request_and_response_body(
     return [b"Yogi ", b"Bear"]
 
 
+def _large_bodies(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+
+    body = b""
+    for _ in range(10000):
+        chunk = request_body.read(1000)
+        if not chunk:
+            break
+        body += chunk
+    if request_body.read() != b"":
+        return _failure("request_body.read(1) != b''", start_response)
+
+    if body != b"A" * 1_000_000:
+        return _failure(f"body != b'A' * 1_000_000 (len: {len(body)})", start_response)
+
+    start_response("200 OK", [("content-type", "text/plain")])
+
+    for _ in range(1000):
+        yield b"B" * 1000
+
+
+def _bidi_stream(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response(
+        "202 Accepted", [("content-type", "text/plain"), ("x-animal", "bear")]
+    )
+
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+    yield b"Who are you?"
+    body = request_body.read(1024)
+    yield b"Hi " + body + b". What do you want to do?"
+    body = request_body.read(1024)
+    yield b"Let's " + body + b"!"
+
+
+def _exception_before_response(
+    _environ: WSGIEnvironment, _start_response: StartResponse
+) -> Iterable[bytes]:
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+def _exception_after_response_headers(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response("200 OK", [("content-type", "text/plain")])
+    yield b""
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+def _exception_after_response_body(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response("200 OK", [("content-type", "text/plain")])
+    yield b"Hello World!!!"
+    msg = "We have failed hard"
+    raise RuntimeError(msg)
+
+
+def _controlled(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    sleep_ms = int(environ.get("HTTP_X_SLEEP_MS", 0))
+    response_bytes = int(environ.get("HTTP_X_RESPONSE_BYTES", 0))
+
+    cast("WSGIInputStream", environ["wsgi.input"]).read()
+
+    if sleep_ms > 0:
+        time.sleep(sleep_ms / 1000.0)
+
+    start_response(
+        "200 OK",
+        [("content-type", "text/plain"), ("content-length", str(response_bytes))],
+    )
+    if response_bytes > 0:
+        chunk = b"A" * response_bytes
+        return [chunk]
+    return []
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -95,5 +180,17 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _response_body(environ, start_response)
         case "/request-and-response-body":
             return _request_and_response_body(environ, start_response)
+        case "/large-bodies":
+            return _large_bodies(environ, start_response)
+        case "/bidi-stream":
+            return _bidi_stream(environ, start_response)
+        case "/exception-before-response":
+            return _exception_before_response(environ, start_response)
+        case "/exception-after-response-headers":
+            return _exception_after_response_headers(environ, start_response)
+        case "/exception-after-response-body":
+            return _exception_after_response_body(environ, start_response)
+        case "/controlled":
+            return _controlled(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

@@ -296,12 +296,7 @@ async def _exception_after_response_headers(
             "trailers": False,
         }
     )
-    # We want to order the exception after response headers have been sent
-    # so schedule some thread switches by calling recv a few times. Revisit
-    # if this is still flaky with a status code 500 - it's not the end of the
-    # world to update the test to accept both status 500 or connection reset.
-    for _ in range(10):
-        await recv()
+    await send({"type": "http.response.body", "body": b"", "more_body": True})
     msg = "We have failed hard"
     raise RuntimeError(msg)
 
