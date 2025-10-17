@@ -12,7 +12,6 @@ permissions:
 jobs:
   build-linux:
     runs-on: ubuntu-24.04${{ matrix.arch == 'arm64' && '-arm' || '' }}
-    environment: ${{ github.event_name == 'push' && 'prod' || 'dev' }}
     strategy:
       matrix:
         python:
@@ -100,6 +99,7 @@ jobs:
       - build-linux
       - build-macos
     runs-on: ubuntu-24.04
+    environment: ${{ github.event_name == 'push' && 'prod' || 'dev' }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -109,7 +109,7 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
           repository-url: ${{ github.event_name != 'push' && 'https://test.pypi.org/legacy/' || null }}
           skip-existing: ${{ github.event_name != 'push' }}
