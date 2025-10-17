@@ -1225,6 +1225,7 @@ dependencies = [
  "executors",
  "oneshot",
  "pyo3",
+ "pyo3-build-config",
  "reqwest",
  "tokio",
  "tokio-stream",
