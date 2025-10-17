@@ -1,13 +1,13 @@
 [project]
 name = "pyvoy"
-version = "0.0.2"
+version = "0.0.3"
 description = "An ASGI server based on envoy"
 authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
 readme = "README.md"
 license-files = ["LICENSE"]
 
-dependencies = []
+dependencies = ["pyyaml"]
 
 [project.scripts]
 pyvoy = "pyvoy._cli:main"

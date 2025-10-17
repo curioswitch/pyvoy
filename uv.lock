@@ -519,6 +519,9 @@ wheels = [
 name = "pyvoy"
 version = "0.0.2"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -536,6 +539,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "pyyaml" }]
 
 [package.metadata.requires-dev]
 dev = [

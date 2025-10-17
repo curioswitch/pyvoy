@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 # Check envoy version minimums and update when needed
-MAC_OS_TARGET = "14_5"
+MAC_OS_TARGET = "15_0"
 GLIBC_TARGET = "2_31"
 
 
