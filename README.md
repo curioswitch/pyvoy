@@ -6,18 +6,14 @@ Python interpreter into a module that can be loaded by a stock envoy binary.
 ## Features
 
 - ASGI applications
-- Full HTTP protocol support, including HTTP/2 trailers
+- WSGI applications with worker threads (WIP, basic applications should work)
+- Full HTTP protocol support, including HTTP/2 trailers and HTTP/3
 - Any envoy configuration features such as authentication can be integrated as normal
 
 ## Limitations
 
-- Platforms limited to those supported by envoy, which generally means glibc-based Linux or MacOS
-- WSGI applications (coming soon)
-- Multiple worker threads (coming soon)
-- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead.
-
-[envoy]: https://www.envoyproxy.io/
-[envoy dynamic modules]: https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules
+- Platforms limited to those supported by envoy, which generally means glibc-based Linux on amd64/arm64 or MacOS on arm64
+- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead
 
 ## Benchmarks
 
@@ -66,3 +62,6 @@ We see that hypercorn seems to not perform well with HTTP/2, with errors and res
 focus comparisons on granian.
 
 Performance seems to be mostly the same between pyvoy and granian within the range of noise.
+
+[envoy]: https://www.envoyproxy.io/
+[envoy dynamic modules]: https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules
