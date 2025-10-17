@@ -72,17 +72,13 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
       - uses: astral-sh/setup-uv@v6
 
       - name: Setup rust
         run: rustup update
 
       - name: Prepare venv
-        run: uv sync
+        run: uv sync --python ${{ matrix.python }} --managed-python
 
       - name: Build wheel
         run: |

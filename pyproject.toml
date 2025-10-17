@@ -1,6 +1,6 @@
 [project]
 name = "pyvoy"
-version = "0.0.2"
+version = "0.0.3-dev.1"
 description = "An ASGI server based on envoy"
 authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
