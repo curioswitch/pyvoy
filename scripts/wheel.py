@@ -41,6 +41,8 @@ def main() -> None:
             "--remove",
             "--python-tag",
             python_tag,
+            "--abi-tag",
+            python_tag,
             "--platform-tag",
             platform_tag,
             built_wheel,
