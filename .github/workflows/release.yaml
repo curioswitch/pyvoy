@@ -8,6 +8,7 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-24.04${{ matrix.arch == 'arm64' && '-arm' || '' }}
+    environment: ${{ github.event_name == 'push' && 'prod' || 'dev' }}
     strategy:
       matrix:
         python:
@@ -104,4 +105,7 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - run: ls -al dist/
+      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        with:
+          repository-url: ${{ github.event_name != 'push' && 'https://test.pypi.org/legacy/' || null }}
+          skip-existing: ${{ github.event_name != 'push' }}
