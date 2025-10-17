@@ -102,5 +102,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
+          merge-multiple: true
 
       - run: ls -al dist/
