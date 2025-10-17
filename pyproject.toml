@@ -22,8 +22,9 @@ dev-dependencies = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "toml",
     "uvicorn[standard]",
-    "uvloop",
+    "wheel",
 ]
 
 [build-system]

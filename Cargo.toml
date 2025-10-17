@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/curioswitch/pyvoy"
 
 [dependencies]
-envoy-proxy-dynamic-modules-rust-sdk = { path = "../envoy/source/extensions/dynamic_modules/sdk/rust" }
+envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/envoyproxy/envoy", tag = "v1.36.0" }
 
 crossbeam-channel = "0.5.15"
 executors = "0.10.0"
