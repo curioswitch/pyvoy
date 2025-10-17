@@ -1,7 +1,6 @@
 use crate::wsgi::python::PyExecutor;
 use crossbeam_channel::{Receiver, Sender};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use pyo3::{Py, PyAny};
 
 use super::types::*;
 use crate::types::*;
@@ -28,6 +27,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         let (request_read_tx, request_read_rx) = crossbeam_channel::unbounded::<isize>();
         let (request_body_tx, request_body_rx) = crossbeam_channel::unbounded::<RequestBody>();
         let (response_tx, response_rx) = crossbeam_channel::unbounded::<ResponseEvent>();
+        let (response_written_tx, response_written_rx) = crossbeam_channel::unbounded::<()>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
@@ -40,6 +40,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             read_buffer: Vec::new(),
             response_rx: response_rx,
             response_tx: Some(response_tx),
+            response_written_tx,
+            response_written_rx: Some(response_written_rx),
         })
     }
 }
@@ -59,6 +61,8 @@ struct Filter {
 
     response_rx: Receiver<ResponseEvent>,
     response_tx: Option<Sender<ResponseEvent>>,
+    response_written_tx: Sender<()>,
+    response_written_rx: Option<Receiver<()>>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -73,6 +77,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_read_tx.take().unwrap(),
             self.request_body_rx.take().unwrap(),
             self.response_tx.take().unwrap(),
+            self.response_written_rx.take().unwrap(),
             envoy_filter.new_scheduler(),
             envoy_filter.new_scheduler(),
         );
@@ -117,8 +122,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         .map(|(k, v)| (k.as_str(), &v[..]))
                         .collect();
                     let end_stream = !body_event.more_body;
-                    if let Some(notify) = body_event.notify {
-                        notify.send(());
+                    if !end_stream {
+                        send_or_log(&self.response_written_tx, ());
                     }
                     if end_stream {
                         if body_event.body.is_empty() {
@@ -134,8 +139,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 }
                 ResponseEvent::Body(event) => {
                     let end_stream = !event.more_body;
-                    if let Some(notify) = event.notify {
-                        notify.send(());
+                    if !end_stream {
+                        send_or_log(&self.response_written_tx, ());
                     }
                     envoy_filter.send_response_data(&event.body, end_stream);
                 }
@@ -179,10 +184,13 @@ impl Filter {
                     envoy_filter.drain_request_body(body.len());
                 }
                 self.pending_read = 0;
-                self.request_body_tx.send(RequestBody {
-                    body: body.into_boxed_slice(),
-                    closed: !has_request_body(envoy_filter) && self.request_closed,
-                });
+                send_or_log(
+                    &self.request_body_tx,
+                    RequestBody {
+                        body: body.into_boxed_slice(),
+                        closed: !has_request_body(envoy_filter) && self.request_closed,
+                    },
+                );
             }
             _ => {
                 if let Some(buffers) = envoy_filter.get_request_body() {
@@ -195,12 +203,24 @@ impl Filter {
                 }
                 if self.request_closed {
                     self.pending_read = 0;
-                    self.request_body_tx.send(RequestBody {
-                        body: std::mem::take(&mut self.read_buffer).into_boxed_slice(),
-                        closed: true,
-                    });
+                    send_or_log(
+                        &self.request_body_tx,
+                        RequestBody {
+                            body: std::mem::take(&mut self.read_buffer).into_boxed_slice(),
+                            closed: true,
+                        },
+                    );
                 }
             }
         }
+    }
+}
+
+fn send_or_log<T>(tx: &Sender<T>, value: T) {
+    if let Err(err) = tx.send(value) {
+        eprintln!(
+            "Failed to send event to Python, this is likely a bug in pyvoy: {}",
+            err,
+        );
     }
 }

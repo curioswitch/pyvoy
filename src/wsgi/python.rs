@@ -35,6 +35,7 @@ impl PyExecutor {
         request_read_tx: Sender<isize>,
         request_body_rx: Receiver<RequestBody>,
         response_tx: Sender<ResponseEvent>,
+        response_written_rx: Receiver<()>,
         request_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         response_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
@@ -138,9 +139,14 @@ impl PyExecutor {
 
                 let start_response = Bound::new(py, StartResponseCallable { headers: None })?;
                 let response = app.call1((environ, start_response.borrow()))?;
+
+                // We ignore all channel errors here since they only happen if the filter was dropped meaning
+                // the request was closed, usually by the client. This is not an application error, and we just need
+                // to make sure a close() method for a generator is called before returning.
+
                 match response.len() {
                     Ok(0) => {
-                        response_tx.send(ResponseEvent::Start(
+                        let _ = response_tx.send(ResponseEvent::Start(
                             ResponseStartEvent {
                                 headers: start_response
                                     .borrow_mut()
@@ -151,7 +157,6 @@ impl PyExecutor {
                             ResponseBodyEvent {
                                 body: Box::from([]),
                                 more_body: false,
-                                notify: None,
                             },
                         ));
                         response_scheduler.commit(EVENT_ID_RESPONSE);
@@ -162,7 +167,7 @@ impl PyExecutor {
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
                         let body: Box<[u8]> = Box::from(item.downcast::<PyBytes>()?.as_bytes());
-                        response_tx.send(ResponseEvent::Start(
+                        let _ = response_tx.send(ResponseEvent::Start(
                             ResponseStartEvent {
                                 headers: start_response
                                     .borrow_mut()
@@ -173,7 +178,6 @@ impl PyExecutor {
                             ResponseBodyEvent {
                                 body,
                                 more_body: false,
-                                notify: None,
                             },
                         ));
                         response_scheduler.commit(EVENT_ID_RESPONSE);
@@ -183,10 +187,9 @@ impl PyExecutor {
                         for item in response.try_iter()? {
                             let body: Box<[u8]> =
                                 Box::from(item?.downcast::<PyBytes>()?.as_bytes());
-                            let (tx, rx) = oneshot::channel::<()>();
                             match started {
                                 false => {
-                                    response_tx.send(ResponseEvent::Start(
+                                    let _ = response_tx.send(ResponseEvent::Start(
                                         ResponseStartEvent {
                                             headers: start_response
                                                 .borrow_mut()
@@ -197,45 +200,40 @@ impl PyExecutor {
                                         ResponseBodyEvent {
                                             body,
                                             more_body: true,
-                                            notify: Some(tx),
                                         },
                                     ));
                                     started = true;
                                 }
                                 true => {
-                                    response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
-                                        body,
-                                        more_body: true,
-                                        notify: Some(tx),
-                                    }));
+                                    let _ =
+                                        response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
+                                            body,
+                                            more_body: true,
+                                        }));
                                 }
                             }
                             response_scheduler.commit(EVENT_ID_RESPONSE);
-                            py.detach::<PyResult<()>, _>(|| {
-                                rx.recv().map_err(|e| {
-                                    PyRuntimeError::new_err(format!(
-                                        "Failed to send response: {}",
-                                        e
-                                    ))
-                                })?;
-                                Ok(())
-                            })?;
+                            py.detach(|| {
+                                let _ = response_written_rx.recv();
+                            });
                         }
-                        let (tx, rx) = oneshot::channel::<()>();
-                        response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
+                        let _ = response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
                             body: Box::from([]),
                             more_body: false,
-                            notify: Some(tx),
                         }));
                         response_scheduler.commit(EVENT_ID_RESPONSE);
-                        py.detach::<PyResult<()>, _>(|| {
-                            rx.recv().map_err(|e| {
-                                PyRuntimeError::new_err(format!("Failed to send response: {}", e))
-                            })?;
-                            Ok(())
-                        })?;
+                        py.detach(|| {
+                            // RecvError only is request filter was dropped, but since this
+                            // is the end always safe to ignore.
+                            let _ = response_written_rx.recv();
+                        });
                     }
                 }
+
+                if let Ok(close) = response.getattr(intern!(py, "close")) {
+                    close.call0()?;
+                }
+
                 Ok(())
             });
             if let Err(e) = result {

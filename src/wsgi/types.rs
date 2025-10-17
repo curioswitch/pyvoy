@@ -5,7 +5,6 @@ pub(crate) struct ResponseStartEvent {
 pub(crate) struct ResponseBodyEvent {
     pub body: Box<[u8]>,
     pub more_body: bool,
-    pub notify: Option<oneshot::Sender<()>>,
 }
 
 pub(crate) enum ResponseEvent {
