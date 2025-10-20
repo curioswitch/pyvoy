@@ -9,7 +9,7 @@ GLIBC_TARGET = "2_31"
 
 
 def main() -> None:
-    subprocess.run(["uv", "build", "--wheel"], check=True)  # noqa: S607
+    subprocess.run(["uv", "build", "--wheel"], check=True)
 
     dist_dir = Path(__file__).parent / ".." / "dist"
     built_wheel = next(dist_dir.glob("*-py3-none-any.whl"))

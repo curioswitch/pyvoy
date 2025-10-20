@@ -46,14 +46,32 @@ def main() -> None:
             copyfileobj(envoy_file, f)
     envoy_path.chmod(0o755)
 
-    subprocess.run(["cargo", "build", "--release"], check=True)  # noqa: S607
-    ext = ".dylib" if sys.platform == "darwin" else ".so"
-    with (
-        (Path(__file__).parent.parent / "target" / "release" / f"libpyvoy{ext}").open(
-            "rb"
-        ) as src,
-        pyvoy_path.open("wb") as dst,
-    ):
+    subprocess.run(["cargo", "build", "--release"], check=True)
+
+    release_dir = Path(__file__).parent.parent / "target" / "release"
+    if sys.platform == "darwin":
+        libpyvoy_path = release_dir / "libpyvoy.dylib"
+        proc = subprocess.run(
+            ["otool", "-L", libpyvoy_path], stdout=subprocess.PIPE, check=True
+        )
+        for line in proc.stdout.splitlines():
+            if b"libpython" not in line:
+                continue
+            libpython_path = Path(line.strip().split(b" ")[0].decode())
+            subprocess.run(
+                [
+                    "install_name_tool",
+                    "-change",
+                    str(libpython_path),
+                    libpython_path.name,
+                    str(libpyvoy_path),
+                ],
+                check=True,
+            )
+    else:
+        libpyvoy_path = release_dir / "libpyvoy.so"
+
+    with libpyvoy_path.open("rb") as src, pyvoy_path.open("wb") as dst:
         copyfileobj(src, dst)
 
 

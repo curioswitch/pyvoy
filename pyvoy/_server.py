@@ -4,10 +4,12 @@ import os
 import subprocess
 import sys
 import urllib.request
+from pathlib import Path
 from types import TracebackType
 from typing import IO, Literal
 
 import yaml
+from find_libpython import find_libpython
 
 from ._bin import get_envoy_path, get_pyvoy_dir_path
 
@@ -74,17 +76,28 @@ class PyvoyServer:
 
         pythonpath = os.pathsep.join(sys.path)
 
+        env = {
+            **os.environ,
+            "PYTHONPATH": pythonpath,
+            "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
+            "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
+        }
+
+        if os.name == "posix":
+            libpython_path = find_libpython()
+            if libpython_path:
+                libpython_dir = str(Path(libpython_path).parent)
+                if sys.platform == "darwin":
+                    env["DYLD_LIBRARY_PATH"] = libpython_dir
+                else:
+                    env["LD_LIBRARY_PATH"] = libpython_dir
+
         self._process = subprocess.Popen(  # noqa: S603 - OK
             [get_envoy_path(), "--config-yaml", json.dumps(config)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            env={
-                **os.environ,
-                "PYTHONPATH": pythonpath,
-                "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
-                "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
-            },
+            env=env,
         )
         admin_address = ""
         assert self._process.stdout is not None  # noqa: S101

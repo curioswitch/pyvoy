@@ -1,13 +1,13 @@
 [project]
 name = "pyvoy"
-version = "0.0.3-dev.1"
+version = "0.0.3-dev.2"
 description = "An ASGI server based on envoy"
 authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
 readme = "README.md"
 license-files = ["LICENSE"]
 
-dependencies = ["pyyaml"]
+dependencies = ["find-libpython", "pyyaml"]
 
 [project.scripts]
 pyvoy = "pyvoy._cli:main"
@@ -143,6 +143,7 @@ extend-ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/**.py" = ["S603", "S607"]
 "**/test_*.py" = [
     "ANN",
     "S101",

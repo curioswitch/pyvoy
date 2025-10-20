@@ -78,7 +78,7 @@ jobs:
         run: rustup update
 
       - name: Prepare venv
-        run: uv sync --python ${{ matrix.python }} --managed-python
+        run: uv sync --python ${{ matrix.python }}
 
       - name: Build wheel
         run: |
