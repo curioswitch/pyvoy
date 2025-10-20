@@ -101,7 +101,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if end_of_stream {
             self.request_closed = true;
         }
-        if has_request_body(envoy_filter) {
+        if end_of_stream || has_request_body(envoy_filter) {
             match self.request_future_rx.try_recv() {
                 Ok(future) => {
                     self.executor.handle_request_future(

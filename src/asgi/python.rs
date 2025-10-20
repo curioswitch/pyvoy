@@ -5,11 +5,14 @@ use crate::types::*;
 use crossbeam_channel::Sender;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
-    exceptions::PyRuntimeError,
+    create_exception,
+    exceptions::{PyOSError, PyRuntimeError},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone},
 };
+
+create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
 struct ExecutorInner {
     app: Py<PyAny>,
@@ -235,6 +238,7 @@ impl ExecutorInner {
                 next_event: NextASGIEvent::Start,
                 response_start: None,
                 trailers_accepted: trailers_accepted,
+                closed: false,
                 response_tx: response_tx.clone(),
                 scheduler: send_scheduler,
                 loop_: self.loop_.clone_ref(py),
@@ -325,8 +329,6 @@ impl ReceiveCallable {
                 self.scheduler.commit(EVENT_ID_REQUEST);
             }
             Err(_) => {
-                // TODO: Better to propagate stream close explicitly than assuming this error
-                // means closed.
                 let event = PyDict::new(py);
                 event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
                 future.call_method1(intern!(py, "set_result"), (event,))?;
@@ -350,14 +352,14 @@ impl AppFutureHandler {
         match future.call_method1(intern!(py, "result"), (0,)) {
             Ok(_) => {}
             Err(e) => {
+                if e.is_instance_of::<ClientDisconnectedError>(py) {
+                    return;
+                }
                 let tb = e.traceback(py).unwrap().format().unwrap_or_default();
                 eprintln!("Exception in ASGI application\n{}{}", tb, e);
-                self.response_tx
-                    .send(ResponseEvent::Exception)
-                    // We printed the exception, if the receiver is already gone
-                    // for whatever reason it's fine.
-                    .unwrap_or_default();
-                self.scheduler.commit(EVENT_ID_EXCEPTION);
+                if let Ok(_) = self.response_tx.send(ResponseEvent::Exception) {
+                    self.scheduler.commit(EVENT_ID_EXCEPTION);
+                }
             }
         }
     }
@@ -376,6 +378,7 @@ struct SendCallable {
     next_event: NextASGIEvent,
     response_start: Option<ResponseStartEvent>,
     trailers_accepted: bool,
+    closed: bool,
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
@@ -386,6 +389,10 @@ unsafe impl Sync for SendCallable {}
 #[pymethods]
 impl SendCallable {
     fn __call__<'py>(&mut self, py: Python<'py>, event: Bound<'py, PyDict>) -> PyResult<Py<PyAny>> {
+        if self.closed {
+            return Err(ClientDisconnectedError::new_err(()));
+        }
+
         let future = self
             .loop_
             .bind(py)
@@ -465,9 +472,21 @@ impl SendCallable {
                     future: future.clone().unbind(),
                 };
                 if let Some(start_event) = self.response_start.take() {
-                    self.response_tx
+                    match self
+                        .response_tx
                         .send(ResponseEvent::Start(start_event, body_event))
-                        .unwrap();
+                    {
+                        Ok(_) => {
+                            self.scheduler.commit(EVENT_ID_RESPONSE);
+                        }
+                        Err(_) => {
+                            self.closed = true;
+                            future.call_method1(
+                                intern!(py, "set_exception"),
+                                (ClientDisconnectedError::new_err(()),),
+                            )?;
+                        }
+                    }
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     match self.response_tx.send(ResponseEvent::Body(body_event)) {
@@ -475,9 +494,11 @@ impl SendCallable {
                             self.scheduler.commit(EVENT_ID_RESPONSE);
                         }
                         Err(_) => {
-                            // TODO: Better to propagate stream close explicitly than assuming this error
-                            // means closed.
-                            future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                            self.closed = true;
+                            future.call_method1(
+                                intern!(py, "set_exception"),
+                                (ClientDisconnectedError::new_err(()),),
+                            )?;
                         }
                     }
                 }
@@ -498,13 +519,15 @@ impl SendCallable {
                 }
                 if self.trailers_accepted {
                     let headers = extract_headers_from_event(py, &event, 0)?;
-                    self.response_tx
-                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
-                            headers,
-                            more_trailers,
-                        }))
-                        .unwrap();
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                    if let Ok(_) =
+                        self.response_tx
+                            .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                                headers,
+                                more_trailers,
+                            }))
+                    {
+                        self.scheduler.commit(EVENT_ID_RESPONSE);
+                    };
                     future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
             }

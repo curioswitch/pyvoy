@@ -20,6 +20,7 @@ dev-dependencies = [
     "hypercorn",
     "pyright[nodejs]",
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "ruff",
     "toml",

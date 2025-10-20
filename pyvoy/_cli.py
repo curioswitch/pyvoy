@@ -1,8 +1,8 @@
+import asyncio
 import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pathlib import Path
-from types import FrameType
 
 import yaml
 
@@ -22,7 +22,7 @@ class CLIArgs:
     interface: Interface
 
 
-def main() -> None:
+async def amain() -> None:
     parser = ArgumentParser(
         description="Run a pyvoy server", formatter_class=ArgumentDefaultsHelpFormatter
     )
@@ -85,17 +85,12 @@ def main() -> None:
 
     args = parser.parse_args(namespace=CLIArgs())
 
-    def exit_python(_s: int, _f: FrameType | None) -> None:
-        print("Shutting down pyvoy...")  # noqa: T201
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, exit_python)
-
     server = PyvoyServer(
         args.app,
         address=args.address,
         port=args.port,
-        print_startup_logs=True,
+        stdout=None,
+        stderr=None,
         tls_port=args.tls_port,
         tls_key=Path(args.tls_key) if args.tls_key else None,
         tls_cert=Path(args.tls_cert) if args.tls_cert else None,
@@ -108,15 +103,27 @@ def main() -> None:
         print(yaml.dump(server.get_envoy_config()))  # noqa: T201
         return
 
-    with server:
+    async with server:
         print(  # noqa: T201
             f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
             file=sys.stderr,
         )
-        while True:
-            line = server.output.readline()
-            if line:
-                print(line, end="", file=sys.stderr)  # noqa: T201
+
+        async def shutdown() -> None:
+            print("Shutting down pyvoy...")  # noqa: T201
+            await server.stop()
+
+        asyncio.get_event_loop().add_signal_handler(
+            signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
+        )
+        try:
+            await server.wait()
+        except asyncio.CancelledError:
+            await shutdown()
+
+
+def main() -> None:
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

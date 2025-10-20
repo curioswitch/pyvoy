@@ -1,10 +1,13 @@
+import asyncio
 import base64
+import contextlib
 import json
 import os
 import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from types import TracebackType
 from typing import IO, Literal
 
@@ -20,11 +23,13 @@ class PyvoyServer:
     _listener_address: str
     _listener_port: int
     _listener_port_tls: int | None
+    _stdout: int | IO[bytes] | None
+    _stderr: int | IO[bytes] | None
     _print_startup_logs: bool
     _print_envoy_config: bool
     _interface: Interface
 
-    _output: IO[str]
+    _stopped: bool
 
     def __init__(
         self,
@@ -38,7 +43,8 @@ class PyvoyServer:
         tls_ca_cert: bytes | os.PathLike | None = None,
         tls_enable_http3: bool = True,
         interface: Interface = "asgi",
-        print_startup_logs: bool = False,
+        stdout: int | IO[bytes] | None = subprocess.DEVNULL,
+        stderr: int | IO[bytes] | None = subprocess.DEVNULL,
         print_envoy_config: bool = False,
     ) -> None:
         self._app = app
@@ -50,24 +56,26 @@ class PyvoyServer:
         self._tls_ca_cert = tls_ca_cert
         self._tls_enable_http3 = tls_enable_http3
         self._interface = interface
-        self._print_startup_logs = print_startup_logs
+        self._stdout = stdout
+        self._stderr = stderr
         self._print_envoy_config = print_envoy_config
 
         self._listener_port_tls = None
+        self._stopped = False
 
-    def __enter__(self) -> "PyvoyServer":
-        self.start()
+    async def __aenter__(self) -> "PyvoyServer":
+        await self.start()
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         _exc_type: type[BaseException] | None,
         _exc_value: BaseException | None,
         _traceback: TracebackType | None,
     ) -> None:
-        self.stop()
+        await self.stop()
 
-    def start(self) -> None:
+    async def start(self) -> None:
         config = self.get_envoy_config()
 
         if self._print_envoy_config:
@@ -92,51 +100,52 @@ class PyvoyServer:
                 else:
                     env["LD_LIBRARY_PATH"] = libpython_dir
 
-        self._process = subprocess.Popen(  # noqa: S603 - OK
-            [get_envoy_path(), "--config-yaml", json.dumps(config)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-        )
-        admin_address = ""
-        assert self._process.stdout is not None  # noqa: S101
-        self._output = self._process.stdout
-        startup_logs = []
-        while True:
-            line = self._output.readline()
-            if self._print_startup_logs:
-                print(line, end="")  # noqa: T201
-            else:
-                startup_logs.append(line)
-            if self._process.poll() is not None:
-                if not self._print_startup_logs:
-                    print("".join(startup_logs), end="")  # noqa: T201
-                msg = "Envoy process exited unexpectedly"
-                raise RuntimeError(msg)
-            if "admin address:" in line:
-                admin_address = line.split("admin address:")[1].strip()
-            if "starting main dispatch loop" in line:
-                break
-        response = urllib.request.urlopen(
-            f"http://{admin_address}/listeners?format=json"
-        )
-        response_data = json.loads(response.read())
-        socket_address = response_data["listener_statuses"][0]["local_address"][
-            "socket_address"
-        ]
-        self._listener_address = socket_address["address"]
-        self._listener_port = socket_address["port_value"]
-        if self._tls_port is not None:
-            socket_address_tls = response_data["listener_statuses"][1]["local_address"][
-                "socket_address"
-            ]
-            self._listener_port_tls = socket_address_tls["port_value"]
+        with NamedTemporaryFile("r") as admin_address_file:
+            self._process = await asyncio.create_subprocess_exec(
+                get_envoy_path(),
+                "--config-yaml",
+                json.dumps(config),
+                "--admin-address-path",
+                admin_address_file.name,
+                stdout=self._stdout,
+                stderr=self._stderr,
+                env=env,
+            )
+            for _ in range(100):
+                with contextlib.suppress(Exception):
+                    admin_address = Path(admin_address_file.name).read_text()
+                    if admin_address:
+                        response = await asyncio.to_thread(
+                            urllib.request.urlopen,
+                            f"http://{admin_address}/listeners?format=json",
+                        )
+                        response_data = json.loads(response.read())
+                        socket_address = response_data["listener_statuses"][0][
+                            "local_address"
+                        ]["socket_address"]
+                        self._listener_address = socket_address["address"]
+                        self._listener_port = socket_address["port_value"]
+                        if self._tls_port is not None:
+                            socket_address_tls = response_data["listener_statuses"][1][
+                                "local_address"
+                            ]["socket_address"]
+                            self._listener_port_tls = socket_address_tls["port_value"]
+                        break
+                await asyncio.sleep(0.1)
 
-    def stop(self) -> None:
-        self._output.close()
-        self._process.terminate()
-        self._process.wait()
+    async def wait(self) -> None:
+        await self._process.wait()
+
+    async def stop(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+        try:
+            self._process.terminate()
+            await self._process.wait()
+        except ProcessLookupError:
+            # Envoy likely crashed, no need to look like multiple errors.
+            pass
 
     @property
     def listener_address(self) -> str:
@@ -149,10 +158,6 @@ class PyvoyServer:
     @property
     def listener_port_tls(self) -> int | None:
         return self._listener_port_tls
-
-    @property
-    def output(self) -> IO[str]:
-        return self._output
 
     def get_envoy_config(self) -> dict:
         enable_http3 = self._tls_enable_http3 and (
@@ -211,7 +216,10 @@ class PyvoyServer:
                 "name": "envoy.transport_sockets.tls",
                 "typed_config": {
                     "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext",
-                    "common_tls_context": common_tls_context,
+                    "common_tls_context": {
+                        **common_tls_context,
+                        "alpn_protocols": ["h2", "http/1.1"],
+                    },
                     "require_client_certificate": bool(self._tls_ca_cert),
                 },
             }
