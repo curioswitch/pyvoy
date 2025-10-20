@@ -1,7 +1,15 @@
 import asyncio
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
-from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
+if TYPE_CHECKING:
+    # We don't use asgiref code so only import from it for type checking
+    from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope, Scope
+else:
+    ASGIReceiveCallable = "asgiref.typing.ASGIReceiveCallable"
+    ASGISendCallable = "asgiref.typing.ASGISendCallable"
+    HTTPScope = "asgiref.typing.HTTPScope"
+    Scope = "asgiref.typing.Scope"
 
 
 async def _send_failure(msg: str, send: ASGISendCallable) -> None:
