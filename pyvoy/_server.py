@@ -94,11 +94,11 @@ class PyvoyServer:
         if os.name == "posix":
             libpython_path = find_libpython()
             if libpython_path:
-                libpython_dir = str(Path(libpython_path).parent)
                 if sys.platform == "darwin":
+                    libpython_dir = str(Path(libpython_path).parent)
                     env["DYLD_LIBRARY_PATH"] = libpython_dir
                 else:
-                    env["LD_LIBRARY_PATH"] = libpython_dir
+                    env["LD_PRELOAD"] = libpython_path
 
         with NamedTemporaryFile("r") as admin_address_file:
             self._process = await asyncio.create_subprocess_exec(
@@ -107,6 +107,7 @@ class PyvoyServer:
                 json.dumps(config),
                 "--admin-address-path",
                 admin_address_file.name,
+                "--use-dynamic-base-id",
                 stdout=self._stdout,
                 stderr=self._stderr,
                 env=env,
