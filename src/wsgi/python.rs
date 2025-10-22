@@ -8,8 +8,11 @@ use pyo3::{
 
 use super::types::*;
 use crate::types::*;
-use crossbeam_channel::{Receiver, Sender};
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
+use std::sync::{
+    Mutex,
+    mpsc::{Receiver, Sender},
+};
 
 #[derive(Clone)]
 pub(crate) struct PyExecutor {
@@ -41,6 +44,8 @@ impl PyExecutor {
     ) {
         let app_module = self.app_module.clone();
         let app_attr = self.app_attr.clone();
+        let request_body_rx = Mutex::new(request_body_rx);
+        let response_written_rx = Mutex::new(response_written_rx);
         self.pool.execute(move || {
             let result: PyResult<()> = Python::attach(|py| {
                 let app_module = py.import(app_module)?;
@@ -214,7 +219,7 @@ impl PyExecutor {
                             }
                             response_scheduler.commit(EVENT_ID_RESPONSE);
                             py.detach(|| {
-                                let _ = response_written_rx.recv();
+                                let _ = response_written_rx.lock().unwrap().recv();
                             });
                         }
                         let _ = response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
@@ -225,7 +230,7 @@ impl PyExecutor {
                         py.detach(|| {
                             // RecvError only is request filter was dropped, but since this
                             // is the end always safe to ignore.
-                            let _ = response_written_rx.recv();
+                            let _ = response_written_rx.lock().unwrap().recv();
                         });
                     }
                 }
@@ -252,12 +257,12 @@ struct StartResponseCallable {
 
 #[pymethods]
 impl StartResponseCallable {
-    #[pyo3(signature = (status, response_headers, exc_info=None))]
+    #[pyo3(signature = (status, response_headers, _exc_info=None))]
     fn __call__<'py>(
         &mut self,
         status: &str,
         response_headers: Bound<'py, PyList>,
-        exc_info: Option<Bound<'py, PyTuple>>,
+        _exc_info: Option<Bound<'py, PyTuple>>,
     ) -> PyResult<()> {
         let mut headers = Vec::with_capacity(response_headers.len() + 1);
         for item in response_headers.iter() {
@@ -282,7 +287,7 @@ impl StartResponseCallable {
 #[pyclass]
 struct RequestInput {
     request_read_tx: Sender<isize>,
-    request_body_rx: Receiver<RequestBody>,
+    request_body_rx: Mutex<Receiver<RequestBody>>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     closed: bool,
 }
@@ -306,7 +311,7 @@ impl RequestInput {
                 self.scheduler.commit(EVENT_ID_REQUEST);
 
                 let body = py.detach::<PyResult<RequestBody>, _>(|| {
-                    self.request_body_rx.recv().map_err(|e| {
+                    self.request_body_rx.lock().unwrap().recv().map_err(|e| {
                         PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
                     })
                 })?;

@@ -1,8 +1,6 @@
 use std::thread;
 
-use super::types::*;
 use crate::types::*;
-use crossbeam_channel::Sender;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
     create_exception,
@@ -11,6 +9,8 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone},
 };
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
@@ -19,6 +19,7 @@ struct ExecutorInner {
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
     loop_: Py<PyAny>,
+    executor: Executor,
 }
 
 /// An executor of Python code.
@@ -42,7 +43,7 @@ pub(crate) struct Executor {
 
 impl Executor {
     pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
-        let (loop_tx, loop_rx) = crossbeam_channel::bounded(0);
+        let (loop_tx, loop_rx) = mpsc::sync_channel(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let asyncio = PyModule::import(py, "asyncio")?;
@@ -73,14 +74,17 @@ impl Executor {
             Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind()))
         })?;
 
+        let (tx, rx) = mpsc::channel::<Event>();
+        let executor = Self { tx };
+
         let inner = ExecutorInner {
             app,
             asgi,
             extensions,
             loop_,
+            executor: executor.clone(),
         };
 
-        let (tx, rx) = crossbeam_channel::unbounded::<Event>();
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
@@ -97,14 +101,14 @@ impl Executor {
                 }
             }
         });
-        Ok(Self { tx })
+        Ok(executor)
     }
 
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
         trailers_accepted: bool,
-        request_future_tx: Sender<Py<PyAny>>,
+        recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
         recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
@@ -114,7 +118,7 @@ impl Executor {
             .send(Event::ExecuteApp {
                 scope,
                 trailers_accepted,
-                request_future_tx,
+                recv_future_tx,
                 response_tx,
                 recv_scheduler,
                 send_scheduler,
@@ -123,14 +127,9 @@ impl Executor {
             .unwrap();
     }
 
-    pub(crate) fn handle_request_future(
-        &self,
-        body: Box<[u8]>,
-        more_body: bool,
-        future: Py<PyAny>,
-    ) {
+    pub(crate) fn handle_recv_future(&self, body: Box<[u8]>, more_body: bool, future: RecvFuture) {
         self.tx
-            .send(Event::HandleRequestFuture {
+            .send(Event::HandleRecvFuture {
                 body,
                 more_body,
                 future,
@@ -138,8 +137,20 @@ impl Executor {
             .unwrap();
     }
 
-    pub(crate) fn handle_response_future(&self, future: Py<PyAny>) {
-        self.tx.send(Event::HandleResponseFuture(future)).unwrap();
+    pub(crate) fn handle_dropped_recv_future(&self, future: Py<PyAny>) {
+        self.tx
+            .send(Event::HandleDroppedRecvFuture(future))
+            .unwrap();
+    }
+
+    pub(crate) fn handle_send_future(&self, future: SendFuture) {
+        self.tx.send(Event::HandleSendFuture(future)).unwrap();
+    }
+
+    pub(crate) fn handle_dropped_send_future(&self, future: Py<PyAny>) {
+        self.tx
+            .send(Event::HandleDroppedSendFuture(future))
+            .unwrap();
     }
 }
 
@@ -149,7 +160,7 @@ impl ExecutorInner {
             Event::ExecuteApp {
                 scope,
                 trailers_accepted,
-                request_future_tx,
+                recv_future_tx,
                 response_tx,
                 recv_scheduler,
                 send_scheduler,
@@ -158,18 +169,22 @@ impl ExecutorInner {
                 py,
                 scope,
                 trailers_accepted,
-                request_future_tx,
+                recv_future_tx,
                 response_tx,
                 recv_scheduler,
                 send_scheduler,
                 end_scheduler,
             ),
-            Event::HandleRequestFuture {
+            Event::HandleRecvFuture {
                 body,
                 more_body,
-                future,
-            } => self.handle_request_future(py, body, more_body, future),
-            Event::HandleResponseFuture(future) => self.handle_response_future(py, future),
+                mut future,
+            } => self.handle_recv_future(py, body, more_body, future.future.take().unwrap()),
+            Event::HandleDroppedRecvFuture(future) => self.handle_dropped_recv_future(py, future),
+            Event::HandleSendFuture(mut send_future) => {
+                self.handle_send_future(py, send_future.future.take().unwrap())
+            }
+            Event::HandleDroppedSendFuture(future) => self.handle_dropped_send_future(py, future),
         }
     }
 
@@ -178,7 +193,7 @@ impl ExecutorInner {
         py: Python<'py>,
         scope: Scope,
         trailers_accepted: bool,
-        request_future_tx: Sender<Py<PyAny>>,
+        recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
         recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
@@ -229,10 +244,11 @@ impl ExecutorInner {
         let app = self.app.bind(py);
         let coro = app.call1((
             scope_dict,
-            ReceiveCallable {
-                request_future_tx: request_future_tx,
+            RecvCallable {
+                recv_future_tx: recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
+                executor: self.executor.clone(),
             },
             SendCallable {
                 next_event: NextASGIEvent::Start,
@@ -242,6 +258,7 @@ impl ExecutorInner {
                 response_tx: response_tx.clone(),
                 scheduler: send_scheduler,
                 loop_: self.loop_.clone_ref(py),
+                executor: self.executor.clone(),
             },
         ))?;
         let asyncio = PyModule::import(py, intern!(py, "asyncio"))?;
@@ -260,7 +277,7 @@ impl ExecutorInner {
         Ok(())
     }
 
-    fn handle_request_future<'py>(
+    fn handle_recv_future<'py>(
         &self,
         py: Python<'py>,
         body: Box<[u8]>,
@@ -279,12 +296,33 @@ impl ExecutorInner {
         Ok(())
     }
 
-    fn handle_response_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
+    fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
+        let future = future.bind(py);
+        let set_result = future.getattr(intern!(py, "set_result"))?;
+        let event = PyDict::new(py);
+        event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
+        self.loop_
+            .bind(py)
+            .call_method1(intern!(py, "call_soon_threadsafe"), (set_result, event))?;
+        Ok(())
+    }
+
+    fn handle_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
         let set_result = future.getattr(intern!(py, "set_result"))?;
         self.loop_.bind(py).call_method1(
             intern!(py, "call_soon_threadsafe"),
             (set_result, PyNone::get(py)),
+        )?;
+        Ok(())
+    }
+
+    fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
+        let future = future.bind(py);
+        let set_exception = future.getattr(intern!(py, "set_exception"))?;
+        self.loop_.bind(py).call_method1(
+            intern!(py, "call_soon_threadsafe"),
+            (set_exception, ClientDisconnectedError::new_err(())),
         )?;
         Ok(())
     }
@@ -294,37 +332,44 @@ enum Event {
     ExecuteApp {
         scope: Scope,
         trailers_accepted: bool,
-        request_future_tx: Sender<Py<PyAny>>,
+        recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
         recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         end_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     },
-    HandleRequestFuture {
+    HandleRecvFuture {
         body: Box<[u8]>,
         more_body: bool,
-        future: Py<PyAny>,
+        future: RecvFuture,
     },
-    HandleResponseFuture(Py<PyAny>),
+    HandleDroppedRecvFuture(Py<PyAny>),
+    HandleSendFuture(SendFuture),
+    HandleDroppedSendFuture(Py<PyAny>),
 }
 
 #[pyclass]
-struct ReceiveCallable {
-    request_future_tx: Sender<Py<PyAny>>,
+struct RecvCallable {
+    recv_future_tx: Sender<RecvFuture>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
+    executor: Executor,
 }
 
-unsafe impl Sync for ReceiveCallable {}
+unsafe impl Sync for RecvCallable {}
 
 #[pymethods]
-impl ReceiveCallable {
+impl RecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Py<PyAny>> {
         let future = self
             .loop_
             .bind(py)
             .call_method0(intern!(py, "create_future"))?;
-        match self.request_future_tx.send(future.clone().unbind()) {
+        let recv_future = RecvFuture {
+            future: Some(future.clone().unbind()),
+            executor: self.executor.clone(),
+        };
+        match self.recv_future_tx.send(recv_future) {
             Ok(_) => {
                 self.scheduler.commit(EVENT_ID_REQUEST);
             }
@@ -382,6 +427,7 @@ struct SendCallable {
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
+    executor: Executor,
 }
 
 unsafe impl Sync for SendCallable {}
@@ -469,7 +515,10 @@ impl SendCallable {
                 let body_event = ResponseBodyEvent {
                     body,
                     more_body,
-                    future: future.clone().unbind(),
+                    future: SendFuture {
+                        future: Some(future.clone().unbind()),
+                        executor: self.executor.clone(),
+                    },
                 };
                 if let Some(start_event) = self.response_start.take() {
                     match self
@@ -487,7 +536,6 @@ impl SendCallable {
                             )?;
                         }
                     }
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     match self.response_tx.send(ResponseEvent::Body(body_event)) {
                         Ok(_) => {
@@ -570,3 +618,56 @@ fn extract_headers_from_event<'py>(
         None => Ok(Vec::with_capacity(extra_capacity)),
     }
 }
+
+pub(crate) struct ResponseStartEvent {
+    pub headers: Vec<(String, Box<[u8]>)>,
+    pub trailers: bool,
+}
+
+pub(crate) struct ResponseBodyEvent {
+    pub body: Box<[u8]>,
+    pub more_body: bool,
+    pub future: SendFuture,
+}
+
+pub(crate) struct ResponseTrailersEvent {
+    pub headers: Vec<(String, Box<[u8]>)>,
+    pub more_trailers: bool,
+}
+
+pub(crate) enum ResponseEvent {
+    Start(ResponseStartEvent, ResponseBodyEvent),
+    Body(ResponseBodyEvent),
+    Trailers(ResponseTrailersEvent),
+    Exception,
+}
+
+pub(crate) struct RecvFuture {
+    future: Option<Py<PyAny>>,
+    executor: Executor,
+}
+
+impl Drop for RecvFuture {
+    fn drop(&mut self) {
+        if let Some(future) = self.future.take() {
+            self.executor.handle_dropped_recv_future(future);
+        }
+    }
+}
+
+pub(crate) struct SendFuture {
+    future: Option<Py<PyAny>>,
+    executor: Executor,
+}
+
+impl Drop for SendFuture {
+    fn drop(&mut self) {
+        if let Some(future) = self.future.take() {
+            self.executor.handle_dropped_send_future(future);
+        }
+    }
+}
+
+pub(crate) const EVENT_ID_REQUEST: u64 = 1;
+pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
+pub(crate) const EVENT_ID_EXCEPTION: u64 = 3;

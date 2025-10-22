@@ -1,6 +1,7 @@
 use crate::wsgi::python::PyExecutor;
-use crossbeam_channel::{Receiver, Sender};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use super::types::*;
 use crate::types::*;
@@ -24,10 +25,10 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (request_read_tx, request_read_rx) = crossbeam_channel::unbounded::<isize>();
-        let (request_body_tx, request_body_rx) = crossbeam_channel::unbounded::<RequestBody>();
-        let (response_tx, response_rx) = crossbeam_channel::unbounded::<ResponseEvent>();
-        let (response_written_tx, response_written_rx) = crossbeam_channel::unbounded::<()>();
+        let (request_read_tx, request_read_rx) = mpsc::channel::<isize>();
+        let (request_body_tx, request_body_rx) = mpsc::channel::<RequestBody>();
+        let (response_tx, response_rx) = mpsc::channel::<ResponseEvent>();
+        let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
