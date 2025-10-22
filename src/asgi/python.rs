@@ -298,9 +298,6 @@ impl ExecutorInner {
 
     fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
-        if future.call_method0(intern!(py, "done"))?.is_truthy()? {
-            return Ok(());
-        }
         let set_result = future.getattr(intern!(py, "set_result"))?;
         let event = PyDict::new(py);
         event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
@@ -322,9 +319,6 @@ impl ExecutorInner {
 
     fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
-        if future.call_method0(intern!(py, "done"))?.is_truthy()? {
-            return Ok(());
-        }
         let set_exception = future.getattr(intern!(py, "set_exception"))?;
         self.loop_.bind(py).call_method1(
             intern!(py, "call_soon_threadsafe"),
@@ -375,15 +369,8 @@ impl RecvCallable {
             future: Some(future.clone().unbind()),
             executor: self.executor.clone(),
         };
-        match self.recv_future_tx.send(recv_future) {
-            Ok(_) => {
-                self.scheduler.commit(EVENT_ID_REQUEST);
-            }
-            Err(_) => {
-                let event = PyDict::new(py);
-                event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
-                future.call_method1(intern!(py, "set_result"), (event,))?;
-            }
+        if let Ok(_) = self.recv_future_tx.send(recv_future) {
+            self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future.unbind())
     }
@@ -536,10 +523,6 @@ impl SendCallable {
                         }
                         Err(_) => {
                             self.closed = true;
-                            future.call_method1(
-                                intern!(py, "set_exception"),
-                                (ClientDisconnectedError::new_err(()),),
-                            )?;
                         }
                     }
                 } else {
@@ -549,10 +532,6 @@ impl SendCallable {
                         }
                         Err(_) => {
                             self.closed = true;
-                            future.call_method1(
-                                intern!(py, "set_exception"),
-                                (ClientDisconnectedError::new_err(()),),
-                            )?;
                         }
                     }
                 }
