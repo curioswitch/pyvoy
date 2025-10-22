@@ -300,10 +300,7 @@ class PyvoyServer:
                                 "typed_config": {
                                     "@type": "type.googleapis.com/envoy.extensions.transport_sockets.quic.v3.QuicDownstreamTransport",
                                     "downstream_tls_context": {
-                                        "common_tls_context": common_tls_context,
-                                        "require_client_certificate": bool(
-                                            self._tls_ca_cert
-                                        ),
+                                        "common_tls_context": common_tls_context
                                     },
                                 },
                             },
