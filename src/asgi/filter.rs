@@ -67,6 +67,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        if end_of_stream {
+            self.request_closed = true;
+        }
+
         let mut trailers_accepted = false;
         for (name, value) in envoy_filter.get_request_headers() {
             if name.as_slice() == b"te" && value.as_slice() == b"trailers" {
@@ -84,12 +88,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             envoy_filter.new_scheduler(),
             envoy_filter.new_scheduler(),
         );
-        if end_of_stream {
-            self.request_closed = true;
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::ContinueAndDontEndStream
-        } else {
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
-        }
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
 
     fn on_request_body(
@@ -100,17 +99,16 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if end_of_stream {
             self.request_closed = true;
         }
-        if end_of_stream || has_request_body(envoy_filter) {
-            match self.recv_future_rx.try_recv() {
-                Ok(future) => {
-                    self.executor.handle_recv_future(
-                        read_request_body(envoy_filter),
-                        !end_of_stream,
-                        future,
-                    );
-                }
-                Err(_) => {}
+
+        match self.recv_future_rx.try_recv() {
+            Ok(future) => {
+                self.executor.handle_recv_future(
+                    read_request_body(envoy_filter),
+                    !end_of_stream,
+                    future,
+                );
             }
+            Err(_) => {}
         }
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
