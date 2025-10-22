@@ -89,9 +89,6 @@ impl Executor {
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
                     inner.handle_event(py, event)?;
-                    for event in rx.try_iter().collect::<Vec<_>>() {
-                        inner.handle_event(py, event)?;
-                    }
                     Ok::<_, PyErr>(())
                 }) {
                     eprintln!(
