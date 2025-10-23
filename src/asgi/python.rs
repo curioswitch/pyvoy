@@ -3,7 +3,7 @@ use std::thread;
 use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
-    create_exception,
+    IntoPyObjectExt, create_exception,
     exceptions::{PyOSError, PyRuntimeError},
     intern,
     prelude::*,
@@ -424,15 +424,14 @@ unsafe impl Sync for SendCallable {}
 
 #[pymethods]
 impl SendCallable {
-    fn __call__<'py>(&mut self, py: Python<'py>, event: Bound<'py, PyDict>) -> PyResult<Py<PyAny>> {
+    fn __call__<'py>(
+        &mut self,
+        py: Python<'py>,
+        event: Bound<'py, PyDict>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed {
             return Err(ClientDisconnectedError::new_err(()));
         }
-
-        let future = self
-            .loop_
-            .bind(py)
-            .call_method0(intern!(py, "create_future"))?;
 
         let event_type: String = match event.get_item("type")? {
             Some(v) => v.extract()?,
@@ -476,7 +475,7 @@ impl SendCallable {
                     headers: headers,
                     trailers: trailers && self.trailers_accepted,
                 });
-                future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
+                EmptyAwaitable.into_bound_py_any(py)
             }
             NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
                 if event_type != "http.response.body" {
@@ -502,13 +501,24 @@ impl SendCallable {
                     }
                     _ => {}
                 }
+                let (ret, send_future) = if more_body {
+                    let future = self
+                        .loop_
+                        .bind(py)
+                        .call_method0(intern!(py, "create_future"))?;
+                    (
+                        future.clone(),
+                        Some(SendFuture {
+                            future: Some(future.unbind()),
+                            executor: self.executor.clone(),
+                        }),
+                    )
+                } else {
+                    (EmptyAwaitable.into_bound_py_any(py)?, None)
+                };
                 let body_event = ResponseBodyEvent {
                     body,
-                    more_body,
-                    future: SendFuture {
-                        future: Some(future.clone().unbind()),
-                        executor: self.executor.clone(),
-                    },
+                    future: send_future,
                 };
                 if let Some(start_event) = self.response_start.take() {
                     match self
@@ -532,6 +542,7 @@ impl SendCallable {
                         }
                     }
                 }
+                Ok(ret)
             }
             NextASGIEvent::Trailers => {
                 if event_type != "http.response.trailers" {
@@ -558,17 +569,14 @@ impl SendCallable {
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     };
-                    future.call_method1(intern!(py, "set_result"), (PyNone::get(py),))?;
                 }
+                EmptyAwaitable.into_bound_py_any(py)
             }
-            NextASGIEvent::Done => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "Unexpected ASGI message '{}' sent, after response already completed.",
-                    event_type
-                )));
-            }
+            NextASGIEvent::Done => Err(PyRuntimeError::new_err(format!(
+                "Unexpected ASGI message '{}' sent, after response already completed.",
+                event_type
+            ))),
         }
-        Ok(future.unbind())
     }
 }
 
@@ -608,8 +616,10 @@ pub(crate) struct ResponseStartEvent {
 
 pub(crate) struct ResponseBodyEvent {
     pub body: Box<[u8]>,
-    pub more_body: bool,
-    pub future: SendFuture,
+    // Future to notify when the body is completed writing.
+    // Not sent for the final piece of body, so None indicates
+    // more_body = False.
+    pub future: Option<SendFuture>,
 }
 
 pub(crate) struct ResponseTrailersEvent {
@@ -653,3 +663,21 @@ impl Drop for SendFuture {
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
 pub(crate) const EVENT_ID_EXCEPTION: u64 = 3;
+
+#[pyclass]
+struct EmptyAwaitable;
+
+#[pymethods]
+impl EmptyAwaitable {
+    fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        return slf;
+    }
+
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        return slf;
+    }
+
+    fn __next__(&self) -> Option<()> {
+        None
+    }
+}

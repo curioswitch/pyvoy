@@ -4,6 +4,7 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass
+from enum import Enum
 
 
 @dataclass
@@ -12,15 +13,21 @@ class AppServer:
     args: list[str]
 
 
-PYVOY = AppServer("pyvoy", ["pyvoy", "tests.apps.kitchensink:app"])
-HYPERCORN = AppServer("hypercorn", ["hypercorn", "tests.apps.kitchensink:app"])
-GRANIAN = AppServer(
-    "granian", ["granian", "--interface", "asgi", "tests.apps.kitchensink:app"]
-)
+APP = "tests.apps.asgi.kitchensink:app"
+
+PYVOY = AppServer("pyvoy", ["pyvoy", APP])
+HYPERCORN = AppServer("hypercorn", ["hypercorn", APP])
+GRANIAN = AppServer("granian", ["granian", "--interface", "asgi", APP])
+UVICORN = AppServer("uvicorn", ["uvicorn", APP])
+
+
+class Protocol(Enum):
+    HTTP1 = "http/1.1"
+    HTTP2 = "h2"
 
 
 def main() -> None:
-    for app_server in (PYVOY, HYPERCORN, GRANIAN):
+    for app_server in (PYVOY, HYPERCORN, GRANIAN, UVICORN):
         with subprocess.Popen(  # noqa: S603
             app_server.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         ) as server:
@@ -35,51 +42,56 @@ def main() -> None:
                 except Exception:  # noqa: S110
                     pass
                 time.sleep(0.1)
-            for sleep in (0, 1, 10, 50, 100, 200, 500, 1000):
-                for response_size in (0, 1, 10, 100, 1000, 10000, 100000):
-                    print(  # noqa: T201
-                        f"Running benchmark for {app_server.name} with sleep={sleep}ms response_size={response_size}\n"
-                    )
-                    target = {
-                        "method": "GET",
-                        "url": "http://localhost:8000/controlled",
-                        "header": {
-                            "X-Sleep-Ms": [str(sleep)],
-                            "X-Response-Bytes": [str(response_size)],
-                        },
-                    }
-                    vegeta = subprocess.Popen(
-                        [  # noqa: S607
+            for protocol in (Protocol.HTTP2, Protocol.HTTP1):
+                if protocol != Protocol.HTTP1 and app_server == UVICORN:
+                    continue
+                for sleep in (0, 1, 10, 50, 100, 200, 500, 1000):
+                    for response_size in (0, 1, 10, 100, 1000, 10000, 100000):
+                        print(  # noqa: T201
+                            f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n"
+                        )
+                        target = {
+                            "method": "GET",
+                            "url": "http://localhost:8000/controlled",
+                            "header": {
+                                "X-Sleep-Ms": [str(sleep)],
+                                "X-Response-Bytes": [str(response_size)],
+                            },
+                        }
+                        vegeta_args = [
                             "go",
                             "run",
                             "github.com/tsenart/vegeta/v12@v12.12.0",
                             "attack",
-                            "-h2c",
                             "-format=json",
                             "-rate=0",
-                            "-max-workers=10",
+                            "-max-workers=30",
                             "-duration=5s",
-                        ],
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=sys.stderr,
-                    )
-                    vegeta_result, _ = vegeta.communicate(
-                        f"{json.dumps(target)}\n".encode()
-                    )
-                    subprocess.run(
-                        [  # noqa: S607
-                            "go",
-                            "run",
-                            "github.com/tsenart/vegeta/v12@v12.12.0",
-                            "report",
-                        ],
-                        check=True,
-                        input=vegeta_result,
-                        stdout=sys.stdout,
-                        stderr=sys.stderr,
-                    )
-                    print("\n")  # noqa: T201
+                        ]
+                        if protocol == Protocol.HTTP2:
+                            vegeta_args.append("-h2c")
+                        vegeta = subprocess.Popen(  # noqa: S603
+                            vegeta_args,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=sys.stderr,
+                        )
+                        vegeta_result, _ = vegeta.communicate(
+                            f"{json.dumps(target)}\n".encode()
+                        )
+                        subprocess.run(
+                            [  # noqa: S607
+                                "go",
+                                "run",
+                                "github.com/tsenart/vegeta/v12@v12.12.0",
+                                "report",
+                            ],
+                            check=True,
+                            input=vegeta_result,
+                            stdout=sys.stdout,
+                            stderr=sys.stderr,
+                        )
+                        print("\n")  # noqa: T201
             server.terminate()
             server.wait()
 

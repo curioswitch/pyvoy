@@ -131,7 +131,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         if let Ok(event) = self.response_rx.try_recv() {
             match event {
-                ResponseEvent::Start(start_event, body_event) => {
+                ResponseEvent::Start(start_event, mut body_event) => {
                     if start_event.trailers {
                         self.response_trailers.replace(Vec::new());
                     }
@@ -140,8 +140,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         .iter()
                         .map(|(k, v)| (k.as_str(), &v[..]))
                         .collect();
-                    let end_stream = !body_event.more_body && self.response_trailers.is_none();
-                    self.executor.handle_send_future(body_event.future);
+                    let end_stream =
+                        body_event.future.is_none() && self.response_trailers.is_none();
+                    if let Some(future) = body_event.future.take() {
+                        self.executor.handle_send_future(future);
+                    }
                     if end_stream {
                         if body_event.body.is_empty() {
                             envoy_filter.send_response_headers(headers_ref, true);
@@ -155,9 +158,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     }
                     self.response_state = ResponseState::SentHeaders;
                 }
-                ResponseEvent::Body(event) => {
-                    let end_stream = !event.more_body && self.response_trailers.is_none();
-                    self.executor.handle_send_future(event.future);
+                ResponseEvent::Body(mut event) => {
+                    let end_stream = event.future.is_none() && self.response_trailers.is_none();
+                    if let Some(future) = event.future.take() {
+                        self.executor.handle_send_future(future);
+                    }
                     envoy_filter.send_response_data(&event.body, end_stream);
                 }
                 ResponseEvent::Trailers(mut event) => {
