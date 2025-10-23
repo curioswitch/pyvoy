@@ -76,11 +76,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             if name.as_slice() == b"te" && value.as_slice() == b"trailers" {
                 // Allow te header to upstream
                 trailers_accepted = true;
+                break;
             }
         }
         let scope = new_scope(envoy_filter);
         self.executor.execute_app(
             scope,
+            end_of_stream,
             trailers_accepted,
             self.recv_future_tx.take().unwrap(),
             self.response_tx.take().unwrap(),

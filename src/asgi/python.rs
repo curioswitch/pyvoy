@@ -4,7 +4,7 @@ use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
     IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError},
+    exceptions::{PyOSError, PyRuntimeError, PyStopIteration},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone},
@@ -104,6 +104,7 @@ impl Executor {
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
+        request_closed: bool,
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
@@ -114,6 +115,7 @@ impl Executor {
         self.tx
             .send(Event::ExecuteApp {
                 scope,
+                request_closed,
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
@@ -156,6 +158,7 @@ impl ExecutorInner {
         match event {
             Event::ExecuteApp {
                 scope,
+                request_closed,
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
@@ -165,6 +168,7 @@ impl ExecutorInner {
             } => self.execute_app(
                 py,
                 scope,
+                request_closed,
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
@@ -189,6 +193,7 @@ impl ExecutorInner {
         &self,
         py: Python<'py>,
         scope: Scope,
+        request_closed: bool,
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
@@ -238,15 +243,21 @@ impl ExecutorInner {
         scope_dict.set_item(intern!(py, "client"), scope.client)?;
         scope_dict.set_item(intern!(py, "server"), scope.server)?;
 
-        let app = self.app.bind(py);
-        let coro = app.call1((
-            scope_dict,
-            RecvCallable {
+        let recv = match request_closed {
+            true => EmptyRecvCallable.into_bound_py_any(py)?,
+            false => RecvCallable {
                 recv_future_tx: recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
-            },
+            }
+            .into_bound_py_any(py)?,
+        };
+
+        let app = self.app.bind(py);
+        let coro = app.call1((
+            scope_dict,
+            recv,
             SendCallable {
                 next_event: NextASGIEvent::Start,
                 response_start: None,
@@ -328,6 +339,7 @@ impl ExecutorInner {
 enum Event {
     ExecuteApp {
         scope: Scope,
+        request_closed: bool,
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
@@ -357,7 +369,7 @@ unsafe impl Sync for RecvCallable {}
 
 #[pymethods]
 impl RecvCallable {
-    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Py<PyAny>> {
+    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let future = self
             .loop_
             .bind(py)
@@ -369,7 +381,24 @@ impl RecvCallable {
         if let Ok(_) = self.recv_future_tx.send(recv_future) {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
-        Ok(future.unbind())
+        Ok(future)
+    }
+}
+
+#[pyclass]
+struct EmptyRecvCallable;
+
+#[pymethods]
+impl EmptyRecvCallable {
+    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let event = PyDict::new(py);
+        event.set_item(intern!(py, "type"), intern!(py, "http.request"))?;
+        event.set_item(intern!(py, "body"), PyBytes::new(py, &[]))?;
+        event.set_item(intern!(py, "more_body"), false)?;
+        return ValueAwaitable {
+            value: Some(event.into_any().unbind()),
+        }
+        .into_bound_py_any(py);
     }
 }
 
@@ -679,5 +708,29 @@ impl EmptyAwaitable {
 
     fn __next__(&self) -> Option<()> {
         None
+    }
+}
+
+#[pyclass]
+struct ValueAwaitable {
+    value: Option<Py<PyAny>>,
+}
+
+#[pymethods]
+impl ValueAwaitable {
+    fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        return slf;
+    }
+
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        return slf;
+    }
+
+    fn __next__<'py>(&mut self) -> PyResult<Py<PyAny>> {
+        if let Some(value) = self.value.take() {
+            Err(PyStopIteration::new_err(value))
+        } else {
+            Err(PyStopIteration::new_err(()))
+        }
     }
 }
