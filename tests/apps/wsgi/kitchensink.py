@@ -109,6 +109,17 @@ def _large_bodies(
         yield b"B" * 1000
 
 
+def _read_to_newline(body_stream: WSGIInputStream) -> bytes:
+    body = b""
+    while True:
+        chunk = body_stream.read(1024)
+        if not chunk:
+            return body
+        body += chunk
+        if body and body[-1] == b"\n"[0]:
+            return body[:-1]
+
+
 def _bidi_stream(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -118,9 +129,9 @@ def _bidi_stream(
 
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
     yield b"Who are you?"
-    body = request_body.read(1024)
+    body = _read_to_newline(request_body)
     yield b"Hi " + body + b". What do you want to do?"
-    body = request_body.read(1024)
+    body = request_body.read()
     yield b"Let's " + body + b"!"
 
 

@@ -36,7 +36,7 @@ func main() {
 	}
 	println("response:", string(buf[:n]))
 	println("request: Choko")
-	reqBodyW.Write([]byte("Choko"))
+	reqBodyW.Write([]byte("Choko\n"))
 	n, err = res.Body.Read(buf)
 	if err != nil {
 		panic(err)

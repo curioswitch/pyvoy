@@ -238,6 +238,20 @@ async def _response_and_trailers(send: ASGISendCallable) -> None:
     )
 
 
+async def _recv_to_newline(recv: ASGIReceiveCallable) -> bytes:
+    body = b""
+    while True:
+        msg = await recv()
+        if msg["type"] != "http.request":
+            msg = 'msg["type"] != "http.request"'
+            raise RuntimeError(msg)
+        body += msg.get("body", b"")
+        if not msg.get("more_body", False):
+            return body
+        if body and body[-1] == b"\n"[0]:
+            return body[:-1]
+
+
 async def _bidi_stream(recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
     await send(
         {
@@ -254,24 +268,22 @@ async def _bidi_stream(recv: ASGIReceiveCallable, send: ASGISendCallable) -> Non
     await send(
         {"type": "http.response.body", "body": b"Who are you?", "more_body": True}
     )
-    msg = await recv()
-    if msg["type"] == "http.request":
-        await send(
-            {
-                "type": "http.response.body",
-                "body": b"Hi " + msg["body"] + b". What do you want to do?",
-                "more_body": True,
-            }
-        )
-    msg = await recv()
-    if msg["type"] == "http.request":
-        await send(
-            {
-                "type": "http.response.body",
-                "body": b"Let's " + msg["body"] + b"!",
-                "more_body": False,
-            }
-        )
+    msg = await _recv_to_newline(recv)
+    await send(
+        {
+            "type": "http.response.body",
+            "body": b"Hi " + msg + b". What do you want to do?",
+            "more_body": True,
+        }
+    )
+    msg = await _recv_to_newline(recv)
+    await send(
+        {
+            "type": "http.response.body",
+            "body": b"Let's " + msg + b"!",
+            "more_body": False,
+        }
+    )
     await send(
         {
             "type": "http.response.trailers",

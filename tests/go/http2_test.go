@@ -100,7 +100,7 @@ func TestHTTP2(t *testing.T) {
 				n, err := res.Body.Read(buf)
 				require.NoError(t, err)
 				require.Equal(t, "Who are you?", string(buf[:n]))
-				_, err = reqBodyW.Write([]byte("Choko"))
+				_, err = reqBodyW.Write([]byte("Choko\n"))
 				require.NoError(t, err)
 				n, err = res.Body.Read(buf)
 				require.NoError(t, err)
