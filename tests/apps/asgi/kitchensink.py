@@ -306,7 +306,7 @@ async def _exception_before_response() -> None:
 
 
 async def _exception_after_response_headers(
-    recv: ASGIReceiveCallable, send: ASGISendCallable
+    _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
     await send(
         {

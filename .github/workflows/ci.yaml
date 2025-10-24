@@ -1,0 +1,82 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  attestations: write
+  id-token: write
+
+concurrency:
+  # Cancel in-progress jobs for PRs only
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15
+          - ubuntu-24.04
+        python:
+          - "3.10"
+          - "3.14"
+        # Test oldest and newest on all OS's, but others only on one
+        # to save CI load.
+        include:
+          - os: ubuntu-24.04
+            python: "3.11"
+          - os: ubuntu-24.04
+            python: "3.12"
+          - os: ubuntu-24.04
+            python: "3.13"
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - uses: astral-sh/setup-uv@2ddd2b9cb38ad8efd50337e8ab201519a34c9f24 # v7.1.1
+
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: tests/go/go.mod
+          cache-dependency-path: "**/go.mod"
+
+      - run: uv lock --check
+
+      - run: uv sync --python ${{ matrix.python }} --managed-python
+
+      # Go ahead and run lint on all Python versions since we may have version-specific
+      # guards in rust in the future.
+      - name: run lints
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: uv run poe lint
+
+      - name: run tests
+        run: uv run poe test
+
+  publish:
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - uses: astral-sh/setup-uv@2ddd2b9cb38ad8efd50337e8ab201519a34c9f24 # v7.1.1
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: pyproject.toml
+
+      - run: uv run poe wheel
+
+      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        if: github.event_name != 'pull_request'
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true

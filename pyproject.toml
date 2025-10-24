@@ -9,15 +9,13 @@ license-files = ["LICENSE"]
 
 dependencies = ["find-libpython", "pyyaml"]
 
-[project.scripts]
-pyvoy = "pyvoy._cli:main"
-
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "asgiref",
     "granian",
     "httpx",
     "hypercorn",
+    "poethepoet",
     "pyright[nodejs]",
     "pytest",
     "pytest-asyncio",
@@ -25,8 +23,12 @@ dev-dependencies = [
     "ruff",
     "toml",
     "uvicorn[standard]",
+    "uvloop",
     "wheel",
 ]
+
+[project.scripts]
+pyvoy = "pyvoy._cli:main"
 
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]

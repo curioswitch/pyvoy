@@ -32,7 +32,7 @@ def main() -> None:
             msg = f"Unsupported platform: {sys.platform}"
             raise RuntimeError(msg)
 
-    subprocess.run(  # noqa: S603
+    subprocess.run(
         [
             sys.executable,
             "-m",
