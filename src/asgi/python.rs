@@ -43,11 +43,22 @@ pub(crate) struct Executor {
 
 impl Executor {
     pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
+        // Import threading on this thread because Python records the first thread
+        // that imports threading as the main thread. When running the Python interpreter, this
+        // happens to work, but not when embedding. For our purposes, we just need the asyncio
+        // thread to know it's not the main thread and can use this hack. In practice, since
+        // this is still during filter initialization, it may be the correct main thread anyway.
+        Python::attach(|py| {
+            PyModule::import(py, "threading")?;
+            Ok::<_, PyErr>(())
+        })?;
+
         let (loop_tx, loop_rx) = mpsc::sync_channel(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
+                let uvloop = PyModule::import(py, "uvloop")?;
                 let asyncio = PyModule::import(py, "asyncio")?;
-                let loop_ = asyncio.call_method0("new_event_loop")?;
+                let loop_ = uvloop.call_method0("new_event_loop")?;
                 loop_tx.send(loop_.clone().unbind()).unwrap();
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
                 loop_.call_method0("run_forever")?;
