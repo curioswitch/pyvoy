@@ -16,11 +16,9 @@ class AppServer:
 APP = "tests.apps.asgi.kitchensink:app"
 
 PYVOY = AppServer("pyvoy", ["pyvoy", APP])
-HYPERCORN = AppServer("hypercorn", ["hypercorn", "--worker-class", "uvloop", APP])
-GRANIAN = AppServer(
-    "granian", ["granian", "--interface", "asgi", "--loop", "uvloop", APP]
-)
-UVICORN = AppServer("uvicorn", ["uvicorn", "--loop", "uvloop", APP])
+HYPERCORN = AppServer("hypercorn", ["hypercorn", APP])
+GRANIAN = AppServer("granian", ["granian", "--interface", "asgi", APP])
+UVICORN = AppServer("uvicorn", ["uvicorn", APP])
 
 
 class Protocol(Enum):

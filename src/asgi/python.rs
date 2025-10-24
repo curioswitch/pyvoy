@@ -1,4 +1,4 @@
-use std::{sync::mpsc::SyncSender, thread};
+use std::thread;
 
 use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
@@ -44,21 +44,17 @@ pub(crate) struct Executor {
 impl Executor {
     pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
         let (loop_tx, loop_rx) = mpsc::sync_channel(0);
-
-        Python::attach(|py| {
-            let event_loop_callable = EventLoopCallable { loop_tx };
-            let threading = PyModule::import(py, "threading")?;
-            threading
-                .call_method1(
-                    "Thread",
-                    (
-                        /* group */ PyNone::get(py),
-                        /* target */ event_loop_callable,
-                    ),
-                )?
-                .call_method0("start")?;
-            Ok::<_, PyErr>(())
-        })?;
+        thread::spawn(move || {
+            let res: PyResult<()> = Python::attach(|py| {
+                let asyncio = PyModule::import(py, "asyncio")?;
+                let loop_ = asyncio.call_method0("new_event_loop")?;
+                loop_tx.send(loop_.clone().unbind()).unwrap();
+                asyncio.call_method1("set_event_loop", (&loop_,))?;
+                loop_.call_method0("run_forever")?;
+                Ok(())
+            });
+            res.unwrap();
+        });
 
         let loop_ = loop_rx.recv().map_err(|e| {
             PyRuntimeError::new_err(format!(
@@ -336,24 +332,6 @@ impl ExecutorInner {
             intern!(py, "call_soon_threadsafe"),
             (set_exception, ClientDisconnectedError::new_err(())),
         )?;
-        Ok(())
-    }
-}
-
-#[pyclass]
-struct EventLoopCallable {
-    loop_tx: SyncSender<Py<PyAny>>,
-}
-
-#[pymethods]
-impl EventLoopCallable {
-    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        let uvloop = PyModule::import(py, "uvloop")?;
-        let loop_ = uvloop.call_method0("new_event_loop")?;
-        self.loop_tx.send(loop_.clone().unbind()).unwrap();
-        let asyncio = PyModule::import(py, "asyncio")?;
-        asyncio.call_method1("set_event_loop", (&loop_,))?;
-        loop_.call_method0("run_forever")?;
         Ok(())
     }
 }
@@ -752,8 +730,6 @@ impl ValueAwaitable {
         if let Some(value) = self.value.take() {
             Err(PyStopIteration::new_err(value))
         } else {
-            // Generally shouldn't happen since awaitables can only be used
-            // once.
             Err(PyStopIteration::new_err(()))
         }
     }
