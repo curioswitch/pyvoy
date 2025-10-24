@@ -57,6 +57,11 @@ pub(crate) enum HttpScheme {
     Https,
 }
 
+fn is_pseudoheader(http_version: &HttpVersion, name: &[u8]) -> bool {
+    matches!(http_version, HttpVersion::Http2 | HttpVersion::Http3)
+        && matches!(name, b":method" | b":scheme" | b":authority" | b":path")
+}
+
 pub(crate) struct Scope {
     pub http_version: HttpVersion,
     pub method: HttpMethod,
@@ -127,7 +132,13 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
     let headers = envoy_filter
         .get_request_headers()
         .iter()
-        .map(|(k, v)| (Box::from(k.as_slice()), Box::from(v.as_slice())))
+        .filter_map(|(k, v)| {
+            if !is_pseudoheader(&http_version, k.as_slice()) {
+                Some((Box::from(k.as_slice()), Box::from(v.as_slice())))
+            } else {
+                None
+            }
+        })
         .collect();
 
     let client = get_address(

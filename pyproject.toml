@@ -25,6 +25,7 @@ dev-dependencies = [
     "ruff",
     "toml",
     "uvicorn[standard]",
+    "uvloop",
     "wheel",
 ]
 
