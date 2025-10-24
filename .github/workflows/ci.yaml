@@ -21,7 +21,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        resolution: ["highest", "lowest-direct"]
         os:
           - macos-15
           - ubuntu-24.04
