@@ -1,0 +1,49 @@
+[tasks.build]
+help = "Builds native extensions"
+script = "scripts.build:main"
+
+[tasks.check]
+help = "Runs all checks"
+sequence = ["lint", "test"]
+
+[tasks.fix-python]
+help = "Fixes python lint errors where possible"
+cmd = "ruff check --fix --unsafe-fixes --exit-zero ."
+
+[tasks.fix-rust]
+help = "Fixes rust lint errors where possible"
+cmd = "cargo clippy --fix"
+
+[tasks.format-python]
+help = "Format python code"
+cmd = "ruff format ."
+
+[tasks.format-rust]
+help = "Format rust code"
+cmd = "cargo fmt"
+
+[tasks.format]
+help = "Formats code"
+sequence = ["format-python", "format-rust", "fix-python"]
+
+[tasks.lint-python]
+help = "Lints python code"
+cmd = "ruff check ."
+
+[tasks.lint-rust]
+help = "Lints rust code"
+cmd = "cargo clippy"
+
+[tasks.lint]
+help = "Lints code"
+sequence = ["lint-python", "lint-rust"]
+
+[tasks.test]
+help = "Run the test suite"
+cmd = "pytest"
+deps = ["build"]
+
+[tasks.wheel]
+help = "Builds the wheel"
+script = "scripts.wheel:main"
+deps = ["build"]
