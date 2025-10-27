@@ -63,6 +63,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-24.04
+    environment: ${{ github.event_name != 'pull_request' && 'dev' || null }}
     needs: build
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
