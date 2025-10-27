@@ -1,8 +1,20 @@
 import time
 from collections.abc import Iterable
-from typing import cast
-from wsgiref.types import InputStream as WSGIInputStream
-from wsgiref.types import StartResponse, WSGIEnvironment
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    import sys
+
+    if sys.version_info >= (3, 11):
+        from wsgiref.types import InputStream as WSGIInputStream
+        from wsgiref.types import StartResponse, WSGIEnvironment
+    else:
+        from _typeshed.wsgi import InputStream as WSGIInputStream
+        from _typeshed.wsgi import StartResponse, WSGIEnvironment
+else:
+    StartResponse = "wsgiref.types.StartResponse"
+    WSGIEnvironment = "wsgiref.types.WSGIEnvironment"
+    WSGIInputStream = "wsgiref.types.InputStream"
 
 
 def _failure(msg: str, start_response: StartResponse) -> Iterable[bytes]:
