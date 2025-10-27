@@ -9,13 +9,17 @@ from pyvoy import Interface, PyvoyServer
 
 @pytest_asyncio.fixture(scope="module")
 async def url_asgi() -> AsyncIterator[str]:
-    async with PyvoyServer("tests.apps.asgi.kitchensink") as server:
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink", stderr=None, stdout=None
+    ) as server:
         yield f"http://{server.listener_address}:{server.listener_port}"
 
 
 @pytest_asyncio.fixture(scope="module")
 async def url_wsgi() -> AsyncIterator[str]:
-    async with PyvoyServer("tests.apps.wsgi.kitchensink", interface="wsgi") as server:
+    async with PyvoyServer(
+        "tests.apps.wsgi.kitchensink", interface="wsgi", stderr=None, stdout=None
+    ) as server:
         yield f"http://{server.listener_address}:{server.listener_port}"
 
 
