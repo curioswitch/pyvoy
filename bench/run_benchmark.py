@@ -54,8 +54,8 @@ def main() -> None:
             for protocol in (Protocol.HTTP2, Protocol.HTTP1):
                 if protocol != Protocol.HTTP1 and app_server == UVICORN:
                     continue
-                for sleep in (0, 1, 10, 50, 100, 200, 500, 1000):
-                    for response_size in (0, 1, 10, 100, 1000, 10000, 100000):
+                for sleep in (0, 10, 200, 500, 1000):
+                    for response_size in (0, 100, 10000, 100000):
                         print(  # noqa: T201
                             f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n",
                             flush=True,
