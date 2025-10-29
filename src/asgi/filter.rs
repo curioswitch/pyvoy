@@ -35,7 +35,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_trailers: None,
             recv_future_rx,
             recv_future_tx: Some(recv_future_tx),
-            response_rx: response_rx,
+            response_rx,
             response_tx: Some(response_tx),
         })
     }
@@ -102,15 +102,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        match self.recv_future_rx.try_recv() {
-            Ok(future) => {
-                self.executor.handle_recv_future(
-                    read_request_body(envoy_filter),
-                    !end_of_stream,
-                    future,
-                );
-            }
-            Err(_) => {}
+        if let Ok(future) = self.recv_future_rx.try_recv() {
+            self.executor.handle_recv_future(
+                read_request_body(envoy_filter),
+                !end_of_stream,
+                future,
+            );
         }
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
@@ -118,15 +115,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             if self.request_closed || has_request_body(envoy_filter) {
-                match self.recv_future_rx.try_recv() {
-                    Ok(future) => {
-                        self.executor.handle_recv_future(
-                            read_request_body(envoy_filter),
-                            !self.request_closed,
-                            future,
-                        );
-                    }
-                    Err(_) => {}
+                if let Ok(future) = self.recv_future_rx.try_recv() {
+                    self.executor.handle_recv_future(
+                        read_request_body(envoy_filter),
+                        !self.request_closed,
+                        future,
+                    );
                 }
             }
             return;

@@ -44,7 +44,7 @@ impl HttpMethod {
             HttpMethod::Trace => dict.set_item(key, intern!(py, "TRACE"))?,
             HttpMethod::Patch => dict.set_item(key, intern!(py, "PATCH"))?,
             HttpMethod::Custom(m) => {
-                let method = String::from_utf8_lossy(&m);
+                let method = String::from_utf8_lossy(m);
                 dict.set_item(key, &method)?;
             }
         };
@@ -152,7 +152,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         envoy_dynamic_module_type_attribute_id::DestinationPort,
     );
 
-    return Scope {
+    Scope {
         http_version,
         method,
         scheme,
@@ -161,7 +161,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         headers,
         client,
         server,
-    };
+    }
 }
 
 fn get_address<EHF: EnvoyHttpFilter>(
@@ -192,5 +192,5 @@ pub(crate) fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> 
             }
         }
     }
-    return false;
+    false
 }
