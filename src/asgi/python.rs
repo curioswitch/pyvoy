@@ -440,7 +440,7 @@ impl AppFutureHandler {
             }
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
-            if let Ok(_) = self.response_tx.send(ResponseEvent::Exception) {
+            if self.response_tx.send(ResponseEvent::Exception).is_ok() {
                 self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
