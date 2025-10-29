@@ -263,15 +263,16 @@ impl ExecutorInner {
             scope.server.map(|(a, p)| (PyString::new(py, &a[..]), p)),
         )?;
 
-        let recv = match request_closed {
-            true => EmptyRecvCallable.into_bound_py_any(py)?,
-            false => RecvCallable {
+        let recv = if request_closed {
+            EmptyRecvCallable.into_bound_py_any(py)?
+        } else {
+            RecvCallable {
                 recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
             }
-            .into_bound_py_any(py)?,
+            .into_bound_py_any(py)?
         };
 
         let app = self.app.bind(py);
@@ -433,17 +434,14 @@ unsafe impl Sync for AppFutureHandler {}
 #[pymethods]
 impl AppFutureHandler {
     fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        match future.call_method1(intern!(py, "result"), (0,)) {
-            Ok(_) => {}
-            Err(e) => {
-                if e.is_instance_of::<ClientDisconnectedError>(py) {
-                    return;
-                }
-                let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-                eprintln!("Exception in ASGI application\n{}{}", tb, e);
-                if let Ok(_) = self.response_tx.send(ResponseEvent::Exception) {
-                    self.scheduler.commit(EVENT_ID_EXCEPTION);
-                }
+        if let Err(e) = future.call_method1(intern!(py, "result"), (0,)) {
+            if e.is_instance_of::<ClientDisconnectedError>(py) {
+                return;
+            }
+            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+            eprintln!("Exception in ASGI application\n{}{}", tb, e);
+            if let Ok(_) = self.response_tx.send(ResponseEvent::Exception) {
+                self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
     }
@@ -516,9 +514,10 @@ impl SendCallable {
                     Some(v) => v.extract()?,
                     None => false,
                 };
-                match trailers {
-                    true => self.next_event = NextASGIEvent::BodyWithTrailers,
-                    false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
+                if trailers {
+                    self.next_event = NextASGIEvent::BodyWithTrailers;
+                } else {
+                    self.next_event = NextASGIEvent::BodyWithoutTrailers;
                 };
                 self.response_start.replace(ResponseStartEvent {
                     headers,
@@ -541,14 +540,16 @@ impl SendCallable {
                     Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
                     _ => Box::new([]),
                 };
-                match (more_body, &self.next_event) {
-                    (false, NextASGIEvent::BodyWithTrailers) => {
-                        self.next_event = NextASGIEvent::Trailers;
+                if !more_body {
+                    match &self.next_event {
+                        NextASGIEvent::BodyWithTrailers => {
+                            self.next_event = NextASGIEvent::Trailers;
+                        }
+                        NextASGIEvent::BodyWithoutTrailers => {
+                            self.next_event = NextASGIEvent::Done;
+                        }
+                        _ => {}
                     }
-                    (false, NextASGIEvent::BodyWithoutTrailers) => {
-                        self.next_event = NextASGIEvent::Done;
-                    }
-                    _ => {}
                 }
                 let (ret, send_future) = if more_body {
                     let future = self
