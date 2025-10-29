@@ -10,7 +10,8 @@ repository = "https://github.com/curioswitch/pyvoy"
 envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/envoyproxy/envoy", tag = "v1.36.2" }
 
 executors = "0.10.0"
-pyo3 = { version = "0.27.1" }
+itoa = "1.0.15"
+pyo3 = "0.27.1"
 urlencoding = "2.1.3"
 yaml-rust2 = "0.10.4"
 
