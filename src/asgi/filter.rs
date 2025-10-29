@@ -1,7 +1,7 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use http::{HeaderName, HeaderValue};
-use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, mpsc};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
@@ -12,9 +12,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(app: &str) -> Option<Self> {
+    pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let executor = match python::Executor::new(module, attr) {
+        let executor = match python::Executor::new(module, attr, constants) {
             Ok(executor) => executor,
             Err(err) => {
                 eprintln!("Failed to initialize ASGI app: {err}");

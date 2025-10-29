@@ -1,4 +1,4 @@
-use std::thread;
+use std::{sync::Arc, thread};
 
 use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
@@ -6,7 +6,6 @@ use http::{HeaderName, HeaderValue};
 use pyo3::{
     IntoPyObjectExt, create_exception,
     exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyValueError},
-    intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
 };
@@ -20,6 +19,7 @@ struct ExecutorInner {
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
     loop_: Py<PyAny>,
+    constants: Arc<Constants>,
     executor: Executor,
 }
 
@@ -43,7 +43,11 @@ pub(crate) struct Executor {
 }
 
 impl Executor {
-    pub(crate) fn new(app_module: &str, app_attr: &str) -> PyResult<Self> {
+    pub(crate) fn new(
+        app_module: &str,
+        app_attr: &str,
+        constants: Arc<Constants>,
+    ) -> PyResult<Self> {
         // Import threading on this thread because Python records the first thread
         // that imports threading as the main thread. When running the Python interpreter, this
         // happens to work, but not when embedding. For our purposes, we just need the asyncio
@@ -94,6 +98,7 @@ impl Executor {
             asgi,
             extensions,
             loop_,
+            constants,
             executor: executor.clone(),
         };
 
@@ -214,39 +219,36 @@ impl ExecutorInner {
         end_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) -> PyResult<()> {
         let scope_dict = PyDict::new(py);
-        scope_dict.set_item(intern!(py, "type"), intern!(py, "http"))?;
-        scope_dict.set_item(intern!(py, "asgi"), self.asgi.bind(py))?;
-        scope_dict.set_item(intern!(py, "extensions"), self.extensions.bind(py))?;
-        scope_dict.set_item(
-            intern!(py, "http_version"),
-            match scope.http_version {
-                HttpVersion::Http10 => intern!(py, "1.0"),
-                HttpVersion::Http11 => intern!(py, "1.1"),
-                HttpVersion::Http2 => intern!(py, "2"),
-                HttpVersion::Http3 => intern!(py, "3"),
-            },
+        scope_dict.set_item(self.constants.typ.bind(py), self.constants.http.bind(py))?;
+        scope_dict.set_item(self.constants.asgi.bind(py), self.asgi.bind(py))?;
+        scope_dict.set_item(self.constants.extensions.bind(py), self.extensions.bind(py))?;
+        scope_dict.set_http_version(
+            py,
+            &self.constants,
+            self.constants.http_version.bind(py),
+            &scope.http_version,
         )?;
-        scope
-            .method
-            .set_in_dict(py, &scope_dict, intern!(py, "method"))?;
-        scope_dict.set_item(
-            intern!(py, "scheme"),
-            match scope.scheme {
-                HttpScheme::Http => intern!(py, "http"),
-                HttpScheme::Https => intern!(py, "https"),
-            },
+        scope_dict.set_http_method(py, self.constants.method.bind(py), &scope.method)?;
+        scope_dict.set_http_scheme(
+            py,
+            &self.constants,
+            self.constants.scheme.bind(py),
+            &scope.scheme,
         )?;
         let decoded_path = urlencoding::decode_binary(&scope.raw_path);
         scope_dict.set_item(
-            intern!(py, "path"),
+            self.constants.path.bind(py),
             PyString::from_bytes(py, &decoded_path)?,
         )?;
-        scope_dict.set_item(intern!(py, "raw_path"), PyBytes::new(py, &scope.raw_path))?;
         scope_dict.set_item(
-            intern!(py, "query_string"),
+            self.constants.raw_path.bind(py),
+            PyBytes::new(py, &scope.raw_path),
+        )?;
+        scope_dict.set_item(
+            self.constants.query_string.bind(py),
             PyBytes::new(py, &scope.query_string),
         )?;
-        scope_dict.set_item(intern!(py, "root_path"), "")?;
+        scope_dict.set_item(self.constants.root_path.bind(py), "")?;
         let headers = PyList::new(
             py,
             scope
@@ -254,24 +256,28 @@ impl ExecutorInner {
                 .iter()
                 .map(|(k, v)| (PyBytes::new(py, k), PyBytes::new(py, v))),
         )?;
-        scope_dict.set_item(intern!(py, "headers"), headers)?;
+        scope_dict.set_item(self.constants.headers.bind(py), headers)?;
         scope_dict.set_item(
-            intern!(py, "client"),
+            self.constants.client.bind(py),
             scope.client.map(|(a, p)| (PyString::new(py, &a[..]), p)),
         )?;
         scope_dict.set_item(
-            intern!(py, "server"),
+            self.constants.server.bind(py),
             scope.server.map(|(a, p)| (PyString::new(py, &a[..]), p)),
         )?;
 
         let recv = if request_closed {
-            EmptyRecvCallable.into_bound_py_any(py)?
+            EmptyRecvCallable {
+                constants: self.constants.clone(),
+            }
+            .into_bound_py_any(py)?
         } else {
             RecvCallable {
                 recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
+                constants: self.constants.clone(),
             }
             .into_bound_py_any(py)?
         };
@@ -289,18 +295,20 @@ impl ExecutorInner {
                 scheduler: send_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
+                constants: self.constants.clone(),
             },
         ))?;
-        let asyncio = PyModule::import(py, intern!(py, "asyncio"))?;
+        let asyncio = PyModule::import(py, self.constants.asyncio.bind(py))?;
         let future = asyncio.call_method1(
-            intern!(py, "run_coroutine_threadsafe"),
+            self.constants.run_coroutine_threadsafe.bind(py),
             (coro, self.loop_.bind(py)),
         )?;
         future.call_method1(
-            intern!(py, "add_done_callback"),
+            self.constants.add_done_callback.bind(py),
             (AppFutureHandler {
                 response_tx,
                 scheduler: end_scheduler,
+                constants: self.constants.clone(),
             },),
         )?;
 
@@ -315,33 +323,41 @@ impl ExecutorInner {
         future: Py<PyAny>,
     ) -> PyResult<()> {
         let future = future.bind(py);
-        let set_result = future.getattr(intern!(py, "set_result"))?;
+        let set_result = future.getattr(self.constants.set_result.bind(py))?;
         let event = PyDict::new(py);
-        event.set_item(intern!(py, "type"), intern!(py, "http.request"))?;
-        event.set_item(intern!(py, "body"), PyBytes::new(py, &body))?;
-        event.set_item(intern!(py, "more_body"), more_body)?;
-        self.loop_
-            .bind(py)
-            .call_method1(intern!(py, "call_soon_threadsafe"), (set_result, event))?;
+        event.set_item(
+            self.constants.typ.bind(py),
+            self.constants.http_request.bind(py),
+        )?;
+        event.set_item(self.constants.body.bind(py), PyBytes::new(py, &body))?;
+        event.set_item(self.constants.more_body.bind(py), more_body)?;
+        self.loop_.bind(py).call_method1(
+            self.constants.call_soon_threadsafe.bind(py),
+            (set_result, event),
+        )?;
         Ok(())
     }
 
     fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
-        let set_result = future.getattr(intern!(py, "set_result"))?;
+        let set_result = future.getattr(self.constants.set_result.bind(py))?;
         let event = PyDict::new(py);
-        event.set_item(intern!(py, "type"), intern!(py, "http.disconnect"))?;
-        self.loop_
-            .bind(py)
-            .call_method1(intern!(py, "call_soon_threadsafe"), (set_result, event))?;
+        event.set_item(
+            self.constants.typ.bind(py),
+            self.constants.http_disconnect.bind(py),
+        )?;
+        self.loop_.bind(py).call_method1(
+            self.constants.call_soon_threadsafe.bind(py),
+            (set_result, event),
+        )?;
         Ok(())
     }
 
     fn handle_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
-        let set_result = future.getattr(intern!(py, "set_result"))?;
+        let set_result = future.getattr(self.constants.set_result.bind(py))?;
         self.loop_.bind(py).call_method1(
-            intern!(py, "call_soon_threadsafe"),
+            self.constants.call_soon_threadsafe.bind(py),
             (set_result, PyNone::get(py)),
         )?;
         Ok(())
@@ -349,9 +365,9 @@ impl ExecutorInner {
 
     fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
         let future = future.bind(py);
-        let set_exception = future.getattr(intern!(py, "set_exception"))?;
+        let set_exception = future.getattr(self.constants.set_exception.bind(py))?;
         self.loop_.bind(py).call_method1(
-            intern!(py, "call_soon_threadsafe"),
+            self.constants.call_soon_threadsafe.bind(py),
             (set_exception, ClientDisconnectedError::new_err(())),
         )?;
         Ok(())
@@ -385,6 +401,7 @@ struct RecvCallable {
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
+    constants: Arc<Constants>,
 }
 
 unsafe impl Sync for RecvCallable {}
@@ -395,7 +412,7 @@ impl RecvCallable {
         let future = self
             .loop_
             .bind(py)
-            .call_method0(intern!(py, "create_future"))?;
+            .call_method0(self.constants.create_future.bind(py))?;
         let recv_future = RecvFuture {
             future: Some(future.clone().unbind()),
             executor: self.executor.clone(),
@@ -408,15 +425,20 @@ impl RecvCallable {
 }
 
 #[pyclass]
-struct EmptyRecvCallable;
+struct EmptyRecvCallable {
+    constants: Arc<Constants>,
+}
 
 #[pymethods]
 impl EmptyRecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let event = PyDict::new(py);
-        event.set_item(intern!(py, "type"), intern!(py, "http.request"))?;
-        event.set_item(intern!(py, "body"), PyBytes::new(py, &[]))?;
-        event.set_item(intern!(py, "more_body"), false)?;
+        event.set_item(
+            self.constants.typ.bind(py),
+            self.constants.http_request.bind(py),
+        )?;
+        event.set_item(self.constants.body.bind(py), PyBytes::new(py, &[]))?;
+        event.set_item(self.constants.more_body.bind(py), false)?;
         ValueAwaitable {
             value: Some(event.into_any().unbind()),
         }
@@ -428,6 +450,7 @@ impl EmptyRecvCallable {
 struct AppFutureHandler {
     response_tx: Sender<ResponseEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    constants: Arc<Constants>,
 }
 
 unsafe impl Sync for AppFutureHandler {}
@@ -435,7 +458,7 @@ unsafe impl Sync for AppFutureHandler {}
 #[pymethods]
 impl AppFutureHandler {
     fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        if let Err(e) = future.call_method1(intern!(py, "result"), (0,)) {
+        if let Err(e) = future.call_method1(self.constants.result.bind(py), (0,)) {
             if e.is_instance_of::<ClientDisconnectedError>(py) {
                 return;
             }
@@ -466,6 +489,7 @@ struct SendCallable {
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
+    constants: Arc<Constants>,
 }
 
 unsafe impl Sync for SendCallable {}
@@ -482,7 +506,7 @@ impl SendCallable {
         }
 
         let event_type_py = event
-            .get_item(intern!(py, "type"))?
+            .get_item(self.constants.typ.bind(py))?
             .ok_or_else(|| PyRuntimeError::new_err("Unexpected ASGI message, missing 'type'."))?;
         let event_type = event_type_py.cast::<PyString>()?.to_str()?;
 
@@ -494,8 +518,8 @@ impl SendCallable {
                         event_type
                     )));
                 }
-                let headers = extract_headers_from_event(py, &event)?;
-                let status: u16 = match event.get_item(intern!(py, "status"))? {
+                let headers = extract_headers_from_event(py, &self.constants, &event)?;
+                let status: u16 = match event.get_item(self.constants.status.bind(py))? {
                     Some(v) => v.extract()?,
                     None => {
                         return Err(PyRuntimeError::new_err(
@@ -503,7 +527,7 @@ impl SendCallable {
                         ));
                     }
                 };
-                let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
+                let trailers: bool = match event.get_item(self.constants.trailers.bind(py))? {
                     Some(v) => v.extract()?,
                     None => false,
                 };
@@ -526,11 +550,11 @@ impl SendCallable {
                         event_type
                     )));
                 }
-                let more_body: bool = match event.get_item(intern!(py, "more_body"))? {
+                let more_body: bool = match event.get_item(self.constants.more_body.bind(py))? {
                     Some(v) => v.extract()?,
                     None => false,
                 };
-                let body: Box<[u8]> = match event.get_item(intern!(py, "body"))? {
+                let body: Box<[u8]> = match event.get_item(self.constants.body.bind(py))? {
                     Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
                     _ => Box::new([]),
                 };
@@ -549,7 +573,7 @@ impl SendCallable {
                     let future = self
                         .loop_
                         .bind(py)
-                        .call_method0(intern!(py, "create_future"))?;
+                        .call_method0(self.constants.create_future.bind(py))?;
                     (
                         future.clone(),
                         Some(SendFuture {
@@ -592,15 +616,16 @@ impl SendCallable {
                         event_type
                     )));
                 }
-                let more_trailers: bool = match event.get_item(intern!(py, "more_trailers"))? {
-                    Some(v) => v.extract()?,
-                    None => false,
-                };
+                let more_trailers: bool =
+                    match event.get_item(self.constants.more_trailers.bind(py))? {
+                        Some(v) => v.extract()?,
+                        None => false,
+                    };
                 if !more_trailers {
                     self.next_event = NextASGIEvent::Done;
                 }
                 if self.trailers_accepted {
-                    let headers = extract_headers_from_event(py, &event)?;
+                    let headers = extract_headers_from_event(py, &self.constants, &event)?;
                     if self
                         .response_tx
                         .send(ResponseEvent::Trailers(ResponseTrailersEvent {
@@ -624,9 +649,10 @@ impl SendCallable {
 
 fn extract_headers_from_event<'py>(
     py: Python<'py>,
+    constants: &Constants,
     event: &Bound<'py, PyDict>,
 ) -> PyResult<Vec<(HeaderName, HeaderValue)>> {
-    match event.get_item(intern!(py, "headers"))? {
+    match event.get_item(constants.headers.bind(py))? {
         Some(v) => {
             let cap = v.len().unwrap_or(0);
             let mut headers = Vec::with_capacity(cap);

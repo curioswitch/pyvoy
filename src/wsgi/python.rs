@@ -2,7 +2,6 @@ use executors::{Executor, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
-    intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyString, PyTuple},
 };
@@ -11,7 +10,7 @@ use super::types::*;
 use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use std::sync::{
-    Mutex,
+    Arc, Mutex,
     mpsc::{Receiver, Sender},
 };
 
@@ -20,16 +19,23 @@ pub(crate) struct PyExecutor {
     pool: ThreadPool,
     app_module: Box<str>,
     app_attr: Box<str>,
+    constants: Arc<Constants>,
 }
 
 impl PyExecutor {
-    pub(crate) fn new(app_module: &str, app_attr: &str, num_threads: usize) -> PyResult<Self> {
+    pub(crate) fn new(
+        app_module: &str,
+        app_attr: &str,
+        num_threads: usize,
+        constants: Arc<Constants>,
+    ) -> PyResult<Self> {
         let pool = ThreadPool::new(num_threads);
 
         Ok(Self {
             pool,
             app_module: Box::from(app_module),
             app_attr: Box::from(app_attr),
+            constants,
         })
     }
 
@@ -47,25 +53,24 @@ impl PyExecutor {
         let app_attr = self.app_attr.clone();
         let request_body_rx = Mutex::new(request_body_rx);
         let response_written_rx = Mutex::new(response_written_rx);
+        let constants = self.constants.clone();
         self.pool.execute(move || {
             let result: PyResult<()> = Python::attach(|py| {
                 let app_module = py.import(&app_module[..])?;
                 let app = app_module.getattr(&app_attr[..])?;
 
                 let environ = PyDict::new(py);
-                scope
-                    .method
-                    .set_in_dict(py, &environ, intern!(py, "REQUEST_METHOD"))?;
+                environ.set_http_method(py, constants.request_method.bind(py), &scope.method)?;
 
                 // TODO: support root_path etc
-                environ.set_item(intern!(py, "SCRIPT_NAME"), "")?;
+                environ.set_item(constants.script_name.bind(py), "")?;
                 environ.set_item(
-                    intern!(py, "PATH_INFO"),
+                    constants.path_info.bind(py),
                     PyString::from_bytes(py, &scope.raw_path)?,
                 )?;
                 if !scope.query_string.is_empty() {
                     environ.set_item(
-                        intern!(py, "QUERY_STRING"),
+                        constants.query_string.bind(py),
                         PyString::from_bytes(py, &scope.query_string)?,
                     )?;
                 }
@@ -74,10 +79,10 @@ impl PyExecutor {
                     let value_str = PyString::from_bytes(py, value)?;
                     match &key[..] {
                         b"content-type" => {
-                            environ.set_item(intern!(py, "CONTENT_TYPE"), value_str)?
+                            environ.set_item(constants.content_type.bind(py), value_str)?
                         }
                         b"content-length" => {
-                            environ.set_item(intern!(py, "CONTENT_LENGTH"), value_str)?
+                            environ.set_item(constants.content_length.bind(py), value_str)?
                         }
                         _ => {
                             if key[0] == b':' {
@@ -100,34 +105,30 @@ impl PyExecutor {
                 }
 
                 if let Some((server, port)) = scope.server {
-                    environ.set_item(intern!(py, "SERVER_NAME"), &server[..])?;
-                    environ.set_item(intern!(py, "SERVER_PORT"), port.to_string())?;
+                    environ.set_item(constants.server_name.bind(py), &server[..])?;
+                    environ.set_item(constants.server_port.bind(py), port.to_string())?;
                 } else {
                     // In practice, should never be exercised.
-                    environ.set_item(intern!(py, "SERVER_NAME"), "localhost")?;
-                    environ.set_item(intern!(py, "SERVER_PORT"), "0")?;
+                    environ.set_item(constants.server_name.bind(py), "localhost")?;
+                    environ.set_item(constants.server_port.bind(py), "0")?;
                 }
 
-                environ.set_item(
-                    intern!(py, "SERVER_PROTOCOL"),
-                    match scope.http_version {
-                        HttpVersion::Http10 => "HTTP/1.0",
-                        HttpVersion::Http11 => "HTTP/1.1",
-                        HttpVersion::Http2 => "HTTP/2",
-                        HttpVersion::Http3 => "HTTP/3",
-                    },
+                environ.set_http_version(
+                    py,
+                    &constants,
+                    constants.server_protocol.bind(py),
+                    &scope.http_version,
                 )?;
 
-                environ.set_item(intern!(py, "wsgi.version"), (1, 0))?;
-                environ.set_item(
-                    intern!(py, "wsgi.url_scheme"),
-                    match scope.scheme {
-                        HttpScheme::Http => "http",
-                        HttpScheme::Https => "https",
-                    },
+                environ.set_item(constants.wsgi_version.bind(py), (1, 0))?;
+                environ.set_http_scheme(
+                    py,
+                    &constants,
+                    constants.wsgi_url_scheme.bind(py),
+                    &scope.scheme,
                 )?;
                 environ.set_item(
-                    intern!(py, "wsgi.input"),
+                    constants.wsgi_input.bind(py),
                     RequestInput {
                         request_read_tx,
                         request_body_rx,
@@ -138,9 +139,9 @@ impl PyExecutor {
 
                 // TODO: Support wsgi.errors
 
-                environ.set_item(intern!(py, "wsgi.multithread"), true)?;
-                environ.set_item(intern!(py, "wsgi.multiprocess"), false)?;
-                environ.set_item(intern!(py, "wsgi.run_once"), false)?;
+                environ.set_item(constants.wsgi_multithread.bind(py), true)?;
+                environ.set_item(constants.wsgi_multiprocess.bind(py), false)?;
+                environ.set_item(constants.wsgi_run_once.bind(py), false)?;
 
                 let start_response = Bound::new(
                     py,
@@ -230,7 +231,7 @@ impl PyExecutor {
                     }
                 }
 
-                if let Ok(close) = response.getattr(intern!(py, "close")) {
+                if let Ok(close) = response.getattr(constants.close.bind(py)) {
                     close.call0()?;
                 }
 
@@ -309,7 +310,7 @@ impl RequestInput {
         if size == 0 {
             Ok(PyBytes::new(py, &[]))
         } else {
-            self.request_read_tx.send(size);
+            let _ = self.request_read_tx.send(size);
             self.scheduler.commit(EVENT_ID_REQUEST);
 
             let body = py.detach::<PyResult<RequestBody>, _>(|| {
