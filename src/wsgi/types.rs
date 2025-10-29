@@ -1,5 +1,8 @@
+use http::{HeaderName, HeaderValue};
+
 pub(crate) struct ResponseStartEvent {
-    pub headers: Vec<(Box<str>, Box<[u8]>)>,
+    pub status: u16,
+    pub headers: Vec<(HeaderName, HeaderValue)>,
 }
 
 pub(crate) struct ResponseBodyEvent {

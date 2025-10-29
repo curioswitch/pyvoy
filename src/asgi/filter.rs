@@ -1,4 +1,5 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
+use http::{HeaderName, HeaderValue};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -53,7 +54,7 @@ struct Filter {
     request_closed: bool,
     response_state: ResponseState,
 
-    response_trailers: Option<Vec<(Box<str>, Box<[u8]>)>>,
+    response_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
 
     recv_future_rx: Receiver<RecvFuture>,
     recv_future_tx: Option<Sender<RecvFuture>>,
@@ -131,11 +132,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     if start_event.trailers {
                         self.response_trailers.replace(Vec::new());
                     }
-                    let headers_ref: Vec<(&str, &[u8])> = start_event
-                        .headers
-                        .iter()
-                        .map(|(k, v)| (&k[..], &v[..]))
-                        .collect();
+                    let mut status_buf = itoa::Buffer::new();
+                    let mut headers: Vec<(&str, &[u8])> =
+                        Vec::with_capacity(start_event.headers.len() + 1);
+                    headers.push((":status", status_buf.format(start_event.status).as_bytes()));
+                    for (k, v) in start_event.headers.iter() {
+                        headers.push((k.as_str(), v.as_bytes()));
+                    }
                     let end_stream =
                         body_event.future.is_none() && self.response_trailers.is_none();
                     if let Some(future) = body_event.future.take() {
@@ -143,13 +146,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     }
                     if end_stream {
                         if body_event.body.is_empty() {
-                            envoy_filter.send_response_headers(headers_ref, true);
+                            envoy_filter.send_response_headers(headers, true);
                         } else {
-                            envoy_filter.send_response_headers(headers_ref, false);
+                            envoy_filter.send_response_headers(headers, false);
                             envoy_filter.send_response_data(&body_event.body, true);
                         }
                     } else {
-                        envoy_filter.send_response_headers(headers_ref, false);
+                        envoy_filter.send_response_headers(headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
                     }
                     self.response_state = ResponseState::SentHeaders;
@@ -165,8 +168,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     if let Some(trailers) = &mut self.response_trailers {
                         trailers.append(&mut event.headers);
                         if !event.more_trailers {
-                            let trailers_ref: Vec<(&str, &[u8])> =
-                                trailers.iter().map(|(k, v)| (&k[..], &v[..])).collect();
+                            let trailers_ref: Vec<(&str, &[u8])> = trailers
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_bytes()))
+                                .collect();
                             envoy_filter.send_response_trailers(trailers_ref);
                         }
                     }

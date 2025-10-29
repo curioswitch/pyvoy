@@ -117,24 +117,26 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         for event in self.response_rx.try_iter().collect::<Vec<_>>() {
             match event {
                 ResponseEvent::Start(start_event, body_event) => {
-                    let headers_ref: Vec<(&str, &[u8])> = start_event
-                        .headers
-                        .iter()
-                        .map(|(k, v)| (&k[..], &v[..]))
-                        .collect();
+                    let mut status_buf = itoa::Buffer::new();
+                    let mut headers: Vec<(&str, &[u8])> =
+                        Vec::with_capacity(start_event.headers.len() + 1);
+                    headers.push((":status", status_buf.format(start_event.status).as_bytes()));
+                    for (k, v) in start_event.headers.iter() {
+                        headers.push((k.as_str(), v.as_bytes()));
+                    }
                     let end_stream = !body_event.more_body;
                     if !end_stream {
                         send_or_log(&self.response_written_tx, ());
                     }
                     if end_stream {
                         if body_event.body.is_empty() {
-                            envoy_filter.send_response_headers(headers_ref, true);
+                            envoy_filter.send_response_headers(headers, true);
                         } else {
-                            envoy_filter.send_response_headers(headers_ref, false);
+                            envoy_filter.send_response_headers(headers, false);
                             envoy_filter.send_response_data(&body_event.body, true);
                         }
                     } else {
-                        envoy_filter.send_response_headers(headers_ref, false);
+                        envoy_filter.send_response_headers(headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
                     }
                 }
