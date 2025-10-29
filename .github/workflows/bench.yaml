@@ -6,6 +6,7 @@ on:
     paths:
       - "src/**"
       - "Cargo.lock"
+      - "bench/**"
       - ".github/workflows/bench.yaml"
   workflow_dispatch:
 
