@@ -7,7 +7,7 @@ use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyStopIteration},
     intern,
     prelude::*,
-    types::{PyBytes, PyDict, PyList, PyNone},
+    types::{PyBytes, PyDict, PyList, PyNone, PyString},
 };
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
@@ -236,7 +236,10 @@ impl ExecutorInner {
             },
         )?;
         let decoded_path = urlencoding::decode_binary(&scope.raw_path);
-        scope_dict.set_item(intern!(py, "path"), String::from_utf8_lossy(&decoded_path))?;
+        scope_dict.set_item(
+            intern!(py, "path"),
+            PyString::from_bytes(py, &decoded_path)?,
+        )?;
         scope_dict.set_item(intern!(py, "raw_path"), PyBytes::new(py, &scope.raw_path))?;
         scope_dict.set_item(
             intern!(py, "query_string"),
@@ -529,7 +532,7 @@ impl SendCallable {
                     None => false,
                 };
                 let body: Box<[u8]> = match event.get_item(intern!(py, "body"))? {
-                    Some(body) => Box::from(body.downcast::<PyBytes>()?.as_bytes()),
+                    Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
                     _ => Box::new([]),
                 };
                 match (more_body, &self.next_event) {
@@ -600,11 +603,13 @@ impl SendCallable {
                 }
                 if self.trailers_accepted {
                     let headers = extract_headers_from_event(py, &event, 0)?;
-                    if self.response_tx
-                            .send(ResponseEvent::Trailers(ResponseTrailersEvent {
-                                headers,
-                                more_trailers,
-                            })).is_ok()
+                    if self
+                        .response_tx
+                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                            headers,
+                            more_trailers,
+                        }))
+                        .is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     };
@@ -635,8 +640,8 @@ fn extract_headers_from_event<'py>(
                 let tuple = item?;
                 let key_item = tuple.get_item(0)?;
                 let value_item = tuple.get_item(1)?;
-                let key_bytes = key_item.downcast::<PyBytes>()?;
-                let value_bytes = value_item.downcast::<PyBytes>()?;
+                let key_bytes = key_item.cast::<PyBytes>()?;
+                let value_bytes = value_item.cast::<PyBytes>()?;
                 headers.push((
                     String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
                     Box::from(value_bytes.as_bytes()),

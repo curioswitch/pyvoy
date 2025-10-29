@@ -114,15 +114,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            if self.request_closed || has_request_body(envoy_filter) {
-                if let Ok(future) = self.recv_future_rx.try_recv() {
+            if (self.request_closed || has_request_body(envoy_filter))
+                && let Ok(future) = self.recv_future_rx.try_recv() {
                     self.executor.handle_recv_future(
                         read_request_body(envoy_filter),
                         !self.request_closed,
                         future,
                     );
                 }
-            }
             return;
         }
         if let Ok(event) = self.response_rx.try_recv() {

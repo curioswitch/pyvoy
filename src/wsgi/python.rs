@@ -60,17 +60,17 @@ impl PyExecutor {
                 environ.set_item(intern!(py, "SCRIPT_NAME"), "")?;
                 environ.set_item(
                     intern!(py, "PATH_INFO"),
-                    String::from_utf8_lossy(&scope.raw_path),
+                    PyString::from_bytes(py, &scope.raw_path)?,
                 )?;
                 if !scope.query_string.is_empty() {
                     environ.set_item(
                         intern!(py, "QUERY_STRING"),
-                        String::from_utf8_lossy(&scope.query_string),
+                        PyString::from_bytes(py, &scope.query_string)?,
                     )?;
                 }
 
                 for (key, value) in scope.headers.iter() {
-                    let value_str = String::from_utf8_lossy(value);
+                    let value_str = PyString::from_bytes(py, value)?;
                     match &key[..] {
                         b"content-type" => {
                             environ.set_item(intern!(py, "CONTENT_TYPE"), value_str)?
@@ -89,7 +89,7 @@ impl PyExecutor {
                             let value_str = String::from_utf8_lossy(value);
                             match environ.get_item(&header_name)? {
                                 Some(existing) => {
-                                    let existing = existing.downcast::<PyString>()?;
+                                    let existing = existing.cast::<PyString>()?;
                                     let new_value = format!("{},{}", existing.to_str()?, value_str);
                                     environ.set_item(header_name, new_value)?;
                                 }
@@ -171,7 +171,7 @@ impl PyExecutor {
                             response.try_iter()?.next().ok_or(PyRuntimeError::new_err(
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
-                        let body: Box<[u8]> = Box::from(item.downcast::<PyBytes>()?.as_bytes());
+                        let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
                         let _ = response_tx.send(ResponseEvent::Start(
                             ResponseStartEvent {
                                 headers: start_response
@@ -190,8 +190,7 @@ impl PyExecutor {
                     _ => {
                         let mut started = false;
                         for item in response.try_iter()? {
-                            let body: Box<[u8]> =
-                                Box::from(item?.downcast::<PyBytes>()?.as_bytes());
+                            let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
                             match started {
                                 false => {
                                     let _ = response_tx.send(ResponseEvent::Start(
@@ -267,9 +266,9 @@ impl StartResponseCallable {
         let mut headers = Vec::with_capacity(response_headers.len() + 1);
         for item in response_headers.iter() {
             let key_item = item.get_item(0)?;
-            let key = key_item.downcast::<PyString>()?;
+            let key = key_item.cast::<PyString>()?;
             let value_item = item.get_item(1)?;
-            let value = value_item.downcast::<PyString>()?;
+            let value = value_item.cast::<PyString>()?;
             headers.push((key.to_string(), Box::from(value.to_str()?.as_bytes())));
         }
 
