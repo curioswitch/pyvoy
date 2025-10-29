@@ -1,5 +1,5 @@
 pub(crate) struct ResponseStartEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
+    pub headers: Vec<(Box<str>, Box<[u8]>)>,
 }
 
 pub(crate) struct ResponseBodyEvent {

@@ -23,7 +23,7 @@ pub(crate) enum HttpMethod {
     Options,
     Trace,
     Patch,
-    Custom(Box<[u8]>),
+    Custom(Box<str>),
 }
 
 impl HttpMethod {
@@ -44,8 +44,7 @@ impl HttpMethod {
             HttpMethod::Trace => dict.set_item(key, intern!(py, "TRACE"))?,
             HttpMethod::Patch => dict.set_item(key, intern!(py, "PATCH"))?,
             HttpMethod::Custom(m) => {
-                let method = String::from_utf8_lossy(m);
-                dict.set_item(key, &method)?;
+                dict.set_item(key, PyString::new(py, m))?;
             }
         };
         Ok(())
@@ -69,8 +68,8 @@ pub(crate) struct Scope {
     pub raw_path: Box<[u8]>,
     pub query_string: Box<[u8]>,
     pub headers: Vec<(Box<[u8]>, Box<[u8]>)>,
-    pub client: Option<(String, i64)>,
-    pub server: Option<(String, i64)>,
+    pub client: Option<(Box<str>, i64)>,
+    pub server: Option<(Box<str>, i64)>,
 }
 
 pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
@@ -99,7 +98,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
             b"OPTIONS" => HttpMethod::Options,
             b"TRACE" => HttpMethod::Trace,
             b"PATCH" => HttpMethod::Patch,
-            other => HttpMethod::Custom(Box::from(other)),
+            other => HttpMethod::Custom(Box::from(str::from_utf8(other).unwrap_or(""))),
         },
         None => HttpMethod::Get,
     };
@@ -115,18 +114,18 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         None => HttpScheme::Http,
     };
 
-    let raw_path = match envoy_filter
+    let raw_path: Box<[u8]> = match envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
     {
         Some(v) => Box::from(v.as_slice()),
-        None => b"/".to_vec().into_boxed_slice(),
+        None => Box::from(&b"/"[..]),
     };
 
     let query_string = match envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestQuery)
     {
         Some(v) => Box::from(v.as_slice()),
-        None => b"".to_vec().into_boxed_slice(),
+        None => Box::from(&b""[..]),
     };
 
     let headers = envoy_filter
@@ -168,7 +167,7 @@ fn get_address<EHF: EnvoyHttpFilter>(
     envoy_filter: &EHF,
     address_attr_id: envoy_dynamic_module_type_attribute_id,
     port_attr_id: envoy_dynamic_module_type_attribute_id,
-) -> Option<(String, i64)> {
+) -> Option<(Box<str>, i64)> {
     match (
         envoy_filter.get_attribute_string(address_attr_id),
         envoy_filter.get_attribute_int(port_attr_id),
@@ -178,7 +177,7 @@ fn get_address<EHF: EnvoyHttpFilter>(
             if let Some(colon_idx) = host.iter().position(|&c| c == b':') {
                 host = &host[..colon_idx];
             }
-            Some((String::from_utf8_lossy(host).to_string(), port))
+            Some((Box::from(str::from_utf8(host).unwrap_or("")), port))
         }
         _ => None,
     }

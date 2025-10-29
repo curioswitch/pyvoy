@@ -120,7 +120,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     let headers_ref: Vec<(&str, &[u8])> = start_event
                         .headers
                         .iter()
-                        .map(|(k, v)| (k.as_str(), &v[..]))
+                        .map(|(k, v)| (&k[..], &v[..]))
                         .collect();
                     let end_stream = !body_event.more_body;
                     if !end_stream {
@@ -175,9 +175,9 @@ impl Filter {
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
                 if let Some(buffers) = envoy_filter.get_request_body() {
                     for buffer in buffers {
-                        let to_copy = std::cmp::min(remaining, buffer.as_slice().len());
-                        body.extend_from_slice(&buffer.as_slice()[..to_copy]);
-                        remaining -= to_copy;
+                        let to_read = std::cmp::min(remaining, buffer.as_slice().len());
+                        body.extend_from_slice(&buffer.as_slice()[..to_read]);
+                        remaining -= to_read;
                         if remaining == 0 {
                             break;
                         }

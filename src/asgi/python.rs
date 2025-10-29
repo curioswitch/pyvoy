@@ -4,7 +4,7 @@ use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
     IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError, PyStopIteration},
+    exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyUnicodeDecodeError},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
@@ -254,8 +254,14 @@ impl ExecutorInner {
                 .map(|(k, v)| (PyBytes::new(py, k), PyBytes::new(py, v))),
         )?;
         scope_dict.set_item(intern!(py, "headers"), headers)?;
-        scope_dict.set_item(intern!(py, "client"), scope.client)?;
-        scope_dict.set_item(intern!(py, "server"), scope.server)?;
+        scope_dict.set_item(
+            intern!(py, "client"),
+            scope.client.map(|(a, p)| (PyString::new(py, &a[..]), p)),
+        )?;
+        scope_dict.set_item(
+            intern!(py, "server"),
+            scope.server.map(|(a, p)| (PyString::new(py, &a[..]), p)),
+        )?;
 
         let recv = match request_closed {
             true => EmptyRecvCallable.into_bound_py_any(py)?,
@@ -503,7 +509,7 @@ impl SendCallable {
                     }
                 };
                 headers.push((
-                    String::from(":status"),
+                    Box::from(&":status"[..]),
                     Box::from(status.to_string().as_bytes()),
                 ));
                 let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
@@ -628,7 +634,7 @@ fn extract_headers_from_event<'py>(
     py: Python<'py>,
     event: &Bound<'py, PyDict>,
     extra_capacity: usize,
-) -> PyResult<Vec<(String, Box<[u8]>)>> {
+) -> PyResult<Vec<(Box<str>, Box<[u8]>)>> {
     match event.get_item(intern!(py, "headers"))? {
         Some(v) => {
             let cap = match v.len() {
@@ -643,7 +649,9 @@ fn extract_headers_from_event<'py>(
                 let key_bytes = key_item.cast::<PyBytes>()?;
                 let value_bytes = value_item.cast::<PyBytes>()?;
                 headers.push((
-                    String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
+                    str::from_utf8(key_bytes.as_bytes())
+                        .map_err(PyUnicodeDecodeError::new_err)?
+                        .into(),
                     Box::from(value_bytes.as_bytes()),
                 ));
             }
@@ -654,7 +662,7 @@ fn extract_headers_from_event<'py>(
 }
 
 pub(crate) struct ResponseStartEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
+    pub headers: Vec<(Box<str>, Box<[u8]>)>,
     pub trailers: bool,
 }
 
@@ -667,7 +675,7 @@ pub(crate) struct ResponseBodyEvent {
 }
 
 pub(crate) struct ResponseTrailersEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
+    pub headers: Vec<(Box<str>, Box<[u8]>)>,
     pub more_trailers: bool,
 }
 

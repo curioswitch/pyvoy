@@ -17,8 +17,8 @@ use std::sync::{
 #[derive(Clone)]
 pub(crate) struct PyExecutor {
     pool: ThreadPool,
-    app_module: String,
-    app_attr: String,
+    app_module: Box<str>,
+    app_attr: Box<str>,
 }
 
 impl PyExecutor {
@@ -27,8 +27,8 @@ impl PyExecutor {
 
         Ok(Self {
             pool,
-            app_module: app_module.to_string(),
-            app_attr: app_attr.to_string(),
+            app_module: Box::from(app_module),
+            app_attr: Box::from(app_attr),
         })
     }
 
@@ -48,8 +48,8 @@ impl PyExecutor {
         let response_written_rx = Mutex::new(response_written_rx);
         self.pool.execute(move || {
             let result: PyResult<()> = Python::attach(|py| {
-                let app_module = py.import(app_module)?;
-                let app = app_module.getattr(app_attr)?;
+                let app_module = py.import(&app_module[..])?;
+                let app = app_module.getattr(&app_attr[..])?;
 
                 let environ = PyDict::new(py);
                 scope
@@ -100,7 +100,7 @@ impl PyExecutor {
                 }
 
                 if let Some((server, port)) = scope.server {
-                    environ.set_item(intern!(py, "SERVER_NAME"), server)?;
+                    environ.set_item(intern!(py, "SERVER_NAME"), &server[..])?;
                     environ.set_item(intern!(py, "SERVER_PORT"), port.to_string())?;
                 } else {
                     // In practice, should never be exercised.
@@ -251,7 +251,7 @@ impl PyExecutor {
 
 #[pyclass]
 struct StartResponseCallable {
-    headers: Option<Vec<(String, Box<[u8]>)>>,
+    headers: Option<Vec<(Box<str>, Box<[u8]>)>>,
 }
 
 #[pymethods]
@@ -269,14 +269,17 @@ impl StartResponseCallable {
             let key = key_item.cast::<PyString>()?;
             let value_item = item.get_item(1)?;
             let value = value_item.cast::<PyString>()?;
-            headers.push((key.to_string(), Box::from(value.to_str()?.as_bytes())));
+            headers.push((
+                Box::from(key.to_str()?),
+                Box::from(value.to_str()?.as_bytes()),
+            ));
         }
 
         let status_code = match status.split_once(' ') {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        headers.push((String::from(":status"), Box::from(status_code.as_bytes())));
+        headers.push((Box::from(":status"), Box::from(status_code.as_bytes())));
         self.headers.replace(headers);
         // TODO: Return a write function.
         Ok(())
