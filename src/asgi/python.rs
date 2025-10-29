@@ -480,14 +480,10 @@ impl SendCallable {
             return Err(ClientDisconnectedError::new_err(()));
         }
 
-        let event_type: String = match event.get_item("type")? {
-            Some(v) => v.extract()?,
-            None => {
-                return Err(PyRuntimeError::new_err(
-                    "Unexpected ASGI message, missing 'type'.",
-                ));
-            }
-        };
+        let event_type_py = event
+            .get_item(intern!(py, "type"))?
+            .ok_or_else(|| PyRuntimeError::new_err("Unexpected ASGI message, missing 'type'."))?;
+        let event_type = event_type_py.cast::<PyString>()?.to_str()?;
 
         match &self.next_event {
             NextASGIEvent::Start => {
