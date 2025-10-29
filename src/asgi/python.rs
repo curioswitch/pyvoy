@@ -2,9 +2,10 @@ use std::thread;
 
 use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
+use http::{HeaderName, HeaderValue};
 use pyo3::{
     IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyUnicodeDecodeError},
+    exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyValueError},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
@@ -493,7 +494,7 @@ impl SendCallable {
                         event_type
                     )));
                 }
-                let mut headers = extract_headers_from_event(py, &event, 1)?;
+                let headers = extract_headers_from_event(py, &event)?;
                 let status: u16 = match event.get_item(intern!(py, "status"))? {
                     Some(v) => v.extract()?,
                     None => {
@@ -502,11 +503,6 @@ impl SendCallable {
                         ));
                     }
                 };
-                let mut status_buf = itoa::Buffer::new();
-                headers.push((
-                    Box::from(":status"),
-                    Box::from(status_buf.format(status).as_bytes()),
-                ));
                 let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
                     Some(v) => v.extract()?,
                     None => false,
@@ -517,6 +513,7 @@ impl SendCallable {
                     self.next_event = NextASGIEvent::BodyWithoutTrailers;
                 };
                 self.response_start.replace(ResponseStartEvent {
+                    status,
                     headers,
                     trailers: trailers && self.trailers_accepted,
                 });
@@ -603,7 +600,7 @@ impl SendCallable {
                     self.next_event = NextASGIEvent::Done;
                 }
                 if self.trailers_accepted {
-                    let headers = extract_headers_from_event(py, &event, 0)?;
+                    let headers = extract_headers_from_event(py, &event)?;
                     if self
                         .response_tx
                         .send(ResponseEvent::Trailers(ResponseTrailersEvent {
@@ -628,14 +625,10 @@ impl SendCallable {
 fn extract_headers_from_event<'py>(
     py: Python<'py>,
     event: &Bound<'py, PyDict>,
-    extra_capacity: usize,
-) -> PyResult<Vec<(Box<str>, Box<[u8]>)>> {
+) -> PyResult<Vec<(HeaderName, HeaderValue)>> {
     match event.get_item(intern!(py, "headers"))? {
         Some(v) => {
-            let cap = match v.len() {
-                Ok(len) => len + extra_capacity,
-                Err(_) => extra_capacity,
-            };
+            let cap = v.len().unwrap_or(0);
             let mut headers = Vec::with_capacity(cap);
             for item in v.try_iter()? {
                 let tuple = item?;
@@ -644,20 +637,23 @@ fn extract_headers_from_event<'py>(
                 let key_bytes = key_item.cast::<PyBytes>()?;
                 let value_bytes = value_item.cast::<PyBytes>()?;
                 headers.push((
-                    str::from_utf8(key_bytes.as_bytes())
-                        .map_err(PyUnicodeDecodeError::new_err)?
-                        .into(),
-                    Box::from(value_bytes.as_bytes()),
+                    HeaderName::from_bytes(key_bytes.as_bytes()).map_err(|e| {
+                        PyValueError::new_err(format!("invalid header name: {}", e))
+                    })?,
+                    HeaderValue::from_bytes(value_bytes.as_bytes()).map_err(|e| {
+                        PyValueError::new_err(format!("invalid header value: {}", e))
+                    })?,
                 ));
             }
             Ok(headers)
         }
-        None => Ok(Vec::with_capacity(extra_capacity)),
+        None => Ok(Vec::new()),
     }
 }
 
 pub(crate) struct ResponseStartEvent {
-    pub headers: Vec<(Box<str>, Box<[u8]>)>,
+    pub status: u16,
+    pub headers: Vec<(HeaderName, HeaderValue)>,
     pub trailers: bool,
 }
 
@@ -670,7 +666,7 @@ pub(crate) struct ResponseBodyEvent {
 }
 
 pub(crate) struct ResponseTrailersEvent {
-    pub headers: Vec<(Box<str>, Box<[u8]>)>,
+    pub headers: Vec<(HeaderName, HeaderValue)>,
     pub more_trailers: bool,
 }
 

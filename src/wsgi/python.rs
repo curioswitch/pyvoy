@@ -1,6 +1,7 @@
 use executors::{Executor, crossbeam_channel_pool::ThreadPool};
+use http::{HeaderName, HeaderValue};
 use pyo3::{
-    exceptions::PyRuntimeError,
+    exceptions::{PyRuntimeError, PyValueError},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyString, PyTuple},
@@ -141,7 +142,13 @@ impl PyExecutor {
                 environ.set_item(intern!(py, "wsgi.multiprocess"), false)?;
                 environ.set_item(intern!(py, "wsgi.run_once"), false)?;
 
-                let start_response = Bound::new(py, StartResponseCallable { headers: None })?;
+                let start_response = Bound::new(
+                    py,
+                    StartResponseCallable {
+                        status: 0,
+                        headers: None,
+                    },
+                )?;
                 let response = app.call1((environ, start_response.borrow()))?;
 
                 // We ignore all channel errors here since they only happen if the filter was dropped meaning
@@ -150,13 +157,11 @@ impl PyExecutor {
 
                 match response.len() {
                     Ok(0) => {
+                        let mut start_response = start_response.borrow_mut();
                         let _ = response_tx.send(ResponseEvent::Start(
                             ResponseStartEvent {
-                                headers: start_response
-                                    .borrow_mut()
-                                    .headers
-                                    .take()
-                                    .unwrap_or_default(),
+                                status: start_response.status,
+                                headers: start_response.headers.take().unwrap_or_default(),
                             },
                             ResponseBodyEvent {
                                 body: Box::from([]),
@@ -171,13 +176,11 @@ impl PyExecutor {
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
                         let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
+                        let mut start_response = start_response.borrow_mut();
                         let _ = response_tx.send(ResponseEvent::Start(
                             ResponseStartEvent {
-                                headers: start_response
-                                    .borrow_mut()
-                                    .headers
-                                    .take()
-                                    .unwrap_or_default(),
+                                status: start_response.status,
+                                headers: start_response.headers.take().unwrap_or_default(),
                             },
                             ResponseBodyEvent {
                                 body,
@@ -191,13 +194,11 @@ impl PyExecutor {
                         for item in response.try_iter()? {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
                             if !started {
+                                let mut start_response = start_response.borrow_mut();
                                 let _ = response_tx.send(ResponseEvent::Start(
                                     ResponseStartEvent {
-                                        headers: start_response
-                                            .borrow_mut()
-                                            .headers
-                                            .take()
-                                            .unwrap_or_default(),
+                                        status: start_response.status,
+                                        headers: start_response.headers.take().unwrap_or_default(),
                                     },
                                     ResponseBodyEvent {
                                         body,
@@ -246,7 +247,8 @@ impl PyExecutor {
 
 #[pyclass]
 struct StartResponseCallable {
-    headers: Option<Vec<(Box<str>, Box<[u8]>)>>,
+    status: u16,
+    headers: Option<Vec<(HeaderName, HeaderValue)>>,
 }
 
 #[pymethods]
@@ -258,15 +260,17 @@ impl StartResponseCallable {
         response_headers: Bound<'py, PyList>,
         _exc_info: Option<Bound<'py, PyTuple>>,
     ) -> PyResult<()> {
-        let mut headers = Vec::with_capacity(response_headers.len() + 1);
+        let mut headers = Vec::with_capacity(response_headers.len());
         for item in response_headers.iter() {
             let key_item = item.get_item(0)?;
             let key = key_item.cast::<PyString>()?;
             let value_item = item.get_item(1)?;
             let value = value_item.cast::<PyString>()?;
             headers.push((
-                Box::from(key.to_str()?),
-                Box::from(value.to_str()?.as_bytes()),
+                HeaderName::from_bytes(key.to_str()?.as_bytes())
+                    .map_err(|e| PyValueError::new_err(format!("invalid header name: {}", e)))?,
+                HeaderValue::from_bytes(value.to_str()?.as_bytes())
+                    .map_err(|e| PyValueError::new_err(format!("invalid header value: {}", e)))?,
             ));
         }
 
@@ -274,7 +278,8 @@ impl StartResponseCallable {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        headers.push((Box::from(":status"), Box::from(status_code.as_bytes())));
+        self.status = u16::from_str_radix(status_code, 10)
+            .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
         self.headers.replace(headers);
         // TODO: Return a write function.
         Ok(())
