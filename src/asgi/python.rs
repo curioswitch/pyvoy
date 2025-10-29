@@ -502,9 +502,10 @@ impl SendCallable {
                         ));
                     }
                 };
+                let mut status_buf = itoa::Buffer::new();
                 headers.push((
                     Box::from(":status"),
-                    Box::from(status.to_string().as_bytes()),
+                    Box::from(status_buf.format(status).as_bytes()),
                 ));
                 let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
                     Some(v) => v.extract()?,
