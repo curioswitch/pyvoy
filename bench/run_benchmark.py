@@ -21,7 +21,7 @@ HYPERCORN = AppServer("hypercorn", ["hypercorn", "--worker-class", "uvloop", APP
 GRANIAN = AppServer(
     "granian", ["granian", "--interface", "asgi", "--loop", "uvloop", APP]
 )
-UVICORN = AppServer("uvicorn", ["uvicorn", "--loop", "uvloop", APP])
+UVICORN = AppServer("uvicorn", ["uvicorn", "--no-access-log", "--loop", "uvloop", APP])
 
 
 class Protocol(Enum):
@@ -123,7 +123,7 @@ def main() -> None:
                         )
                         print("\n", flush=True)  # noqa: T201
             server.terminate()
-            server.wait()
+            server.communicate()
 
 
 if __name__ == "__main__":
