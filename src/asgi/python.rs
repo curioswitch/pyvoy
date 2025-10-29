@@ -567,26 +567,23 @@ impl SendCallable {
                     future: send_future,
                 };
                 if let Some(start_event) = self.response_start.take() {
-                    match self
+                    if self
                         .response_tx
                         .send(ResponseEvent::Start(start_event, body_event))
+                        .is_ok()
                     {
-                        Ok(_) => {
-                            self.scheduler.commit(EVENT_ID_RESPONSE);
-                        }
-                        Err(_) => {
-                            self.closed = true;
-                        }
+                        self.scheduler.commit(EVENT_ID_RESPONSE);
+                    } else {
+                        self.closed = true;
                     }
+                } else if self
+                    .response_tx
+                    .send(ResponseEvent::Body(body_event))
+                    .is_ok()
+                {
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
-                    match self.response_tx.send(ResponseEvent::Body(body_event)) {
-                        Ok(_) => {
-                            self.scheduler.commit(EVENT_ID_RESPONSE);
-                        }
-                        Err(_) => {
-                            self.closed = true;
-                        }
-                    }
+                    self.closed = true;
                 }
                 Ok(ret)
             }
