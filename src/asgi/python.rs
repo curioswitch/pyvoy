@@ -248,7 +248,7 @@ impl ExecutorInner {
             scope
                 .headers
                 .iter()
-                .map(|(k, v)| (PyBytes::new(py, &k), PyBytes::new(py, &v))),
+                .map(|(k, v)| (PyBytes::new(py, k), PyBytes::new(py, v))),
         )?;
         scope_dict.set_item(intern!(py, "headers"), headers)?;
         scope_dict.set_item(intern!(py, "client"), scope.client)?;
@@ -257,7 +257,7 @@ impl ExecutorInner {
         let recv = match request_closed {
             true => EmptyRecvCallable.into_bound_py_any(py)?,
             false => RecvCallable {
-                recv_future_tx: recv_future_tx,
+                recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -272,7 +272,7 @@ impl ExecutorInner {
             SendCallable {
                 next_event: NextASGIEvent::Start,
                 response_start: None,
-                trailers_accepted: trailers_accepted,
+                trailers_accepted,
                 closed: false,
                 response_tx: response_tx.clone(),
                 scheduler: send_scheduler,
@@ -288,7 +288,7 @@ impl ExecutorInner {
         future.call_method1(
             intern!(py, "add_done_callback"),
             (AppFutureHandler {
-                response_tx: response_tx,
+                response_tx,
                 scheduler: end_scheduler,
             },),
         )?;
@@ -389,7 +389,7 @@ impl RecvCallable {
             future: Some(future.clone().unbind()),
             executor: self.executor.clone(),
         };
-        if let Ok(_) = self.recv_future_tx.send(recv_future) {
+        if self.recv_future_tx.send(recv_future).is_ok() {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future)
@@ -406,10 +406,10 @@ impl EmptyRecvCallable {
         event.set_item(intern!(py, "type"), intern!(py, "http.request"))?;
         event.set_item(intern!(py, "body"), PyBytes::new(py, &[]))?;
         event.set_item(intern!(py, "more_body"), false)?;
-        return ValueAwaitable {
+        ValueAwaitable {
             value: Some(event.into_any().unbind()),
         }
-        .into_bound_py_any(py);
+        .into_bound_py_any(py)
     }
 }
 
@@ -512,7 +512,7 @@ impl SendCallable {
                     false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
                 };
                 self.response_start.replace(ResponseStartEvent {
-                    headers: headers,
+                    headers,
                     trailers: trailers && self.trailers_accepted,
                 });
                 EmptyAwaitable.into_bound_py_any(py)
@@ -600,12 +600,11 @@ impl SendCallable {
                 }
                 if self.trailers_accepted {
                     let headers = extract_headers_from_event(py, &event, 0)?;
-                    if let Ok(_) =
-                        self.response_tx
+                    if self.response_tx
                             .send(ResponseEvent::Trailers(ResponseTrailersEvent {
                                 headers,
                                 more_trailers,
-                            }))
+                            })).is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     };
@@ -710,11 +709,11 @@ struct EmptyAwaitable;
 #[pymethods]
 impl EmptyAwaitable {
     fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        return slf;
+        slf
     }
 
     fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        return slf;
+        slf
     }
 
     fn __next__(&self) -> Option<()> {
@@ -730,11 +729,11 @@ struct ValueAwaitable {
 #[pymethods]
 impl ValueAwaitable {
     fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        return slf;
+        slf
     }
 
     fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        return slf;
+        slf
     }
 
     fn __next__<'py>(&mut self) -> PyResult<Py<PyAny>> {

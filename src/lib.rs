@@ -49,10 +49,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             return None;
         }
     };
-    let interface = match filter_config["interface"].as_str() {
-        Some(interface) => interface,
-        None => "asgi",
-    };
+    let interface = filter_config["interface"].as_str().unwrap_or("asgi");
 
     match interface {
         "asgi" => match asgi::filter::Config::new(app) {

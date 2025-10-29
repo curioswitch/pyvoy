@@ -39,7 +39,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             request_body_tx,
             pending_read: 0,
             read_buffer: Vec::new(),
-            response_rx: response_rx,
+            response_rx,
             response_tx: Some(response_tx),
             response_written_tx,
             response_written_rx: Some(response_written_rx),
@@ -169,10 +169,10 @@ impl Filter {
             return;
         }
         match self.pending_read {
-            0 => return,
+            0 => (),
             n if n > 0 => {
                 let mut remaining = n as usize;
-                let mut body: Vec<u8> = Vec::with_capacity(remaining as usize);
+                let mut body: Vec<u8> = Vec::with_capacity(remaining);
                 if let Some(buffers) = envoy_filter.get_request_body() {
                     for buffer in buffers {
                         let to_copy = std::cmp::min(remaining, buffer.as_slice().len());

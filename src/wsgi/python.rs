@@ -82,11 +82,11 @@ impl PyExecutor {
                             if key[0] == b':' {
                                 continue;
                             }
-                            let key_str = String::from_utf8_lossy(&key)
+                            let key_str = String::from_utf8_lossy(key)
                                 .to_uppercase()
                                 .replace("-", "_");
                             let header_name = format!("HTTP_{}", key_str);
-                            let value_str = String::from_utf8_lossy(&value);
+                            let value_str = String::from_utf8_lossy(value);
                             match environ.get_item(&header_name)? {
                                 Some(existing) => {
                                     let existing = existing.downcast::<PyString>()?;

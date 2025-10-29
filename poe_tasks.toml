@@ -17,7 +17,7 @@ cmd = "ruff check --fix --unsafe-fixes --exit-zero ."
 
 [tasks.fix-rust]
 help = "Fixes rust lint errors where possible"
-cmd = "cargo clippy --fix"
+cmd = "cargo clippy --fix --allow-dirty"
 
 [tasks.format-python]
 help = "Format python code"
@@ -29,7 +29,7 @@ cmd = "cargo fmt"
 
 [tasks.format]
 help = "Formats code"
-sequence = ["format-python", "format-rust", "fix-python"]
+sequence = ["format-python", "format-rust", "fix-python", "fix-rust"]
 
 [tasks.lint-python]
 help = "Lints python code"
