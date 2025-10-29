@@ -509,7 +509,7 @@ impl SendCallable {
                     }
                 };
                 headers.push((
-                    Box::from(&":status"[..]),
+                    Box::from(":status"),
                     Box::from(status.to_string().as_bytes()),
                 ));
                 let trailers: bool = match event.get_item(intern!(py, "trailers"))? {

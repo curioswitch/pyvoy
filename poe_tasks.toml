@@ -29,7 +29,7 @@ cmd = "cargo fmt"
 
 [tasks.format]
 help = "Formats code"
-sequence = ["format-python", "format-rust", "fix-python", "fix-rust"]
+sequence = ["fix-python", "fix-rust", "format-python", "format-rust"]
 
 [tasks.lint-python]
 help = "Lints python code"
