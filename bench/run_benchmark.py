@@ -38,7 +38,7 @@ def main() -> None:
     parser.add_argument(
         "--short",
         action=argparse.BooleanOptionalAction,
-        help="Run a short version of the tests, generally to verify benchmark harness",
+        help="Run a short version of the tests",
     )
     args = parser.parse_args(namespace=Args())
 
@@ -76,9 +76,7 @@ def main() -> None:
                     continue
                 for sleep in (0, 10, 200, 500, 1000):
                     for response_size in (0, 100, 10000, 100000):
-                        if args.short and (
-                            protocol != Protocol.HTTP2 or sleep > 0 or response_size > 0
-                        ):
+                        if args.short and (sleep > 0 or response_size > 0):
                             continue
                         print(  # noqa: T201
                             f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n",

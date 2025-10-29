@@ -8,10 +8,9 @@ on:
       - "Cargo.lock"
       - "bench/**"
       - ".github/workflows/bench.yaml"
+  # Just verify the harness on PRs, no need for actual numbers
   pull_request:
     paths:
-      - "src/**"
-      - "Cargo.lock"
       - "bench/**"
       - ".github/workflows/bench.yaml"
   workflow_dispatch:
