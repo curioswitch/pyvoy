@@ -1,3 +1,8 @@
+[tasks.bench]
+help = "Run benchmarks"
+script = "bench.run_benchmark:main"
+deps = ["build"]
+
 [tasks.build]
 help = "Builds native extensions"
 script = "scripts.build:main"
