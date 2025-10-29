@@ -1,7 +1,7 @@
 use crate::wsgi::python::PyExecutor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, mpsc};
 
 use super::types::*;
 use crate::types::*;
@@ -10,9 +10,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(app: &str) -> Option<Self> {
+    pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let executor = match PyExecutor::new(module, attr, 200) {
+        let executor = match PyExecutor::new(module, attr, 200, constants) {
             Ok(executor) => executor,
             Err(err) => {
                 eprintln!("Failed to initialize ASGI app: {err}");
