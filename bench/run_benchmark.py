@@ -29,6 +29,13 @@ class Protocol(Enum):
 
 
 def main() -> None:
+    # Run vegeta once at start to avoid go downloading messages during benchmarks
+    subprocess.run(
+        ["go", "run", "github.com/tsenart/vegeta/v12@v12.12.0", "--version"],  # noqa: S607
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     for app_server in (PYVOY, HYPERCORN, GRANIAN, UVICORN):
         with subprocess.Popen(  # noqa: S603
             app_server.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -47,10 +54,11 @@ def main() -> None:
             for protocol in (Protocol.HTTP2, Protocol.HTTP1):
                 if protocol != Protocol.HTTP1 and app_server == UVICORN:
                     continue
-                for sleep in (0,):  # 1, 10, 50, 100, 200, 500, 1000):
-                    for response_size in (0,):  # 1, 10, 100, 1000, 10000, 100000):
+                for sleep in (0, 1, 10, 50, 100, 200, 500, 1000):
+                    for response_size in (0, 1, 10, 100, 1000, 10000, 100000):
                         print(  # noqa: T201
-                            f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n"
+                            f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n",
+                            flush=True,
                         )
                         target = {
                             "method": "GET",
@@ -90,10 +98,8 @@ def main() -> None:
                             ],
                             check=True,
                             input=vegeta_result,
-                            stdout=sys.stdout,
-                            stderr=sys.stderr,
                         )
-                        print("\n")  # noqa: T201
+                        print("\n", flush=True)  # noqa: T201
             server.terminate()
             server.wait()
 
