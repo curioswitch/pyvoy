@@ -8,6 +8,11 @@ on:
       - "Cargo.lock"
       - "bench/**"
       - ".github/workflows/bench.yaml"
+  # Just verify the harness on PRs, no need for actual numbers
+  pull_request:
+    paths:
+      - "bench/**"
+      - ".github/workflows/bench.yaml"
   workflow_dispatch:
 
 jobs:
@@ -32,4 +37,4 @@ jobs:
 
       - run: uv sync --python ${{ matrix.python }} --managed-python
 
-      - run: uv run poe bench
+      - run: uv run poe bench ${{ github.event_name == 'pull_request' && '--short' || '' }}

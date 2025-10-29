@@ -1,3 +1,4 @@
+import argparse
 import json
 import subprocess
 import sys
@@ -20,7 +21,7 @@ HYPERCORN = AppServer("hypercorn", ["hypercorn", "--worker-class", "uvloop", APP
 GRANIAN = AppServer(
     "granian", ["granian", "--interface", "asgi", "--loop", "uvloop", APP]
 )
-UVICORN = AppServer("uvicorn", ["uvicorn", "--loop", "uvloop", APP])
+UVICORN = AppServer("uvicorn", ["uvicorn", "--no-access-log", "--loop", "uvloop", APP])
 
 
 class Protocol(Enum):
@@ -28,7 +29,19 @@ class Protocol(Enum):
     HTTP2 = "h2"
 
 
+class Args(argparse.Namespace):
+    short: bool
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Conformance server")
+    parser.add_argument(
+        "--short",
+        action=argparse.BooleanOptionalAction,
+        help="Run a short version of the tests",
+    )
+    args = parser.parse_args(namespace=Args())
+
     # Run vegeta once at start to avoid go downloading messages during benchmarks
     subprocess.run(
         ["go", "run", "github.com/tsenart/vegeta/v12@v12.12.0", "--version"],  # noqa: S607
@@ -38,24 +51,33 @@ def main() -> None:
     )
     for app_server in (PYVOY, HYPERCORN, GRANIAN, UVICORN):
         with subprocess.Popen(  # noqa: S603
-            app_server.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            app_server.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         ) as server:
             # Wait for server to start
+            started = False
             for _ in range(100):
                 try:
                     with urllib.request.urlopen(
                         "http://localhost:8000/controlled"
                     ) as resp:
                         if resp.status == 200:
+                            started = True
                             break
                 except Exception:  # noqa: S110
                     pass
                 time.sleep(0.1)
+            if server.returncode is not None or not started:
+                server.terminate()
+                stdout, stderr = server.communicate()
+                msg = f"Server {app_server.name} failed to start\n{stderr.decode()}\n{stdout.decode()}"
+                raise RuntimeError(msg)
             for protocol in (Protocol.HTTP2, Protocol.HTTP1):
                 if protocol != Protocol.HTTP1 and app_server == UVICORN:
                     continue
                 for sleep in (0, 10, 200, 500, 1000):
                     for response_size in (0, 100, 10000, 100000):
+                        if args.short and (sleep > 0 or response_size > 0):
+                            continue
                         print(  # noqa: T201
                             f"Running benchmark for {app_server.name} with protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n",
                             flush=True,
@@ -101,7 +123,7 @@ def main() -> None:
                         )
                         print("\n", flush=True)  # noqa: T201
             server.terminate()
-            server.wait()
+            server.communicate()
 
 
 if __name__ == "__main__":
