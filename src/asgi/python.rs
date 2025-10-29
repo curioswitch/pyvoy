@@ -4,7 +4,7 @@ use crate::types::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use pyo3::{
     IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError, PyStopIteration},
+    exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyUnicodeDecodeError},
     intern,
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
@@ -254,18 +254,25 @@ impl ExecutorInner {
                 .map(|(k, v)| (PyBytes::new(py, k), PyBytes::new(py, v))),
         )?;
         scope_dict.set_item(intern!(py, "headers"), headers)?;
-        scope_dict.set_item(intern!(py, "client"), scope.client)?;
-        scope_dict.set_item(intern!(py, "server"), scope.server)?;
+        scope_dict.set_item(
+            intern!(py, "client"),
+            scope.client.map(|(a, p)| (PyString::new(py, &a[..]), p)),
+        )?;
+        scope_dict.set_item(
+            intern!(py, "server"),
+            scope.server.map(|(a, p)| (PyString::new(py, &a[..]), p)),
+        )?;
 
-        let recv = match request_closed {
-            true => EmptyRecvCallable.into_bound_py_any(py)?,
-            false => RecvCallable {
+        let recv = if request_closed {
+            EmptyRecvCallable.into_bound_py_any(py)?
+        } else {
+            RecvCallable {
                 recv_future_tx,
                 scheduler: recv_scheduler,
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
             }
-            .into_bound_py_any(py)?,
+            .into_bound_py_any(py)?
         };
 
         let app = self.app.bind(py);
@@ -427,17 +434,14 @@ unsafe impl Sync for AppFutureHandler {}
 #[pymethods]
 impl AppFutureHandler {
     fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        match future.call_method1(intern!(py, "result"), (0,)) {
-            Ok(_) => {}
-            Err(e) => {
-                if e.is_instance_of::<ClientDisconnectedError>(py) {
-                    return;
-                }
-                let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-                eprintln!("Exception in ASGI application\n{}{}", tb, e);
-                if let Ok(_) = self.response_tx.send(ResponseEvent::Exception) {
-                    self.scheduler.commit(EVENT_ID_EXCEPTION);
-                }
+        if let Err(e) = future.call_method1(intern!(py, "result"), (0,)) {
+            if e.is_instance_of::<ClientDisconnectedError>(py) {
+                return;
+            }
+            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+            eprintln!("Exception in ASGI application\n{}{}", tb, e);
+            if self.response_tx.send(ResponseEvent::Exception).is_ok() {
+                self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
     }
@@ -503,16 +507,17 @@ impl SendCallable {
                     }
                 };
                 headers.push((
-                    String::from(":status"),
+                    Box::from(":status"),
                     Box::from(status.to_string().as_bytes()),
                 ));
                 let trailers: bool = match event.get_item(intern!(py, "trailers"))? {
                     Some(v) => v.extract()?,
                     None => false,
                 };
-                match trailers {
-                    true => self.next_event = NextASGIEvent::BodyWithTrailers,
-                    false => self.next_event = NextASGIEvent::BodyWithoutTrailers,
+                if trailers {
+                    self.next_event = NextASGIEvent::BodyWithTrailers;
+                } else {
+                    self.next_event = NextASGIEvent::BodyWithoutTrailers;
                 };
                 self.response_start.replace(ResponseStartEvent {
                     headers,
@@ -535,14 +540,16 @@ impl SendCallable {
                     Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
                     _ => Box::new([]),
                 };
-                match (more_body, &self.next_event) {
-                    (false, NextASGIEvent::BodyWithTrailers) => {
-                        self.next_event = NextASGIEvent::Trailers;
+                if !more_body {
+                    match &self.next_event {
+                        NextASGIEvent::BodyWithTrailers => {
+                            self.next_event = NextASGIEvent::Trailers;
+                        }
+                        NextASGIEvent::BodyWithoutTrailers => {
+                            self.next_event = NextASGIEvent::Done;
+                        }
+                        _ => {}
                     }
-                    (false, NextASGIEvent::BodyWithoutTrailers) => {
-                        self.next_event = NextASGIEvent::Done;
-                    }
-                    _ => {}
                 }
                 let (ret, send_future) = if more_body {
                     let future = self
@@ -628,7 +635,7 @@ fn extract_headers_from_event<'py>(
     py: Python<'py>,
     event: &Bound<'py, PyDict>,
     extra_capacity: usize,
-) -> PyResult<Vec<(String, Box<[u8]>)>> {
+) -> PyResult<Vec<(Box<str>, Box<[u8]>)>> {
     match event.get_item(intern!(py, "headers"))? {
         Some(v) => {
             let cap = match v.len() {
@@ -643,7 +650,9 @@ fn extract_headers_from_event<'py>(
                 let key_bytes = key_item.cast::<PyBytes>()?;
                 let value_bytes = value_item.cast::<PyBytes>()?;
                 headers.push((
-                    String::from_utf8_lossy(key_bytes.as_bytes()).to_string(),
+                    str::from_utf8(key_bytes.as_bytes())
+                        .map_err(PyUnicodeDecodeError::new_err)?
+                        .into(),
                     Box::from(value_bytes.as_bytes()),
                 ));
             }
@@ -654,7 +663,7 @@ fn extract_headers_from_event<'py>(
 }
 
 pub(crate) struct ResponseStartEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
+    pub headers: Vec<(Box<str>, Box<[u8]>)>,
     pub trailers: bool,
 }
 
@@ -667,7 +676,7 @@ pub(crate) struct ResponseBodyEvent {
 }
 
 pub(crate) struct ResponseTrailersEvent {
-    pub headers: Vec<(String, Box<[u8]>)>,
+    pub headers: Vec<(Box<str>, Box<[u8]>)>,
     pub more_trailers: bool,
 }
 

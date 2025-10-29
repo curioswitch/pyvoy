@@ -53,7 +53,7 @@ struct Filter {
     request_closed: bool,
     response_state: ResponseState,
 
-    response_trailers: Option<Vec<(String, Box<[u8]>)>>,
+    response_trailers: Option<Vec<(Box<str>, Box<[u8]>)>>,
 
     recv_future_rx: Receiver<RecvFuture>,
     recv_future_tx: Option<Sender<RecvFuture>>,
@@ -115,13 +115,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             if (self.request_closed || has_request_body(envoy_filter))
-                && let Ok(future) = self.recv_future_rx.try_recv() {
-                    self.executor.handle_recv_future(
-                        read_request_body(envoy_filter),
-                        !self.request_closed,
-                        future,
-                    );
-                }
+                && let Ok(future) = self.recv_future_rx.try_recv()
+            {
+                self.executor.handle_recv_future(
+                    read_request_body(envoy_filter),
+                    !self.request_closed,
+                    future,
+                );
+            }
             return;
         }
         if let Ok(event) = self.response_rx.try_recv() {
@@ -133,7 +134,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     let headers_ref: Vec<(&str, &[u8])> = start_event
                         .headers
                         .iter()
-                        .map(|(k, v)| (k.as_str(), &v[..]))
+                        .map(|(k, v)| (&k[..], &v[..]))
                         .collect();
                     let end_stream =
                         body_event.future.is_none() && self.response_trailers.is_none();
@@ -165,7 +166,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         trailers.append(&mut event.headers);
                         if !event.more_trailers {
                             let trailers_ref: Vec<(&str, &[u8])> =
-                                trailers.iter().map(|(k, v)| (k.as_str(), &v[..])).collect();
+                                trailers.iter().map(|(k, v)| (&k[..], &v[..])).collect();
                             envoy_filter.send_response_trailers(trailers_ref);
                         }
                     }

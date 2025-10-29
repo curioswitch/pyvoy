@@ -17,8 +17,8 @@ use std::sync::{
 #[derive(Clone)]
 pub(crate) struct PyExecutor {
     pool: ThreadPool,
-    app_module: String,
-    app_attr: String,
+    app_module: Box<str>,
+    app_attr: Box<str>,
 }
 
 impl PyExecutor {
@@ -27,8 +27,8 @@ impl PyExecutor {
 
         Ok(Self {
             pool,
-            app_module: app_module.to_string(),
-            app_attr: app_attr.to_string(),
+            app_module: Box::from(app_module),
+            app_attr: Box::from(app_attr),
         })
     }
 
@@ -48,8 +48,8 @@ impl PyExecutor {
         let response_written_rx = Mutex::new(response_written_rx);
         self.pool.execute(move || {
             let result: PyResult<()> = Python::attach(|py| {
-                let app_module = py.import(app_module)?;
-                let app = app_module.getattr(app_attr)?;
+                let app_module = py.import(&app_module[..])?;
+                let app = app_module.getattr(&app_attr[..])?;
 
                 let environ = PyDict::new(py);
                 scope
@@ -87,20 +87,19 @@ impl PyExecutor {
                                 .replace("-", "_");
                             let header_name = format!("HTTP_{}", key_str);
                             let value_str = String::from_utf8_lossy(value);
-                            match environ.get_item(&header_name)? {
-                                Some(existing) => {
-                                    let existing = existing.cast::<PyString>()?;
-                                    let new_value = format!("{},{}", existing.to_str()?, value_str);
-                                    environ.set_item(header_name, new_value)?;
-                                }
-                                None => environ.set_item(header_name, value_str)?,
+                            if let Some(existing) = environ.get_item(&header_name)? {
+                                let existing = existing.cast::<PyString>()?;
+                                let new_value = format!("{},{}", existing.to_str()?, value_str);
+                                environ.set_item(header_name, new_value)?;
+                            } else {
+                                environ.set_item(header_name, value_str)?;
                             }
                         }
                     }
                 }
 
                 if let Some((server, port)) = scope.server {
-                    environ.set_item(intern!(py, "SERVER_NAME"), server)?;
+                    environ.set_item(intern!(py, "SERVER_NAME"), &server[..])?;
                     environ.set_item(intern!(py, "SERVER_PORT"), port.to_string())?;
                 } else {
                     // In practice, should never be exercised.
@@ -191,30 +190,26 @@ impl PyExecutor {
                         let mut started = false;
                         for item in response.try_iter()? {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
-                            match started {
-                                false => {
-                                    let _ = response_tx.send(ResponseEvent::Start(
-                                        ResponseStartEvent {
-                                            headers: start_response
-                                                .borrow_mut()
-                                                .headers
-                                                .take()
-                                                .unwrap_or_default(),
-                                        },
-                                        ResponseBodyEvent {
-                                            body,
-                                            more_body: true,
-                                        },
-                                    ));
-                                    started = true;
-                                }
-                                true => {
-                                    let _ =
-                                        response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
-                                            body,
-                                            more_body: true,
-                                        }));
-                                }
+                            if !started {
+                                let _ = response_tx.send(ResponseEvent::Start(
+                                    ResponseStartEvent {
+                                        headers: start_response
+                                            .borrow_mut()
+                                            .headers
+                                            .take()
+                                            .unwrap_or_default(),
+                                    },
+                                    ResponseBodyEvent {
+                                        body,
+                                        more_body: true,
+                                    },
+                                ));
+                                started = true;
+                            } else {
+                                let _ = response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
+                                    body,
+                                    more_body: true,
+                                }));
                             }
                             response_scheduler.commit(EVENT_ID_RESPONSE);
                             py.detach(|| {
@@ -251,7 +246,7 @@ impl PyExecutor {
 
 #[pyclass]
 struct StartResponseCallable {
-    headers: Option<Vec<(String, Box<[u8]>)>>,
+    headers: Option<Vec<(Box<str>, Box<[u8]>)>>,
 }
 
 #[pymethods]
@@ -269,14 +264,17 @@ impl StartResponseCallable {
             let key = key_item.cast::<PyString>()?;
             let value_item = item.get_item(1)?;
             let value = value_item.cast::<PyString>()?;
-            headers.push((key.to_string(), Box::from(value.to_str()?.as_bytes())));
+            headers.push((
+                Box::from(key.to_str()?),
+                Box::from(value.to_str()?.as_bytes()),
+            ));
         }
 
         let status_code = match status.split_once(' ') {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        headers.push((String::from(":status"), Box::from(status_code.as_bytes())));
+        headers.push((Box::from(":status"), Box::from(status_code.as_bytes())));
         self.headers.replace(headers);
         // TODO: Return a write function.
         Ok(())
@@ -303,23 +301,22 @@ impl RequestInput {
 
         let size = size.unwrap_or(-1);
 
-        match size {
-            0 => Ok(PyBytes::new(py, &[])),
-            _ => {
-                self.request_read_tx.send(size);
-                self.scheduler.commit(EVENT_ID_REQUEST);
+        if size == 0 {
+            Ok(PyBytes::new(py, &[]))
+        } else {
+            self.request_read_tx.send(size);
+            self.scheduler.commit(EVENT_ID_REQUEST);
 
-                let body = py.detach::<PyResult<RequestBody>, _>(|| {
-                    self.request_body_rx.lock().unwrap().recv().map_err(|e| {
-                        PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
-                    })
-                })?;
-                if body.closed {
-                    self.closed = true;
-                }
-
-                Ok(PyBytes::new(py, &body.body))
+            let body = py.detach::<PyResult<RequestBody>, _>(|| {
+                self.request_body_rx.lock().unwrap().recv().map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
+                })
+            })?;
+            if body.closed {
+                self.closed = true;
             }
+
+            Ok(PyBytes::new(py, &body.body))
         }
     }
 }

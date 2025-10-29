@@ -42,24 +42,17 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
     let filter_config = &filter_config[0];
 
-    let app = match filter_config["app"].as_str() {
-        Some(app) => app,
-        None => {
-            eprintln!("pyvoy: config missing required 'app' field");
-            return None;
-        }
+    let Some(app) = filter_config["app"].as_str() else {
+        eprintln!("pyvoy: config missing required 'app' field");
+        return None;
     };
     let interface = filter_config["interface"].as_str().unwrap_or("asgi");
 
     match interface {
-        "asgi" => match asgi::filter::Config::new(app) {
-            Some(cfg) => Some(Box::new(cfg)),
-            None => None,
-        },
-        "wsgi" => match wsgi::filter::Config::new(app) {
-            Some(cfg) => Some(Box::new(cfg)),
-            None => None,
-        },
+        "asgi" => asgi::filter::Config::new(app)
+            .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
+        "wsgi" => wsgi::filter::Config::new(app)
+            .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
             eprintln!("pyvoy: unsupported interface: {}", interface);
             None
