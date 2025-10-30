@@ -419,8 +419,6 @@ pub(crate) struct Constants {
     pub empty_bytes: Py<PyBytes>,
 }
 
-unsafe impl Sync for Constants {}
-
 impl Constants {
     pub fn new(py: Python<'_>) -> Self {
         Self {
@@ -500,25 +498,22 @@ impl Constants {
 pub(crate) trait PyDictExt {
     fn set_http_method<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         method: &http::Method,
     ) -> PyResult<()>;
 
     fn set_http_scheme<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         scheme: &uri::Scheme,
     ) -> PyResult<()>;
 
     fn set_http_version<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         version: &http::Version,
     ) -> PyResult<()>;
 }
@@ -526,38 +521,37 @@ pub(crate) trait PyDictExt {
 impl PyDictExt for Bound<'_, PyDict> {
     fn set_http_method<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         method: &http::Method,
     ) -> PyResult<()> {
         match *method {
             http::Method::OPTIONS => {
-                self.set_item(key, constants.options.bind(py))?;
+                self.set_item(key, &constants.options)?;
             }
             http::Method::GET => {
-                self.set_item(key, constants.get.bind(py))?;
+                self.set_item(key, &constants.get)?;
             }
             http::Method::POST => {
-                self.set_item(key, constants.post.bind(py))?;
+                self.set_item(key, &constants.post)?;
             }
             http::Method::PUT => {
-                self.set_item(key, constants.put.bind(py))?;
+                self.set_item(key, &constants.put)?;
             }
             http::Method::DELETE => {
-                self.set_item(key, constants.delete.bind(py))?;
+                self.set_item(key, &constants.delete)?;
             }
             http::Method::HEAD => {
-                self.set_item(key, constants.head.bind(py))?;
+                self.set_item(key, &constants.head)?;
             }
             http::Method::TRACE => {
-                self.set_item(key, constants.trace.bind(py))?;
+                self.set_item(key, &constants.trace)?;
             }
             http::Method::CONNECT => {
-                self.set_item(key, constants.connect.bind(py))?;
+                self.set_item(key, &constants.connect)?;
             }
             http::Method::PATCH => {
-                self.set_item(key, constants.patch.bind(py))?;
+                self.set_item(key, &constants.patch)?;
             }
             _ => {
                 self.set_item(key, method.as_str())?;
@@ -568,15 +562,14 @@ impl PyDictExt for Bound<'_, PyDict> {
 
     fn set_http_scheme<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         scheme: &uri::Scheme,
     ) -> PyResult<()> {
         if *scheme == uri::Scheme::HTTP {
-            self.set_item(key, constants.http.bind(py))?;
+            self.set_item(key, &constants.http)?;
         } else if *scheme == uri::Scheme::HTTPS {
-            self.set_item(key, constants.https.bind(py))?;
+            self.set_item(key, &constants.https)?;
         } else {
             self.set_item(key, scheme.as_str())?;
         }
@@ -585,19 +578,18 @@ impl PyDictExt for Bound<'_, PyDict> {
 
     fn set_http_version<'py>(
         &self,
-        py: Python<'py>,
         constants: &Constants,
-        key: &Bound<'py, PyString>,
+        key: &Py<PyString>,
         version: &http::Version,
     ) -> PyResult<()> {
         self.set_item(
             key,
             match *version {
-                http::Version::HTTP_10 => constants.http_10.bind(py),
-                http::Version::HTTP_11 => constants.http_11.bind(py),
-                http::Version::HTTP_2 => constants.http_2.bind(py),
-                http::Version::HTTP_3 => constants.http_3.bind(py),
-                _ => constants.http_11.bind(py),
+                http::Version::HTTP_10 => &constants.http_10,
+                http::Version::HTTP_11 => &constants.http_11,
+                http::Version::HTTP_2 => &constants.http_2,
+                http::Version::HTTP_3 => &constants.http_3,
+                _ => &constants.http_11,
             },
         )?;
         Ok(())
