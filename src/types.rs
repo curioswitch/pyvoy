@@ -301,30 +301,20 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         .and_then(|v| http::Method::from_bytes(v.as_slice()).ok())
         .unwrap_or(http::Method::GET);
 
-    let scheme = match envoy_filter
+    let scheme = envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestScheme)
-    {
-        Some(v) => match v.as_slice() {
-            b"http" => uri::Scheme::HTTP,
-            b"https" => uri::Scheme::HTTPS,
-            _ => uri::Scheme::HTTP,
-        },
-        None => uri::Scheme::HTTP,
-    };
+        .and_then(|v| uri::Scheme::try_from(v.as_slice()).ok())
+        .unwrap_or(uri::Scheme::HTTP);
 
-    let raw_path: Box<[u8]> = match envoy_filter
+    let raw_path: Box<[u8]> = envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
-    {
-        Some(v) => Box::from(v.as_slice()),
-        None => Box::from(&b"/"[..]),
-    };
+        .map(|v| Box::from(v.as_slice()))
+        .unwrap_or_else(|| Box::from(b"/" as &[u8]));
 
-    let query_string = match envoy_filter
+    let query_string = envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestQuery)
-    {
-        Some(v) => Box::from(v.as_slice()),
-        None => Box::from(&b""[..]),
-    };
+        .map(|v| Box::from(v.as_slice()))
+        .unwrap_or_default();
 
     let headers = envoy_filter
         .get_request_headers()
