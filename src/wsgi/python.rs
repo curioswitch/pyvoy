@@ -1,5 +1,5 @@
 use executors::{Executor, crossbeam_channel_pool::ThreadPool};
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, header};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -81,23 +81,22 @@ impl PyExecutor {
                 }
 
                 for (key, value) in scope.headers.iter() {
-                    let value_str = PyString::from_bytes(py, value)?;
-                    match &key[..] {
-                        b"content-type" => {
-                            environ.set_item(constants.content_type.bind(py), value_str)?
-                        }
-                        b"content-length" => {
-                            environ.set_item(constants.content_length.bind(py), value_str)?
-                        }
+                    match *key {
+                        header::CONTENT_TYPE => environ.set_item(
+                            constants.content_type.bind(py),
+                            PyString::from_bytes(py, value.as_bytes())?,
+                        )?,
+                        header::CONTENT_LENGTH => environ.set_item(
+                            constants.content_length.bind(py),
+                            PyString::from_bytes(py, value.as_bytes())?,
+                        )?,
                         _ => {
-                            if key[0] == b':' {
+                            if key.as_str().as_bytes()[0] == b':' {
                                 continue;
                             }
-                            let key_str = String::from_utf8_lossy(key)
-                                .to_uppercase()
-                                .replace("-", "_");
+                            let key_str = key.as_str().to_uppercase().replace("-", "_");
                             let header_name = format!("HTTP_{}", key_str);
-                            let value_str = String::from_utf8_lossy(value);
+                            let value_str = String::from_utf8_lossy(value.as_bytes());
                             if let Some(existing) = environ.get_item(&header_name)? {
                                 let existing = existing.cast::<PyString>()?;
                                 let new_value = format!("{},{}", existing.to_str()?, value_str);

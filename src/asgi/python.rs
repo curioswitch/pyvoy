@@ -256,10 +256,12 @@ impl ExecutorInner {
         scope_dict.set_item(self.constants.root_path.bind(py), "")?;
         let headers = PyList::new(
             py,
-            scope
-                .headers
-                .iter()
-                .map(|(k, v)| (PyBytes::new(py, k), PyBytes::new(py, v))),
+            scope.headers.iter().map(|(k, v)| {
+                (
+                    k.as_py_bytes(py, &self.constants),
+                    PyBytes::new(py, v.as_bytes()),
+                )
+            }),
         )?;
         scope_dict.set_item(self.constants.headers.bind(py), headers)?;
         scope_dict.set_item(
