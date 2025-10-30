@@ -33,6 +33,26 @@ pub(crate) struct Constants {
     /// The string "3".
     pub http_3: Py<PyString>,
 
+    // HTTP method strings
+    /// The string "OPTIONS".
+    pub options: Py<PyString>,
+    /// The string "GET".
+    pub get: Py<PyString>,
+    /// The string "POST".
+    pub post: Py<PyString>,
+    /// The string "PUT".
+    pub put: Py<PyString>,
+    /// The string "DELETE".
+    pub delete: Py<PyString>,
+    /// The string "HEAD".
+    pub head: Py<PyString>,
+    /// The string "TRACE".
+    pub trace: Py<PyString>,
+    /// The string "CONNECT".
+    pub connect: Py<PyString>,
+    /// The string "PATCH".
+    pub patch: Py<PyString>,
+
     // ASGI scope keys
     /// The string "asgi".
     pub asgi: Py<PyString>,
@@ -149,6 +169,16 @@ impl Constants {
             http_2: PyString::new(py, "2").unbind(),
             http_3: PyString::new(py, "3").unbind(),
 
+            options: PyString::new(py, "OPTIONS").unbind(),
+            get: PyString::new(py, "GET").unbind(),
+            post: PyString::new(py, "POST").unbind(),
+            put: PyString::new(py, "PUT").unbind(),
+            delete: PyString::new(py, "DELETE").unbind(),
+            head: PyString::new(py, "HEAD").unbind(),
+            trace: PyString::new(py, "TRACE").unbind(),
+            connect: PyString::new(py, "CONNECT").unbind(),
+            patch: PyString::new(py, "PATCH").unbind(),
+
             raw_path: PyString::new(py, "raw_path").unbind(),
             query_string: PyString::new(py, "query_string").unbind(),
             root_path: PyString::new(py, "root_path").unbind(),
@@ -199,6 +229,7 @@ pub(crate) trait PyDictExt {
     fn set_http_method<'py>(
         &self,
         py: Python<'py>,
+        constants: &Constants,
         key: &Bound<'py, PyString>,
         method: &http::Method,
     ) -> PyResult<()>;
@@ -223,11 +254,43 @@ pub(crate) trait PyDictExt {
 impl PyDictExt for Bound<'_, PyDict> {
     fn set_http_method<'py>(
         &self,
-        _py: Python<'py>,
+        py: Python<'py>,
+        constants: &Constants,
         key: &Bound<'py, PyString>,
         method: &http::Method,
     ) -> PyResult<()> {
-        self.set_item(key, method.as_str())?;
+        match *method {
+            http::Method::OPTIONS => {
+                self.set_item(key, constants.options.bind(py))?;
+            }
+            http::Method::GET => {
+                self.set_item(key, constants.get.bind(py))?;
+            }
+            http::Method::POST => {
+                self.set_item(key, constants.post.bind(py))?;
+            }
+            http::Method::PUT => {
+                self.set_item(key, constants.put.bind(py))?;
+            }
+            http::Method::DELETE => {
+                self.set_item(key, constants.delete.bind(py))?;
+            }
+            http::Method::HEAD => {
+                self.set_item(key, constants.head.bind(py))?;
+            }
+            http::Method::TRACE => {
+                self.set_item(key, constants.trace.bind(py))?;
+            }
+            http::Method::CONNECT => {
+                self.set_item(key, constants.connect.bind(py))?;
+            }
+            http::Method::PATCH => {
+                self.set_item(key, constants.patch.bind(py))?;
+            }
+            _ => {
+                self.set_item(key, method.as_str())?;
+            }
+        }
         Ok(())
     }
 

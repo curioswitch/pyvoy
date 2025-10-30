@@ -54,15 +54,15 @@ impl Executor {
         // thread to know it's not the main thread and can use this hack. In practice, since
         // this is still during filter initialization, it may be the correct main thread anyway.
         Python::attach(|py| {
-            PyModule::import(py, "threading")?;
+            py.import("threading")?;
             Ok::<_, PyErr>(())
         })?;
 
         let (loop_tx, loop_rx) = mpsc::sync_channel(0);
         thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
-                let uvloop = PyModule::import(py, "uvloop")?;
-                let asyncio = PyModule::import(py, "asyncio")?;
+                let uvloop = py.import("uvloop")?;
+                let asyncio = py.import("asyncio")?;
                 let loop_ = uvloop.call_method0("new_event_loop")?;
                 loop_tx.send(loop_.clone().unbind()).unwrap();
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
@@ -80,7 +80,7 @@ impl Executor {
         })?;
 
         let (app, asgi, extensions) = Python::attach(|py| {
-            let module = PyModule::import(py, app_module)?;
+            let module = py.import(app_module)?;
             let app = module.getattr(app_attr)?;
             let asgi = PyDict::new(py);
             asgi.set_item("version", "3.0")?;
@@ -228,7 +228,12 @@ impl ExecutorInner {
             self.constants.http_version.bind(py),
             &scope.http_version,
         )?;
-        scope_dict.set_http_method(py, self.constants.method.bind(py), &scope.method)?;
+        scope_dict.set_http_method(
+            py,
+            &self.constants,
+            self.constants.method.bind(py),
+            &scope.method,
+        )?;
         scope_dict.set_http_scheme(
             py,
             &self.constants,
@@ -298,7 +303,7 @@ impl ExecutorInner {
                 constants: self.constants.clone(),
             },
         ))?;
-        let asyncio = PyModule::import(py, self.constants.asyncio.bind(py))?;
+        let asyncio = py.import(self.constants.asyncio.bind(py))?;
         let future = asyncio.call_method1(
             self.constants.run_coroutine_threadsafe.bind(py),
             (coro, self.loop_.bind(py)),

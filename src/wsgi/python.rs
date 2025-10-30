@@ -60,7 +60,12 @@ impl PyExecutor {
                 let app = app_module.getattr(&app_attr[..])?;
 
                 let environ = PyDict::new(py);
-                environ.set_http_method(py, constants.request_method.bind(py), &scope.method)?;
+                environ.set_http_method(
+                    py,
+                    &constants,
+                    constants.request_method.bind(py),
+                    &scope.method,
+                )?;
 
                 // TODO: support root_path etc
                 environ.set_item(constants.script_name.bind(py), "")?;
