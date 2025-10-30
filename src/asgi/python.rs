@@ -437,7 +437,10 @@ impl EmptyRecvCallable {
             self.constants.typ.bind(py),
             self.constants.http_request.bind(py),
         )?;
-        event.set_item(self.constants.body.bind(py), PyBytes::new(py, &[]))?;
+        event.set_item(
+            self.constants.body.bind(py),
+            self.constants.empty_bytes.bind(py),
+        )?;
         event.set_item(self.constants.more_body.bind(py), false)?;
         ValueAwaitable {
             value: Some(event.into_any().unbind()),

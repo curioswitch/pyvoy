@@ -6,7 +6,7 @@ use http::{
 };
 use pyo3::{
     prelude::*,
-    types::{PyDict, PyString},
+    types::{PyBytes, PyDict, PyString},
 };
 
 /// Constants used when creating Python objects. These are mostly strings,
@@ -126,6 +126,7 @@ pub(crate) struct Constants {
     // Misc
     /// The string "close".
     pub close: Py<PyString>,
+    pub empty_bytes: Py<PyBytes>,
 }
 
 unsafe impl Sync for Constants {}
@@ -189,6 +190,7 @@ impl Constants {
             wsgi_run_once: PyString::new(py, "wsgi.run_once").unbind(),
 
             close: PyString::new(py, "close").unbind(),
+            empty_bytes: PyBytes::new(py, b"").unbind(),
         }
     }
 }
