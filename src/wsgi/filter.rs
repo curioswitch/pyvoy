@@ -1,7 +1,6 @@
 use crate::envoy::{SyncScheduler, has_request_body};
 use crate::wsgi::python::PyExecutor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 
