@@ -78,15 +78,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             .iter()
             .any(|(name, value)| name.as_slice() == b"te" && value.as_slice() == b"trailers");
         let scope = new_scope(envoy_filter);
+
         self.executor.execute_app(
             scope,
             end_of_stream,
             trailers_accepted,
             self.recv_future_tx.take().unwrap(),
             self.response_tx.take().unwrap(),
-            envoy_filter.new_scheduler(),
-            envoy_filter.new_scheduler(),
-            envoy_filter.new_scheduler(),
+            Arc::new(SyncScheduler::new(envoy_filter.new_scheduler())),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }
@@ -173,13 +172,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         }
                     }
                 }
-                ResponseEvent::Exception => match self.response_state {
-                    // While technically it's possible we have a chance to interrupt the response to
-                    // trigger a client failure, not always. It is more consistent to always allow it
-                    // to be completed successfully on the client side rather than having inconsistent
-                    // behavior. The exception itself was logged from Python.
-                    ResponseState::Complete => {}
-                    _ => {
+                ResponseEvent::Exception => {
+                    if !matches!(self.response_state, ResponseState::Complete) {
                         self.response_state = ResponseState::Complete;
                         envoy_filter.send_response(
                             500,
@@ -190,7 +184,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             Some(b"Internal Server Error"),
                         );
                     }
-                },
+                }
             }
         }
     }

@@ -1,7 +1,7 @@
 use std::{sync::Arc, thread};
 
+use crate::envoy::SyncScheduler;
 use crate::types::*;
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue};
 use pyo3::{
     IntoPyObjectExt, create_exception,
@@ -125,9 +125,7 @@ impl Executor {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        end_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+        scheduler: Arc<SyncScheduler>,
     ) {
         self.tx
             .send(Event::ExecuteApp {
@@ -136,9 +134,7 @@ impl Executor {
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
-                recv_scheduler,
-                send_scheduler,
-                end_scheduler,
+                scheduler,
             })
             .unwrap();
     }
@@ -179,9 +175,7 @@ impl ExecutorInner {
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
-                recv_scheduler,
-                send_scheduler,
-                end_scheduler,
+                scheduler,
             } => self.execute_app(
                 py,
                 scope,
@@ -189,9 +183,7 @@ impl ExecutorInner {
                 trailers_accepted,
                 recv_future_tx,
                 response_tx,
-                recv_scheduler,
-                send_scheduler,
-                end_scheduler,
+                scheduler,
             ),
             Event::HandleRecvFuture {
                 body,
@@ -214,9 +206,7 @@ impl ExecutorInner {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        end_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+        scheduler: Arc<SyncScheduler>,
     ) -> PyResult<()> {
         let scope_dict = PyDict::new(py);
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
@@ -267,7 +257,7 @@ impl ExecutorInner {
         } else {
             RecvCallable {
                 recv_future_tx,
-                scheduler: recv_scheduler,
+                scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
                 constants: self.constants.clone(),
@@ -285,7 +275,7 @@ impl ExecutorInner {
                 trailers_accepted,
                 closed: false,
                 response_tx: response_tx.clone(),
-                scheduler: send_scheduler,
+                scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
                 constants: self.constants.clone(),
@@ -300,7 +290,7 @@ impl ExecutorInner {
             &self.constants.add_done_callback,
             (AppFutureHandler {
                 response_tx,
-                scheduler: end_scheduler,
+                scheduler,
                 constants: self.constants.clone(),
             },),
         )?;
@@ -366,9 +356,7 @@ enum Event {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        recv_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        send_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        end_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+        scheduler: Arc<SyncScheduler>,
     },
     HandleRecvFuture {
         body: Box<[u8]>,
@@ -383,7 +371,7 @@ enum Event {
 #[pyclass]
 struct RecvCallable {
     recv_future_tx: Sender<RecvFuture>,
-    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
     constants: Arc<Constants>,
@@ -431,7 +419,7 @@ impl EmptyRecvCallable {
 #[pyclass]
 struct AppFutureHandler {
     response_tx: Sender<ResponseEvent>,
-    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    scheduler: Arc<SyncScheduler>,
     constants: Arc<Constants>,
 }
 
@@ -468,7 +456,7 @@ struct SendCallable {
     trailers_accepted: bool,
     closed: bool,
     response_tx: Sender<ResponseEvent>,
-    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
     constants: Arc<Constants>,
