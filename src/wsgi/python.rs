@@ -91,13 +91,16 @@ impl PyExecutor {
                             }
                             let key_str = key.as_str().to_uppercase().replace("-", "_");
                             let header_name = format!("HTTP_{}", key_str);
-                            let value_str = String::from_utf8_lossy(value.as_bytes());
                             if let Some(existing) = environ.get_item(&header_name)? {
+                                let value_str = String::from_utf8_lossy(value.as_bytes());
                                 let existing = existing.cast::<PyString>()?;
                                 let new_value = format!("{},{}", existing.to_str()?, value_str);
                                 environ.set_item(header_name, new_value)?;
                             } else {
-                                environ.set_item(header_name, value_str)?;
+                                environ.set_item(
+                                    header_name,
+                                    PyString::from_bytes(py, value.as_bytes())?,
+                                )?;
                             }
                         }
                     }

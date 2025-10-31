@@ -5,6 +5,7 @@ use std::sync::{Arc, mpsc};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
+use crate::envoy::*;
 use crate::types::*;
 
 pub struct Config {
@@ -72,14 +73,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        let mut trailers_accepted = false;
-        for (name, value) in envoy_filter.get_request_headers() {
-            if name.as_slice() == b"te" && value.as_slice() == b"trailers" {
-                // Allow te header to upstream
-                trailers_accepted = true;
-                break;
-            }
-        }
+        let trailers_accepted = envoy_filter
+            .get_request_headers()
+            .iter()
+            .any(|(name, value)| name.as_slice() == b"te" && value.as_slice() == b"trailers");
         let scope = new_scope(envoy_filter);
         self.executor.execute_app(
             scope,
@@ -196,32 +193,5 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 },
             }
         }
-    }
-}
-
-fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> Box<[u8]> {
-    if let Some(buffers) = envoy_filter.get_request_body() {
-        match buffers.len() {
-            0 => Box::new([]),
-            1 => {
-                let body = buffers[0].as_slice().to_vec().into_boxed_slice();
-                envoy_filter.drain_request_body(body.len());
-                body
-            }
-            _ => {
-                let mut body_len = 0;
-                for buffer in &buffers {
-                    body_len += buffer.as_slice().len();
-                }
-                let mut body = Vec::with_capacity(body_len);
-                for buffer in buffers {
-                    body.extend_from_slice(buffer.as_slice());
-                }
-                envoy_filter.drain_request_body(body.len());
-                body.into_boxed_slice()
-            }
-        }
-    } else {
-        Box::new([])
     }
 }

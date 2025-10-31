@@ -6,6 +6,8 @@ use pyo3::types::PyList;
 use yaml_rust2::YamlLoader;
 
 mod asgi;
+/// Helpers for working with Envoy's SDK.
+mod envoy;
 mod types;
 mod wsgi;
 

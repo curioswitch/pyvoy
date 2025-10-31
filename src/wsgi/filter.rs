@@ -4,6 +4,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 
 use super::types::*;
+use crate::envoy::has_request_body;
 use crate::types::*;
 pub struct Config {
     executor: PyExecutor,
