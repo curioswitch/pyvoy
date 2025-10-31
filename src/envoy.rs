@@ -1,4 +1,4 @@
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilter;
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler};
 use http::{HeaderName, HeaderValue};
 
 /// Reads request headers from Envoy, skipping pseudo-headers.
@@ -60,3 +60,24 @@ pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) ->
         }
     }
 }
+
+/// A Sync wrapper around EnvoyHttpFilterScheduler.
+///
+/// TODO: Remove after https://github.com/envoyproxy/envoy/commit/c561059a04f496eda1e664a8d45bf9b64deef100 is released.
+pub(crate) struct SyncScheduler(Box<dyn EnvoyHttpFilterScheduler>);
+
+impl SyncScheduler {
+    pub fn new(scheduler: Box<dyn EnvoyHttpFilterScheduler>) -> Self {
+        Self(scheduler)
+    }
+}
+
+impl std::ops::Deref for SyncScheduler {
+    type Target = Box<dyn EnvoyHttpFilterScheduler>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+unsafe impl Sync for SyncScheduler {}

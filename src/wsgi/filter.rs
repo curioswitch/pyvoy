@@ -1,10 +1,10 @@
+use crate::envoy::{SyncScheduler, has_request_body};
 use crate::wsgi::python::PyExecutor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 
 use super::types::*;
-use crate::envoy::has_request_body;
 use crate::types::*;
 pub struct Config {
     executor: PyExecutor,
@@ -74,14 +74,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         let scope = new_scope(envoy_filter);
+
         self.executor.execute_app(
             scope,
             self.request_read_tx.take().unwrap(),
             self.request_body_rx.take().unwrap(),
             self.response_tx.take().unwrap(),
             self.response_written_rx.take().unwrap(),
-            envoy_filter.new_scheduler(),
-            envoy_filter.new_scheduler(),
+            SyncScheduler::new(envoy_filter.new_scheduler()),
         );
         if end_of_stream {
             self.request_closed = true;

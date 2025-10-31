@@ -7,8 +7,8 @@ use pyo3::{
 };
 
 use super::types::*;
+use crate::envoy::SyncScheduler;
 use crate::types::*;
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use std::sync::{
     Arc, Mutex,
     mpsc::{Receiver, Sender},
@@ -46,8 +46,7 @@ impl PyExecutor {
         request_body_rx: Receiver<RequestBody>,
         response_tx: Sender<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        request_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-        response_scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+        scheduler: SyncScheduler,
     ) {
         let app_module = self.app_module.clone();
         let app_attr = self.app_attr.clone();
@@ -55,6 +54,7 @@ impl PyExecutor {
         let response_written_rx = Mutex::new(response_written_rx);
         let constants = self.constants.clone();
         self.pool.execute(move || {
+            let scheduler = Arc::new(scheduler);
             let result: PyResult<()> = Python::attach(|py| {
                 let app_module = py.import(&app_module[..])?;
                 let app = app_module.getattr(&app_attr[..])?;
@@ -128,7 +128,7 @@ impl PyExecutor {
                     RequestInput {
                         request_read_tx,
                         request_body_rx,
-                        scheduler: request_scheduler,
+                        scheduler: scheduler.clone(),
                         closed: false,
                     },
                 )?;
@@ -165,7 +165,7 @@ impl PyExecutor {
                                 more_body: false,
                             },
                         ));
-                        response_scheduler.commit(EVENT_ID_RESPONSE);
+                        scheduler.commit(EVENT_ID_RESPONSE);
                     }
                     Ok(1) => {
                         let item =
@@ -184,7 +184,7 @@ impl PyExecutor {
                                 more_body: false,
                             },
                         ));
-                        response_scheduler.commit(EVENT_ID_RESPONSE);
+                        scheduler.commit(EVENT_ID_RESPONSE);
                     }
                     _ => {
                         let mut started = false;
@@ -209,7 +209,7 @@ impl PyExecutor {
                                     more_body: true,
                                 }));
                             }
-                            response_scheduler.commit(EVENT_ID_RESPONSE);
+                            scheduler.commit(EVENT_ID_RESPONSE);
                             py.detach(|| {
                                 let _ = response_written_rx.lock().unwrap().recv();
                             });
@@ -218,7 +218,7 @@ impl PyExecutor {
                             body: Box::from([]),
                             more_body: false,
                         }));
-                        response_scheduler.commit(EVENT_ID_RESPONSE);
+                        scheduler.commit(EVENT_ID_RESPONSE);
                         py.detach(|| {
                             // RecvError only is request filter was dropped, but since this
                             // is the end always safe to ignore.
@@ -236,7 +236,7 @@ impl PyExecutor {
             if let Err(e) = result {
                 eprintln!("WSGI application error: {}", e);
                 let _ = response_tx.send(ResponseEvent::Exception);
-                response_scheduler.commit(EVENT_ID_EXCEPTION);
+                scheduler.commit(EVENT_ID_EXCEPTION);
             }
         });
     }
@@ -287,7 +287,7 @@ impl StartResponseCallable {
 struct RequestInput {
     request_read_tx: Sender<isize>,
     request_body_rx: Mutex<Receiver<RequestBody>>,
-    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    scheduler: Arc<SyncScheduler>,
     closed: bool,
 }
 
