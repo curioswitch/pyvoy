@@ -1,3 +1,4 @@
+use crate::envoy::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilter;
 use envoy_proxy_dynamic_modules_rust_sdk::abi::envoy_dynamic_module_type_attribute_id;
 use http::{
@@ -789,11 +790,6 @@ impl HeaderNameExt for HeaderName {
     }
 }
 
-fn is_pseudoheader(http_version: &http::Version, name: &[u8]) -> bool {
-    http_version >= &http::Version::HTTP_2
-        && matches!(name, b":method" | b":scheme" | b":authority" | b":path")
-}
-
 pub(crate) struct Scope {
     pub http_version: http::Version,
     pub method: Method,
@@ -838,23 +834,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         .map(|v| Box::from(v.as_slice()))
         .unwrap_or_default();
 
-    let headers = envoy_filter
-        .get_request_headers()
-        .iter()
-        .filter_map(|(k, v)| {
-            if !is_pseudoheader(&http_version, k.as_slice()) {
-                match (
-                    HeaderName::from_bytes(k.as_slice()),
-                    HeaderValue::from_bytes(v.as_slice()),
-                ) {
-                    (Ok(name), Ok(value)) => Some((name, value)),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
+    let headers = read_request_headers(envoy_filter, &http_version);
 
     let client = get_address(
         envoy_filter,
@@ -897,15 +877,4 @@ fn get_address<EHF: EnvoyHttpFilter>(
         }
         _ => None,
     }
-}
-
-pub(crate) fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
-    if let Some(buffers) = envoy_filter.get_request_body() {
-        for buffer in buffers {
-            if !buffer.as_slice().is_empty() {
-                return true;
-            }
-        }
-    }
-    false
 }
