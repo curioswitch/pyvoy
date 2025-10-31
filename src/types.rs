@@ -418,6 +418,7 @@ pub(crate) struct Constants {
     /// The string "close".
     pub close: Py<PyString>,
     pub empty_bytes: Py<PyBytes>,
+    pub empty_string: Py<PyString>,
 }
 
 impl Constants {
@@ -492,6 +493,7 @@ impl Constants {
 
             close: PyString::new(py, "close").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
+            empty_string: PyString::new(py, "").unbind(),
         }
     }
 }

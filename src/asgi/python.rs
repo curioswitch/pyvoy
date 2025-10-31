@@ -229,7 +229,7 @@ impl ExecutorInner {
             &self.constants.query_string,
             PyBytes::new(py, &scope.query_string),
         )?;
-        scope_dict.set_item(&self.constants.root_path, "")?;
+        scope_dict.set_item(&self.constants.root_path, &self.constants.empty_string)?;
         let headers = PyList::new(
             py,
             scope.headers.iter().map(|(k, v)| {
@@ -267,7 +267,7 @@ impl ExecutorInner {
             .into_bound_py_any(py)?
         };
 
-        let app = self.app.bind(py);
+        let app = self.app.bind_borrowed(py);
         let coro = app.call1((
             scope_dict,
             recv,
@@ -286,7 +286,7 @@ impl ExecutorInner {
         let asyncio = py.import(&self.constants.asyncio)?;
         let future = asyncio.call_method1(
             &self.constants.run_coroutine_threadsafe,
-            (coro, self.loop_.bind(py)),
+            (coro, &self.loop_),
         )?;
         future.call_method1(
             &self.constants.add_done_callback,
@@ -307,33 +307,33 @@ impl ExecutorInner {
         more_body: bool,
         future: Py<PyAny>,
     ) -> PyResult<()> {
-        let future = future.bind(py);
+        let future = future.bind_borrowed(py);
         let set_result = future.getattr(&self.constants.set_result)?;
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.http_request)?;
         event.set_item(&self.constants.body, PyBytes::new(py, &body))?;
         event.set_item(&self.constants.more_body, more_body)?;
         self.loop_
-            .bind(py)
+            .bind_borrowed(py)
             .call_method1(&self.constants.call_soon_threadsafe, (set_result, event))?;
         Ok(())
     }
 
     fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
-        let future = future.bind(py);
+        let future = future.bind_borrowed(py);
         let set_result = future.getattr(&self.constants.set_result)?;
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
         self.loop_
-            .bind(py)
+            .bind_borrowed(py)
             .call_method1(&self.constants.call_soon_threadsafe, (set_result, event))?;
         Ok(())
     }
 
     fn handle_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
-        let future = future.bind(py);
+        let future = future.bind_borrowed(py);
         let set_result = future.getattr(&self.constants.set_result)?;
-        self.loop_.bind(py).call_method1(
+        self.loop_.bind_borrowed(py).call_method1(
             &self.constants.call_soon_threadsafe,
             (set_result, PyNone::get(py)),
         )?;
@@ -341,9 +341,9 @@ impl ExecutorInner {
     }
 
     fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: Py<PyAny>) -> PyResult<()> {
-        let future = future.bind(py);
+        let future = future.bind_borrowed(py);
         let set_exception = future.getattr(&self.constants.set_exception)?;
-        self.loop_.bind(py).call_method1(
+        self.loop_.bind_borrowed(py).call_method1(
             &self.constants.call_soon_threadsafe,
             (set_exception, ClientDisconnectedError::new_err(())),
         )?;
@@ -386,7 +386,7 @@ impl RecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let future = self
             .loop_
-            .bind(py)
+            .bind_borrowed(py)
             .call_method0(&self.constants.create_future)?;
         let recv_future = RecvFuture {
             future: Some(future.clone().unbind()),
@@ -544,7 +544,7 @@ impl SendCallable {
                 let (ret, send_future) = if more_body {
                     let future = self
                         .loop_
-                        .bind(py)
+                        .bind_borrowed(py)
                         .call_method0(&self.constants.create_future)?;
                     (
                         future.clone(),
