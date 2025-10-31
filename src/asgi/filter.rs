@@ -85,7 +85,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             trailers_accepted,
             self.recv_future_tx.take().unwrap(),
             self.response_tx.take().unwrap(),
-            Arc::new(SyncScheduler::new(envoy_filter.new_scheduler())),
+            SyncScheduler::new(envoy_filter.new_scheduler()),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
     }

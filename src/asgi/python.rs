@@ -125,7 +125,7 @@ impl Executor {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: SyncScheduler,
     ) {
         self.tx
             .send(Event::ExecuteApp {
@@ -206,7 +206,7 @@ impl ExecutorInner {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: SyncScheduler,
     ) -> PyResult<()> {
         let scope_dict = PyDict::new(py);
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
@@ -248,6 +248,8 @@ impl ExecutorInner {
             &self.constants.server,
             scope.server.map(|(a, p)| (PyString::new(py, &a[..]), p)),
         )?;
+
+        let scheduler = Arc::new(scheduler);
 
         let recv = if request_closed {
             EmptyRecvCallable {
@@ -356,7 +358,7 @@ enum Event {
         trailers_accepted: bool,
         recv_future_tx: Sender<RecvFuture>,
         response_tx: Sender<ResponseEvent>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: SyncScheduler,
     },
     HandleRecvFuture {
         body: Box<[u8]>,

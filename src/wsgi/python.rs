@@ -46,7 +46,7 @@ impl PyExecutor {
         request_body_rx: Receiver<RequestBody>,
         response_tx: Sender<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: SyncScheduler,
     ) {
         let app_module = self.app_module.clone();
         let app_attr = self.app_attr.clone();
@@ -54,6 +54,7 @@ impl PyExecutor {
         let response_written_rx = Mutex::new(response_written_rx);
         let constants = self.constants.clone();
         self.pool.execute(move || {
+            let scheduler = Arc::new(scheduler);
             let result: PyResult<()> = Python::attach(|py| {
                 let app_module = py.import(&app_module[..])?;
                 let app = app_module.getattr(&app_attr[..])?;

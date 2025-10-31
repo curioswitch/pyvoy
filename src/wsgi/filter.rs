@@ -1,6 +1,7 @@
 use crate::envoy::{SyncScheduler, has_request_body};
 use crate::wsgi::python::PyExecutor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 
@@ -81,7 +82,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_body_rx.take().unwrap(),
             self.response_tx.take().unwrap(),
             self.response_written_rx.take().unwrap(),
-            Arc::new(SyncScheduler::new(envoy_filter.new_scheduler())),
+            SyncScheduler::new(envoy_filter.new_scheduler()),
         );
         if end_of_stream {
             self.request_closed = true;
