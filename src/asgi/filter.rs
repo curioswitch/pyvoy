@@ -28,39 +28,33 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (recv_future_tx, recv_future_rx) = mpsc::channel::<RecvFuture>();
-        let (response_tx, response_rx) = mpsc::channel::<ResponseEvent>();
+        let (recv_tx, recv_rx) = mpsc::channel::<RecvFuture>();
+        let (send_tx, send_rx) = mpsc::channel::<SendEvent>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
-            response_state: ResponseState::Started,
+            response_closed: false,
             response_trailers: None,
-            recv_future_rx,
-            recv_future_tx: Some(recv_future_tx),
-            response_rx,
-            response_tx: Some(response_tx),
+            recv_rx,
+            recv_tx: Some(recv_tx),
+            send_rx,
+            send_tx: Some(send_tx),
         })
     }
-}
-
-enum ResponseState {
-    Started,
-    SentHeaders,
-    Complete,
 }
 
 struct Filter {
     executor: python::Executor,
 
     request_closed: bool,
-    response_state: ResponseState,
+    response_closed: bool,
 
     response_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
 
-    recv_future_rx: Receiver<RecvFuture>,
-    recv_future_tx: Option<Sender<RecvFuture>>,
-    response_rx: Receiver<ResponseEvent>,
-    response_tx: Option<Sender<ResponseEvent>>,
+    recv_rx: Receiver<RecvFuture>,
+    recv_tx: Option<Sender<RecvFuture>>,
+    send_rx: Receiver<SendEvent>,
+    send_tx: Option<Sender<SendEvent>>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -74,17 +68,17 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
 
         let trailers_accepted = envoy_filter
-            .get_request_headers()
-            .iter()
-            .any(|(name, value)| name.as_slice() == b"te" && value.as_slice() == b"trailers");
+            .get_request_header_value("te")
+            .map(|v| v.as_slice() == b"trailers")
+            .unwrap_or(false);
         let scope = new_scope(envoy_filter);
 
         self.executor.execute_app(
             scope,
             end_of_stream,
             trailers_accepted,
-            self.recv_future_tx.take().unwrap(),
-            self.response_tx.take().unwrap(),
+            self.recv_tx.take().unwrap(),
+            self.send_tx.take().unwrap(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
@@ -99,7 +93,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        if let Ok(future) = self.recv_future_rx.try_recv() {
+        if let Ok(future) = self.recv_rx.try_recv() {
             self.executor.handle_recv_future(
                 read_request_body(envoy_filter),
                 !end_of_stream,
@@ -112,7 +106,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             if (self.request_closed || has_request_body(envoy_filter))
-                && let Ok(future) = self.recv_future_rx.try_recv()
+                && let Ok(future) = self.recv_rx.try_recv()
             {
                 self.executor.handle_recv_future(
                     read_request_body(envoy_filter),
@@ -122,9 +116,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        if let Ok(event) = self.response_rx.try_recv() {
+        if let Ok(event) = self.send_rx.try_recv() {
             match event {
-                ResponseEvent::Start(start_event, mut body_event) => {
+                SendEvent::Start(start_event, mut body_event) => {
                     if start_event.trailers {
                         self.response_trailers.replace(Vec::new());
                     }
@@ -151,16 +145,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         envoy_filter.send_response_headers(headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
                     }
-                    self.response_state = ResponseState::SentHeaders;
                 }
-                ResponseEvent::Body(mut event) => {
+                SendEvent::Body(mut event) => {
                     let end_stream = event.future.is_none() && self.response_trailers.is_none();
                     if let Some(future) = event.future.take() {
                         self.executor.handle_send_future(future);
                     }
                     envoy_filter.send_response_data(&event.body, end_stream);
                 }
-                ResponseEvent::Trailers(mut event) => {
+                SendEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
                         trailers.append(&mut event.headers);
                         if !event.more_trailers {
@@ -172,9 +165,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         }
                     }
                 }
-                ResponseEvent::Exception => {
-                    if !matches!(self.response_state, ResponseState::Complete) {
-                        self.response_state = ResponseState::Complete;
+                SendEvent::Exception => {
+                    if !self.response_closed {
+                        self.response_closed = true;
                         envoy_filter.send_response(
                             500,
                             vec![
