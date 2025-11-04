@@ -123,8 +123,8 @@ impl Executor {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
-        recv_future_tx: Sender<RecvFuture>,
-        response_tx: Sender<ResponseEvent>,
+        recv_tx: Sender<RecvFuture>,
+        send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
     ) {
         self.tx
@@ -132,8 +132,8 @@ impl Executor {
                 scope,
                 request_closed,
                 trailers_accepted,
-                recv_future_tx,
-                response_tx,
+                recv_tx,
+                send_tx,
                 scheduler,
             })
             .unwrap();
@@ -173,16 +173,16 @@ impl ExecutorInner {
                 scope,
                 request_closed,
                 trailers_accepted,
-                recv_future_tx,
-                response_tx,
+                recv_tx,
+                send_tx,
                 scheduler,
             } => self.execute_app(
                 py,
                 scope,
                 request_closed,
                 trailers_accepted,
-                recv_future_tx,
-                response_tx,
+                recv_tx,
+                send_tx,
                 scheduler,
             ),
             Event::HandleRecvFuture {
@@ -204,8 +204,8 @@ impl ExecutorInner {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
-        recv_future_tx: Sender<RecvFuture>,
-        response_tx: Sender<ResponseEvent>,
+        recv_tx: Sender<RecvFuture>,
+        send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
     ) -> PyResult<()> {
         let scope_dict = PyDict::new(py);
@@ -258,7 +258,7 @@ impl ExecutorInner {
             .into_bound_py_any(py)?
         } else {
             RecvCallable {
-                recv_future_tx,
+                recv_future_tx: recv_tx,
                 scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -275,7 +275,7 @@ impl ExecutorInner {
                 response_start: None,
                 trailers_accepted,
                 closed: false,
-                response_tx: response_tx.clone(),
+                send_tx: send_tx.clone(),
                 scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -290,7 +290,7 @@ impl ExecutorInner {
         future.call_method1(
             &self.constants.add_done_callback,
             (AppFutureHandler {
-                response_tx,
+                send_tx,
                 scheduler,
                 constants: self.constants.clone(),
             },),
@@ -357,8 +357,8 @@ enum Event {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
-        recv_future_tx: Sender<RecvFuture>,
-        response_tx: Sender<ResponseEvent>,
+        recv_tx: Sender<RecvFuture>,
+        send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
     },
     HandleRecvFuture {
@@ -421,7 +421,7 @@ impl EmptyRecvCallable {
 
 #[pyclass]
 struct AppFutureHandler {
-    response_tx: Sender<ResponseEvent>,
+    send_tx: Sender<SendEvent>,
     scheduler: Arc<SyncScheduler>,
     constants: Arc<Constants>,
 }
@@ -437,7 +437,7 @@ impl AppFutureHandler {
             }
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
-            if self.response_tx.send(ResponseEvent::Exception).is_ok() {
+            if self.send_tx.send(SendEvent::Exception).is_ok() {
                 self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
@@ -458,7 +458,7 @@ struct SendCallable {
     response_start: Option<ResponseStartEvent>,
     trailers_accepted: bool,
     closed: bool,
-    response_tx: Sender<ResponseEvent>,
+    send_tx: Sender<SendEvent>,
     scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
@@ -563,19 +563,15 @@ impl SendCallable {
                 };
                 if let Some(start_event) = self.response_start.take() {
                     if self
-                        .response_tx
-                        .send(ResponseEvent::Start(start_event, body_event))
+                        .send_tx
+                        .send(SendEvent::Start(start_event, body_event))
                         .is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     } else {
                         self.closed = true;
                     }
-                } else if self
-                    .response_tx
-                    .send(ResponseEvent::Body(body_event))
-                    .is_ok()
-                {
+                } else if self.send_tx.send(SendEvent::Body(body_event)).is_ok() {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     self.closed = true;
@@ -599,8 +595,8 @@ impl SendCallable {
                 if self.trailers_accepted {
                     let headers = extract_headers_from_event(py, &self.constants, &event)?;
                     if self
-                        .response_tx
-                        .send(ResponseEvent::Trailers(ResponseTrailersEvent {
+                        .send_tx
+                        .send(SendEvent::Trailers(ResponseTrailersEvent {
                             headers,
                             more_trailers,
                         }))
@@ -668,7 +664,7 @@ pub(crate) struct ResponseTrailersEvent {
     pub more_trailers: bool,
 }
 
-pub(crate) enum ResponseEvent {
+pub(crate) enum SendEvent {
     Start(ResponseStartEvent, ResponseBodyEvent),
     Body(ResponseBodyEvent),
     Trailers(ResponseTrailersEvent),
