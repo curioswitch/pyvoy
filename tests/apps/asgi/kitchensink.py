@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     # We don't use asgiref code so only import from it for type checking
@@ -28,6 +28,18 @@ async def _send_failure(msg: str, send: ASGISendCallable) -> None:
             "more_body": False,
         }
     )
+
+
+async def _send_success(send: ASGISendCallable) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"Ok", "more_body": False})
 
 
 async def _headers_only(
@@ -396,6 +408,135 @@ async def _controlled(
         await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
+async def _bad_app_missing_type(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        # We don't await since this error is evaluated eagerly being a parameter error.
+        # In other words, it will always fail even if send call and await are separated.
+        # This differs from errors for wrong order, etc.
+        send(
+            cast(
+                "Any",
+                {
+                    "status": 200,
+                    "headers": [(b"content-type", b"text/plain")],
+                    "trailers": False,
+                },
+            )
+        )
+    except RuntimeError as e:
+        if str(e) != "Unexpected ASGI message, missing 'type'.":
+            await _send_failure(
+                "str(e) != \"Unexpected ASGI message, missing 'type'.\"", send
+            )
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for missing type", send)
+
+
+async def _bad_app_body_before_start(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    # Verify no exception until awaited.
+    awaitable = send({"type": "http.response.body", "body": b"", "more_body": False})
+    try:
+        await awaitable
+    except RuntimeError as e:
+        if (
+            str(e)
+            != "Expected ASGI message 'http.response.start', but got 'http.response.body'."
+        ):
+            await _send_failure(
+                "str(e) != \"Expected ASGI message 'http.response.start', but got 'http.response.body'.\"",
+                send,
+            )
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for body before start", send)
+
+
+async def _bad_app_start_after_start(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    # Verify no exception until awaited.
+    awaitable = send(
+        {
+            "type": "http.response.start",
+            "status": 202,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    # As we've already sent a status code, failures will reset the stream, which leads to the unit test failing.
+    try:
+        await awaitable
+    except RuntimeError as e:
+        if (
+            str(e)
+            != "Expected ASGI message 'http.response.body', but got 'http.response.start'."
+        ):
+            await _send_failure(
+                "str(e) != \"Expected ASGI message 'http.response.body', but got 'http.response.start'.\"",
+                send,
+            )
+            return
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+    else:
+        await _send_failure("No exception raised for body before start", send)
+
+
+async def _bad_app_start_instead_of_trailers(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": True,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    # Verify no exception until awaited.
+    awaitable = send(
+        {
+            "type": "http.response.start",
+            "status": 202,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    # As we've already sent a status code, failures will reset the stream, which leads to the unit test failing.
+    try:
+        await awaitable
+    except RuntimeError as e:
+        if (
+            str(e)
+            != "Expected ASGI message 'http.response.trailers', but got 'http.response.start'."
+        ):
+            await _send_failure(
+                "str(e) != \"Expected ASGI message 'http.response.trailers', but got 'http.response.start'.\"",
+                send,
+            )
+            return
+        await send(
+            {"type": "http.response.trailers", "headers": [], "more_trailers": False}
+        )
+    else:
+        await _send_failure("No exception raised for body before start", send)
+
+
 async def app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -426,5 +567,13 @@ async def app(
             await _exception_after_response_complete(send)
         case "/controlled":
             await _controlled(scope, recv, send)
+        case "/bad-app-missing-type":
+            await _bad_app_missing_type(scope, recv, send)
+        case "/bad-app-body-before-start":
+            await _bad_app_body_before_start(scope, recv, send)
+        case "/bad-app-start-after-start":
+            await _bad_app_start_after_start(scope, recv, send)
+        case "/bad-app-start-instead-of-trailers":
+            await _bad_app_start_instead_of_trailers(scope, recv, send)
         case _:
             await _send_failure("unknown path", send)

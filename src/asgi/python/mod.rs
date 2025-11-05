@@ -1,16 +1,21 @@
 use std::{sync::Arc, thread};
 
-use crate::envoy::SyncScheduler;
-use crate::types::*;
+use crate::{
+    asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+    envoy::SyncScheduler,
+    types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope},
+};
 use http::{HeaderName, HeaderValue};
 use pyo3::{
     IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError, PyStopIteration, PyValueError},
+    exceptions::{PyOSError, PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
 };
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+
+mod awaitable;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
@@ -412,10 +417,7 @@ impl EmptyRecvCallable {
         event.set_item(&self.constants.typ, &self.constants.http_request)?;
         event.set_item(&self.constants.body, &self.constants.empty_bytes)?;
         event.set_item(&self.constants.more_body, false)?;
-        ValueAwaitable {
-            value: Some(event.into_any().unbind()),
-        }
-        .into_bound_py_any(py)
+        ValueAwaitable::new_py(py, event.into_any().unbind())
     }
 }
 
@@ -475,7 +477,7 @@ impl SendCallable {
         event: Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed {
-            return Err(ClientDisconnectedError::new_err(()));
+            return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
         }
 
         let event_type_py = event
@@ -486,18 +488,24 @@ impl SendCallable {
         match &self.next_event {
             NextASGIEvent::Start => {
                 if event_type != "http.response.start" {
-                    return Err(PyRuntimeError::new_err(format!(
-                        "Expected ASGI message 'http.response.start', but got '{}'.",
-                        event_type
-                    )));
+                    return ErrorAwaitable::new_py(
+                        py,
+                        PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.start', but got '{}'.",
+                            event_type
+                        )),
+                    );
                 }
                 let headers = extract_headers_from_event(py, &self.constants, &event)?;
                 let status: u16 = match event.get_item(&self.constants.status)? {
                     Some(v) => v.extract()?,
                     None => {
-                        return Err(PyRuntimeError::new_err(
-                            "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
-                        ));
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
+                            ),
+                        );
                     }
                 };
                 let trailers: bool = match event.get_item(&self.constants.trailers)? {
@@ -514,14 +522,17 @@ impl SendCallable {
                     headers,
                     trailers: trailers && self.trailers_accepted,
                 });
-                EmptyAwaitable.into_bound_py_any(py)
+                EmptyAwaitable::new_py(py)
             }
             NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
                 if event_type != "http.response.body" {
-                    return Err(PyRuntimeError::new_err(format!(
-                        "Expected ASGI message 'http.response.body', but got '{}'.",
-                        event_type
-                    )));
+                    return ErrorAwaitable::new_py(
+                        py,
+                        PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.body', but got '{}'.",
+                            event_type
+                        )),
+                    );
                 }
                 let more_body: bool = match event.get_item(&self.constants.more_body)? {
                     Some(v) => v.extract()?,
@@ -555,7 +566,7 @@ impl SendCallable {
                         }),
                     )
                 } else {
-                    (EmptyAwaitable.into_bound_py_any(py)?, None)
+                    (EmptyAwaitable::new_py(py)?, None)
                 };
                 let body_event = ResponseBodyEvent {
                     body,
@@ -580,10 +591,13 @@ impl SendCallable {
             }
             NextASGIEvent::Trailers => {
                 if event_type != "http.response.trailers" {
-                    return Err(PyRuntimeError::new_err(format!(
-                        "Expected ASGI message 'http.response.trailers', but got '{}'.",
-                        event_type
-                    )));
+                    return ErrorAwaitable::new_py(
+                        py,
+                        PyRuntimeError::new_err(format!(
+                            "Expected ASGI message 'http.response.trailers', but got '{}'.",
+                            event_type
+                        )),
+                    );
                 }
                 let more_trailers: bool = match event.get_item(&self.constants.more_trailers)? {
                     Some(v) => v.extract()?,
@@ -605,12 +619,15 @@ impl SendCallable {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     };
                 }
-                EmptyAwaitable.into_bound_py_any(py)
+                EmptyAwaitable::new_py(py)
             }
-            NextASGIEvent::Done => Err(PyRuntimeError::new_err(format!(
-                "Unexpected ASGI message '{}' sent, after response already completed.",
-                event_type
-            ))),
+            NextASGIEvent::Done => ErrorAwaitable::new_py(
+                py,
+                PyRuntimeError::new_err(format!(
+                    "Unexpected ASGI message '{}' sent, after response already completed.",
+                    event_type
+                )),
+            ),
         }
     }
 }
@@ -700,45 +717,3 @@ impl Drop for SendFuture {
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
 pub(crate) const EVENT_ID_EXCEPTION: u64 = 3;
-
-#[pyclass]
-struct EmptyAwaitable;
-
-#[pymethods]
-impl EmptyAwaitable {
-    fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __next__(&self) -> Option<()> {
-        None
-    }
-}
-
-#[pyclass]
-struct ValueAwaitable {
-    value: Option<Py<PyAny>>,
-}
-
-#[pymethods]
-impl ValueAwaitable {
-    fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __next__<'py>(&mut self) -> PyResult<Py<PyAny>> {
-        if let Some(value) = self.value.take() {
-            Err(PyStopIteration::new_err(value))
-        } else {
-            Err(PyStopIteration::new_err(()))
-        }
-    }
-}

@@ -275,7 +275,8 @@ impl StartResponseCallable {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        self.status = u16::from_str_radix(status_code, 10)
+        self.status = status_code
+            .parse::<u16>()
             .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
         self.headers.replace(headers);
         // TODO: Return a write function.
