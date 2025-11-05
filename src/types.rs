@@ -499,21 +499,21 @@ impl Constants {
 }
 
 pub(crate) trait PyDictExt {
-    fn set_http_method<'py>(
+    fn set_http_method(
         &self,
         constants: &Constants,
         key: &Py<PyString>,
         method: &http::Method,
     ) -> PyResult<()>;
 
-    fn set_http_scheme<'py>(
+    fn set_http_scheme(
         &self,
         constants: &Constants,
         key: &Py<PyString>,
         scheme: &uri::Scheme,
     ) -> PyResult<()>;
 
-    fn set_http_version<'py>(
+    fn set_http_version(
         &self,
         constants: &Constants,
         key: &Py<PyString>,
@@ -522,7 +522,7 @@ pub(crate) trait PyDictExt {
 }
 
 impl PyDictExt for Bound<'_, PyDict> {
-    fn set_http_method<'py>(
+    fn set_http_method(
         &self,
         constants: &Constants,
         key: &Py<PyString>,
@@ -563,7 +563,7 @@ impl PyDictExt for Bound<'_, PyDict> {
         Ok(())
     }
 
-    fn set_http_scheme<'py>(
+    fn set_http_scheme(
         &self,
         constants: &Constants,
         key: &Py<PyString>,
@@ -579,7 +579,7 @@ impl PyDictExt for Bound<'_, PyDict> {
         Ok(())
     }
 
-    fn set_http_version<'py>(
+    fn set_http_version(
         &self,
         constants: &Constants,
         key: &Py<PyString>,

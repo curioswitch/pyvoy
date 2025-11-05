@@ -143,3 +143,39 @@ async def test_exception_after_response_complete(
     assert response.headers["content-type"] == "text/plain"
     assert response.content == b"Hello World!!!"
     # TODO: Check server logs
+
+
+@pytest.mark.asyncio
+async def test_asgi_bad_app_missing_type(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-missing-type")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_asgi_bad_app_body_before_start(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-body-before-start")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_asgi_bad_app_start_after_start(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-start-after-start")
+    assert response.status_code == 200, response.text
+
+
+# While httpx doesn't support trailers, it doesn't matter since we only check if
+# the handler raised an exception.
+@pytest.mark.asyncio
+async def test_asgi_bad_app_start_instead_of_trailers(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(
+        f"{url_asgi}/bad-app-start-instead-of-trailers", headers={"te": "trailers"}
+    )
+    assert response.status_code == 200, response.text
