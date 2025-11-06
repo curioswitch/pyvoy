@@ -565,7 +565,7 @@ impl SendCallable {
                         NextASGIEvent::BodyWithoutTrailers => {
                             self.next_event = NextASGIEvent::Done;
                         }
-                        _ => {}
+                        _ => unreachable!(),
                     }
                 }
                 let (ret, send_future) = if more_body {

@@ -85,8 +85,9 @@ impl ErrorAwaitable {
         if let Some(error) = self.error.take() {
             Err(error)
         } else {
-            // Shouldn't happen in practice.
+            // LCOV_EXCL_START - Shouldn't happen in practice but allowed.
             Ok(())
+            // LCOV_EXCL_STOP
         }
     }
 }
