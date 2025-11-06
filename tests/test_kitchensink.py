@@ -250,6 +250,14 @@ async def test_asgi_bad_app_missing_type(
 
 
 @pytest.mark.asyncio
+async def test_asgi_bad_app_start_missing_status(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-start-missing-status")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
 async def test_asgi_bad_app_body_before_start(
     url_asgi: str, client: httpx.AsyncClient
 ) -> None:
@@ -263,6 +271,15 @@ async def test_asgi_bad_app_start_after_start(
 ) -> None:
     response = await client.get(f"{url_asgi}/bad-app-start-after-start")
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_asgi_bad_app_body_after_complete(
+    url_asgi: str, client: httpx.AsyncClient, logs_asgi: StreamReader
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-body-after-complete")
+    assert response.status_code == 200, response.text
+    await assert_logs_contains(logs_asgi, ["Assertions passed"])
 
 
 # While httpx doesn't support trailers, it doesn't matter since we only check if
