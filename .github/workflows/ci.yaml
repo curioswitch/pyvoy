@@ -28,8 +28,6 @@ jobs:
         python:
           - "3.10"
           - "3.14"
-        coverage:
-          - "nocov"
         # Test oldest and newest on all OS's, but others only on one
         # to save CI load.
         include:
