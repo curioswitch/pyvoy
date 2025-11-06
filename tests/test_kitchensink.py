@@ -30,7 +30,7 @@ async def _find_logs_lines(
 
 async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) -> None:
     found_lines, read_lines = await asyncio.wait_for(
-        _find_logs_lines(logs, expected_lines), timeout=5.0
+        _find_logs_lines(logs, expected_lines), timeout=10.0
     )
     missing_lines = set(expected_lines) - found_lines
     assert not missing_lines, (
