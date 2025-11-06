@@ -1,10 +1,9 @@
+import sys
 import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    import sys
-
     if sys.version_info >= (3, 11):
         from wsgiref.types import InputStream as WSGIInputStream
         from wsgiref.types import StartResponse, WSGIEnvironment
@@ -150,7 +149,7 @@ def _bidi_stream(
 def _exception_before_response(
     _environ: WSGIEnvironment, _start_response: StartResponse
 ) -> Iterable[bytes]:
-    msg = "We have failed hard"
+    msg = "We have failed before the response"
     raise RuntimeError(msg)
 
 
@@ -159,7 +158,7 @@ def _exception_after_response_headers(
 ) -> Iterable[bytes]:
     start_response("200 OK", [("content-type", "text/plain")])
     yield b""
-    msg = "We have failed hard"
+    msg = "We have failed after response headers"
     raise RuntimeError(msg)
 
 
@@ -168,7 +167,7 @@ def _exception_after_response_body(
 ) -> Iterable[bytes]:
     start_response("200 OK", [("content-type", "text/plain")])
     yield b"Hello World!!!"
-    msg = "We have failed hard"
+    msg = "We have failed after response body"
     raise RuntimeError(msg)
 
 
@@ -190,6 +189,15 @@ def _controlled(
     if response_bytes > 0:
         chunk = b"A" * response_bytes
         return [chunk]
+    return []
+
+
+def _print_logs(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    print("This is a stdout print", flush=True)  # noqa: T201
+    print("This is a stderr print", file=sys.stderr)  # noqa: T201
+    start_response("200 OK", [("content-type", "text/plain"), ("x-animal", "bear")])
     return []
 
 
@@ -215,5 +223,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _exception_after_response_body(environ, start_response)
         case "/controlled":
             return _controlled(environ, start_response)
+        case "/print-logs":
+            return _print_logs(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

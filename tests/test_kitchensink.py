@@ -1,3 +1,6 @@
+import asyncio
+import subprocess
+from asyncio import StreamReader
 from collections.abc import AsyncIterator
 
 import httpx
@@ -7,20 +10,84 @@ import pytest_asyncio
 from pyvoy import Interface, PyvoyServer
 
 
-@pytest_asyncio.fixture(scope="module")
-async def url_asgi() -> AsyncIterator[str]:
-    async with PyvoyServer(
-        "tests.apps.asgi.kitchensink", stderr=None, stdout=None
-    ) as server:
-        yield f"http://{server.listener_address}:{server.listener_port}"
+async def _find_logs_lines(
+    logs: StreamReader, expected_lines: list[str]
+) -> tuple[set[str], list[str]]:
+    found_lines: set[str] = set()
+    read_lines: list[str] = []
+    try:
+        async for line in logs:
+            read_lines.append(line.decode())
+            decoded_line = line.decode().rstrip()
+            if decoded_line in expected_lines:
+                found_lines.add(decoded_line)
+            if len(found_lines) == len(expected_lines):
+                break
+    except asyncio.CancelledError:
+        pass
+    return found_lines, read_lines
+
+
+async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) -> None:
+    found_lines, read_lines = await asyncio.wait_for(
+        _find_logs_lines(logs, expected_lines), timeout=1.0
+    )
+    missing_lines = set(expected_lines) - found_lines
+    assert not missing_lines, (
+        f"Missing log lines: {missing_lines}\nRead lines: {''.join(read_lines)}"
+    )
 
 
 @pytest_asyncio.fixture(scope="module")
-async def url_wsgi() -> AsyncIterator[str]:
+async def server_asgi() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
-        "tests.apps.wsgi.kitchensink", interface="wsgi", stderr=None, stdout=None
+        "tests.apps.asgi.kitchensink", stderr=subprocess.STDOUT, stdout=subprocess.PIPE
     ) as server:
-        yield f"http://{server.listener_address}:{server.listener_port}"
+        yield server
+
+
+@pytest_asyncio.fixture(scope="module")
+async def server_wsgi() -> AsyncIterator[PyvoyServer]:
+    async with PyvoyServer(
+        "tests.apps.wsgi.kitchensink",
+        interface="wsgi",
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        yield server
+
+
+@pytest.fixture
+def logs_asgi(server_asgi: PyvoyServer) -> StreamReader:
+    assert server_asgi.stdout is not None
+    return server_asgi.stdout
+
+
+@pytest.fixture
+def logs_wsgi(server_wsgi: PyvoyServer) -> StreamReader:
+    assert server_wsgi.stdout is not None
+    return server_wsgi.stdout
+
+
+@pytest.fixture
+def logs(
+    interface: Interface, logs_asgi: StreamReader, logs_wsgi: StreamReader
+) -> StreamReader:
+    match interface:
+        case "asgi":
+            return logs_asgi
+        case "wsgi":
+            return logs_wsgi
+
+
+@pytest_asyncio.fixture
+async def url_asgi(server_asgi: PyvoyServer) -> AsyncIterator[str]:
+    yield f"http://{server_asgi.listener_address}:{server_asgi.listener_port}"
+
+
+@pytest_asyncio.fixture
+async def url_wsgi(server_wsgi: PyvoyServer) -> AsyncIterator[str]:
+    yield f"http://{server_wsgi.listener_address}:{server_wsgi.listener_port}"
 
 
 @pytest.fixture(params=["asgi", "wsgi"])
@@ -99,11 +166,20 @@ async def test_empty_request_body_http2(url: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_exception_before_response(url: str, client: httpx.AsyncClient) -> None:
+async def test_exception_before_response(
+    url: str, client: httpx.AsyncClient, logs: StreamReader
+) -> None:
     response = await client.get(f"{url}/exception-before-response")
     assert response.status_code == 500
     assert response.headers["content-type"] == "text/plain; charset=utf-8"
     assert response.content == b"Internal Server Error"
+    await assert_logs_contains(
+        logs,
+        [
+            "Traceback (most recent call last):",
+            "RuntimeError: We have failed before the response",
+        ],
+    )
 
 
 # Because we only flush headers when the first body message is available,
@@ -113,36 +189,56 @@ async def test_exception_before_response(url: str, client: httpx.AsyncClient) ->
 
 @pytest.mark.asyncio
 async def test_exception_after_response_headers(
-    url: str, client: httpx.AsyncClient
+    url: str, client: httpx.AsyncClient, logs: StreamReader
 ) -> None:
     with pytest.raises(httpx.RemoteProtocolError) as exc_info:
         await client.get(f"{url}/exception-after-response-headers")
     assert "peer closed connection without sending complete message body" in str(
         exc_info.value
     )
+    await assert_logs_contains(
+        logs,
+        [
+            "Traceback (most recent call last):",
+            "RuntimeError: We have failed after response headers",
+        ],
+    )
 
 
 @pytest.mark.asyncio
 async def test_exception_after_response_body(
-    url: str, client: httpx.AsyncClient
+    url: str, client: httpx.AsyncClient, logs: StreamReader
 ) -> None:
     with pytest.raises(httpx.RemoteProtocolError) as exc_info:
         await client.get(f"{url}/exception-after-response-body")
     assert "peer closed connection without sending complete message body" in str(
         exc_info.value
     )
+    await assert_logs_contains(
+        logs,
+        [
+            "Traceback (most recent call last):",
+            "RuntimeError: We have failed after response body",
+        ],
+    )
 
 
 # Not possible to model with WSGI
 @pytest.mark.asyncio
 async def test_exception_after_response_complete(
-    url_asgi: str, client: httpx.AsyncClient
+    url_asgi: str, client: httpx.AsyncClient, logs_asgi: StreamReader
 ) -> None:
     response = await client.get(f"{url_asgi}/exception-after-response-complete")
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "text/plain"
     assert response.content == b"Hello World!!!"
-    # TODO: Check server logs
+    await assert_logs_contains(
+        logs_asgi,
+        [
+            "Traceback (most recent call last):",
+            "RuntimeError: We have failed after response complete",
+        ],
+    )
 
 
 @pytest.mark.asyncio
@@ -179,3 +275,15 @@ async def test_asgi_bad_app_start_instead_of_trailers(
         f"{url_asgi}/bad-app-start-instead-of-trailers", headers={"te": "trailers"}
     )
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_standard_logs(
+    url: str, client: httpx.AsyncClient, logs: StreamReader
+) -> None:
+    response = await client.get(f"{url}/print-logs")
+    assert response.status_code == 200, response.text
+
+    await assert_logs_contains(
+        logs, ["This is a stdout print", "This is a stderr print"]
+    )
