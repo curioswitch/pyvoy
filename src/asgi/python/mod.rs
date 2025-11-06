@@ -500,12 +500,9 @@ impl SendCallable {
                 let status: u16 = match event.get_item(&self.constants.status)? {
                     Some(v) => v.extract()?,
                     None => {
-                        return ErrorAwaitable::new_py(
-                            py,
-                            PyRuntimeError::new_err(
-                                "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
-                            ),
-                        );
+                        return Err(PyRuntimeError::new_err(
+                            "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
+                        ));
                     }
                 };
                 let trailers: bool = match event.get_item(&self.constants.trailers)? {

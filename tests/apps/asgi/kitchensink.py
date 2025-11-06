@@ -437,6 +437,38 @@ async def _bad_app_missing_type(
         await _send_failure("No exception raised for missing type", send)
 
 
+async def _bad_app_start_missing_status(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        # We don't await since this error is evaluated eagerly being a parameter error.
+        # In other words, it will always fail even if send call and await are separated.
+        # This differs from errors for wrong order, etc.
+        send(
+            cast(
+                "Any",
+                {
+                    "type": "http.response.start",
+                    "headers": [(b"content-type", b"text/plain")],
+                    "trailers": False,
+                },
+            )
+        )
+    except RuntimeError as e:
+        if (
+            str(e)
+            != "Unexpected ASGI message, missing 'status' in 'http.response.start'."
+        ):
+            await _send_failure(
+                f"{e!s} != \"Unexpected ASGI message, missing 'status' in 'http.response.start'.\"",
+                send,
+            )
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for missing status", send)
+
+
 async def _bad_app_body_before_start(
     _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -495,6 +527,43 @@ async def _bad_app_start_after_start(
         await send({"type": "http.response.body", "body": b"", "more_body": False})
     else:
         await _send_failure("No exception raised for body before start", send)
+
+
+async def _bad_app_body_after_complete(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    # Verify no exception until awaited.
+    awaitable = send({"type": "http.response.body", "body": b"", "more_body": False})
+    # The request was already completed successfully on the client side so we can't propagate
+    # assertion failures through it and use logs instead.
+    try:
+        await awaitable
+    except RuntimeError as e:
+        if (
+            str(e)
+            != "Unexpected ASGI message 'http.response.body' sent, after response already completed."
+        ):
+            print(  # noqa: T201
+                f"{e!s} != \"Unexpected ASGI message 'http.response.body' sent, after response already completed.\"",
+                file=sys.stderr,
+            )
+            return
+        print(  # noqa: T201
+            "Assertions passed", file=sys.stderr
+        )
+    else:
+        print(  # noqa: T201
+            "No exception raised for body before start", file=sys.stderr
+        )
 
 
 async def _bad_app_start_instead_of_trailers(
@@ -578,10 +647,14 @@ async def app(
             await _controlled(scope, recv, send)
         case "/bad-app-missing-type":
             await _bad_app_missing_type(scope, recv, send)
+        case "/bad-app-start-missing-status":
+            await _bad_app_start_missing_status(scope, recv, send)
         case "/bad-app-body-before-start":
             await _bad_app_body_before_start(scope, recv, send)
         case "/bad-app-start-after-start":
             await _bad_app_start_after_start(scope, recv, send)
+        case "/bad-app-body-after-complete":
+            await _bad_app_body_after_complete(scope, recv, send)
         case "/bad-app-start-instead-of-trailers":
             await _bad_app_start_instead_of_trailers(scope, recv, send)
         case "/print-logs":

@@ -116,7 +116,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
             return;
         }
-        if let Ok(event) = self.send_rx.try_recv() {
+        for event in self.send_rx.try_iter() {
             match event {
                 SendEvent::Start(start_event, mut body_event) => {
                     if start_event.trailers {
@@ -141,6 +141,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             envoy_filter.send_response_headers(headers, false);
                             envoy_filter.send_response_data(&body_event.body, true);
                         }
+                        return;
                     } else {
                         envoy_filter.send_response_headers(headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
@@ -152,6 +153,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         self.executor.handle_send_future(future);
                     }
                     envoy_filter.send_response_data(&event.body, end_stream);
+                    if end_stream {
+                        return;
+                    }
                 }
                 SendEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
@@ -162,6 +166,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                                 .map(|(k, v)| (k.as_str(), v.as_bytes()))
                                 .collect();
                             envoy_filter.send_response_trailers(trailers_ref);
+                            return;
                         }
                     }
                 }
@@ -176,6 +181,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             ],
                             Some(b"Internal Server Error"),
                         );
+                        return;
                     }
                 }
             }
