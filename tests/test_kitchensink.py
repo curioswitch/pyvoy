@@ -30,7 +30,7 @@ async def _find_logs_lines(
 
 async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) -> None:
     found_lines, read_lines = await asyncio.wait_for(
-        _find_logs_lines(logs, expected_lines), timeout=10.0
+        _find_logs_lines(logs, expected_lines), timeout=3.0
     )
     missing_lines = set(expected_lines) - found_lines
     assert not missing_lines, (
@@ -250,7 +250,7 @@ async def test_client_closed_before_response(
 ) -> None:
     try:
         async with (
-            httpx.AsyncClient(timeout=0.001) as client,
+            httpx.AsyncClient(timeout=0.1) as client,
             client.stream(
                 "GET", f"{url_asgi}/client-closed-before-response", content=content
             ) as response,
