@@ -234,7 +234,10 @@ impl PyExecutor {
                 Ok(())
             });
             if let Err(e) = result {
-                eprintln!("WSGI application error: {}", e);
+                Python::attach(|py| {
+                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                    eprintln!("Exception in WSGI application\n{}{}", tb, e);
+                });
                 let _ = response_tx.send(ResponseEvent::Exception);
                 scheduler.commit(EVENT_ID_EXCEPTION);
             }

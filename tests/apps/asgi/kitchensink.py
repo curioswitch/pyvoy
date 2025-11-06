@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, cast
 
@@ -313,7 +314,7 @@ async def _bidi_stream(recv: ASGIReceiveCallable, send: ASGISendCallable) -> Non
 
 
 async def _exception_before_response() -> None:
-    msg = "We have failed hard"
+    msg = "We have failed before the response"
     raise RuntimeError(msg)
 
 
@@ -329,7 +330,7 @@ async def _exception_after_response_headers(
         }
     )
     await send({"type": "http.response.body", "body": b"", "more_body": True})
-    msg = "We have failed hard"
+    msg = "We have failed after response headers"
     raise RuntimeError(msg)
 
 
@@ -345,7 +346,7 @@ async def _exception_after_response_body(send: ASGISendCallable) -> None:
     await send(
         {"type": "http.response.body", "body": b"Hello World!!!", "more_body": True}
     )
-    msg = "We have failed hard"
+    msg = "We have failed after response body"
     raise RuntimeError(msg)
 
 
@@ -361,7 +362,7 @@ async def _exception_after_response_complete(send: ASGISendCallable) -> None:
     await send(
         {"type": "http.response.body", "body": b"Hello World!!!", "more_body": False}
     )
-    msg = "We have failed hard"
+    msg = "We have failed after response complete"
     raise RuntimeError(msg)
 
 
@@ -537,6 +538,14 @@ async def _bad_app_start_instead_of_trailers(
         await _send_failure("No exception raised for body before start", send)
 
 
+async def _print_logs(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, _send: ASGISendCallable
+) -> None:
+    print("This is a stdout print", flush=True)  # noqa: T201
+    print("This is a stderr print", file=sys.stderr)  # noqa: T201
+    await _send_success(_send)
+
+
 async def app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -575,5 +584,7 @@ async def app(
             await _bad_app_start_after_start(scope, recv, send)
         case "/bad-app-start-instead-of-trailers":
             await _bad_app_start_instead_of_trailers(scope, recv, send)
+        case "/print-logs":
+            await _print_logs(scope, recv, send)
         case _:
             await _send_failure("unknown path", send)

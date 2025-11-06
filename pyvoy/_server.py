@@ -160,6 +160,14 @@ class PyvoyServer:
     def listener_port_tls(self) -> int | None:
         return self._listener_port_tls
 
+    @property
+    def stdout(self) -> asyncio.StreamReader | None:
+        return self._process.stdout
+
+    @property
+    def stderr(self) -> asyncio.StreamReader | None:
+        return self._process.stderr
+
     def get_envoy_config(self) -> dict:
         enable_http3 = self._tls_enable_http3 and (
             self._tls_key or self._tls_cert or self._tls_ca_cert
