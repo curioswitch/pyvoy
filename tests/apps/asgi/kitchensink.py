@@ -366,6 +366,30 @@ async def _exception_after_response_complete(send: ASGISendCallable) -> None:
     raise RuntimeError(msg)
 
 
+async def _client_closed_before_response(
+    _scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    # Client libraries tend to be well behaved and close the request properly, so we can't
+    # avoid empty body messages. We go ahead and consume them, and should eventually reach
+    # the disconnect.
+    for _ in range(100):
+        msg = await recv()
+        if msg["type"] != "http.request":
+            break
+        await asyncio.sleep(0.1)
+    if msg["type"] != "http.disconnect":
+        msg = f'{msg["type"]} != "http.disconnect"'
+        raise RuntimeError(msg)
+    try:
+        await _send_success(send)
+    except OSError:
+        print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
+    except Exception as e:
+        msg = f"Unexpected exception type: {e!s}"
+        raise RuntimeError(msg) from e
+    print("client-closed-before-response assertions passed", file=sys.stderr)  # noqa: T201
+
+
 async def _controlled(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -558,7 +582,7 @@ async def _bad_app_body_after_complete(
             )
             return
         print(  # noqa: T201
-            "Assertions passed", file=sys.stderr
+            "bad-app-body-after-complete assertions passed", file=sys.stderr
         )
     else:
         print(  # noqa: T201
@@ -643,6 +667,8 @@ async def app(
             await _exception_after_response_body(send)
         case "/exception-after-response-complete":
             await _exception_after_response_complete(send)
+        case "/client-closed-before-response":
+            await _client_closed_before_response(scope, recv, send)
         case "/controlled":
             await _controlled(scope, recv, send)
         case "/bad-app-missing-type":

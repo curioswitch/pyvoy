@@ -1,5 +1,6 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use http::{HeaderName, HeaderValue};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 
@@ -33,7 +34,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
-            response_closed: false,
+            response_closed: Arc::new(AtomicBool::new(false)),
             response_trailers: None,
             recv_rx,
             recv_tx: Some(recv_tx),
@@ -47,7 +48,7 @@ struct Filter {
     executor: python::Executor,
 
     request_closed: bool,
-    response_closed: bool,
+    response_closed: Arc<AtomicBool>,
 
     response_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
 
@@ -77,6 +78,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             scope,
             end_of_stream,
             trailers_accepted,
+            self.response_closed.clone(),
             self.recv_tx.take().unwrap(),
             self.send_tx.take().unwrap(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
@@ -101,6 +103,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             );
         }
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
+    }
+
+    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
+        self.response_closed.store(true, Ordering::Relaxed);
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
@@ -171,18 +177,16 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     }
                 }
                 SendEvent::Exception => {
-                    if !self.response_closed {
-                        self.response_closed = true;
-                        envoy_filter.send_response(
-                            500,
-                            vec![
-                                ("content-type", b"text/plain; charset=utf-8"),
-                                ("connection", b"close"),
-                            ],
-                            Some(b"Internal Server Error"),
-                        );
-                        return;
-                    }
+                    // Will reset the stream if headers have already been sent.
+                    envoy_filter.send_response(
+                        500,
+                        vec![
+                            ("content-type", b"text/plain; charset=utf-8"),
+                            ("connection", b"close"),
+                        ],
+                        Some(b"Internal Server Error"),
+                    );
+                    return;
                 }
             }
         }

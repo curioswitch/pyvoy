@@ -1,4 +1,7 @@
-use std::{sync::Arc, thread};
+use std::{
+    sync::{Arc, atomic::AtomicBool},
+    thread,
+};
 
 use crate::{
     asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
@@ -128,6 +131,7 @@ impl Executor {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
+        response_closed: Arc<AtomicBool>,
         recv_tx: Sender<RecvFuture>,
         send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
@@ -137,6 +141,7 @@ impl Executor {
                 scope,
                 request_closed,
                 trailers_accepted,
+                response_closed,
                 recv_tx,
                 send_tx,
                 scheduler,
@@ -178,6 +183,7 @@ impl ExecutorInner {
                 scope,
                 request_closed,
                 trailers_accepted,
+                response_closed,
                 recv_tx,
                 send_tx,
                 scheduler,
@@ -186,6 +192,7 @@ impl ExecutorInner {
                 scope,
                 request_closed,
                 trailers_accepted,
+                response_closed,
                 recv_tx,
                 send_tx,
                 scheduler,
@@ -209,6 +216,7 @@ impl ExecutorInner {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
+        response_closed: Arc<AtomicBool>,
         recv_tx: Sender<RecvFuture>,
         send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
@@ -258,12 +266,13 @@ impl ExecutorInner {
 
         let recv = if request_closed {
             EmptyRecvCallable {
+                response_closed,
                 constants: self.constants.clone(),
             }
             .into_bound_py_any(py)?
         } else {
             RecvCallable {
-                recv_future_tx: recv_tx,
+                recv_tx,
                 scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -362,6 +371,7 @@ enum Event {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
+        response_closed: Arc<AtomicBool>,
         recv_tx: Sender<RecvFuture>,
         send_tx: Sender<SendEvent>,
         scheduler: SyncScheduler,
@@ -378,7 +388,7 @@ enum Event {
 
 #[pyclass]
 struct RecvCallable {
-    recv_future_tx: Sender<RecvFuture>,
+    recv_tx: Sender<RecvFuture>,
     scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
@@ -398,7 +408,7 @@ impl RecvCallable {
             future: Some(future.clone().unbind()),
             executor: self.executor.clone(),
         };
-        if self.recv_future_tx.send(recv_future).is_ok() {
+        if self.recv_tx.send(recv_future).is_ok() {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future)
@@ -407,6 +417,7 @@ impl RecvCallable {
 
 #[pyclass]
 struct EmptyRecvCallable {
+    response_closed: Arc<AtomicBool>,
     constants: Arc<Constants>,
 }
 
@@ -414,9 +425,16 @@ struct EmptyRecvCallable {
 impl EmptyRecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, &self.constants.empty_bytes)?;
-        event.set_item(&self.constants.more_body, false)?;
+        if self
+            .response_closed
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
+        } else {
+            event.set_item(&self.constants.typ, &self.constants.http_request)?;
+            event.set_item(&self.constants.body, &self.constants.empty_bytes)?;
+            event.set_item(&self.constants.more_body, false)?;
+        }
         ValueAwaitable::new_py(py, event.into_any().unbind())
     }
 }
@@ -578,11 +596,13 @@ impl SendCallable {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     } else {
                         self.closed = true;
+                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                     }
                 } else if self.send_tx.send(SendEvent::Body(body_event)).is_ok() {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     self.closed = true;
+                    return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                 }
                 Ok(ret)
             }
@@ -614,7 +634,10 @@ impl SendCallable {
                         .is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
-                    };
+                    } else {
+                        self.closed = true;
+                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
+                    }
                 }
                 EmptyAwaitable::new_py(py)
             }

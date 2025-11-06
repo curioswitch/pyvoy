@@ -30,7 +30,7 @@ async def _find_logs_lines(
 
 async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) -> None:
     found_lines, read_lines = await asyncio.wait_for(
-        _find_logs_lines(logs, expected_lines), timeout=1.0
+        _find_logs_lines(logs, expected_lines), timeout=3.0
     )
     missing_lines = set(expected_lines) - found_lines
     assert not missing_lines, (
@@ -241,6 +241,32 @@ async def test_exception_after_response_complete(
     )
 
 
+# TODO: WSGI for client disconnect cases
+@pytest.mark.asyncio
+# Filter logic has a fast path for empty content so we need to test both.
+@pytest.mark.parametrize("content", [b"", b"hello"])
+async def test_client_closed_before_response(
+    url_asgi: str, logs_asgi: StreamReader, content: bytes
+) -> None:
+    try:
+        async with (
+            httpx.AsyncClient(timeout=0.1) as client,
+            client.stream(
+                "GET", f"{url_asgi}/client-closed-before-response", content=content
+            ) as response,
+        ):
+            await response.aclose()
+    except httpx.TimeoutException:
+        pass
+    await assert_logs_contains(
+        logs_asgi,
+        [
+            "send raised OSError as expected",
+            "client-closed-before-response assertions passed",
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_asgi_bad_app_missing_type(
     url_asgi: str, client: httpx.AsyncClient
@@ -279,7 +305,9 @@ async def test_asgi_bad_app_body_after_complete(
 ) -> None:
     response = await client.get(f"{url_asgi}/bad-app-body-after-complete")
     assert response.status_code == 200, response.text
-    await assert_logs_contains(logs_asgi, ["Assertions passed"])
+    await assert_logs_contains(
+        logs_asgi, ["bad-app-body-after-complete assertions passed"]
+    )
 
 
 # While httpx doesn't support trailers, it doesn't matter since we only check if
