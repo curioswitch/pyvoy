@@ -42,6 +42,10 @@ jobs:
             python: "3.14"
             coverage: "cov"
 
+    env:
+      # Avoid multiple compile e.g. in lint and test by setting as a job env var
+      RUSTFLAGS: ${{ matrix.coverage == 'cov' && '-C instrument-coverage' || '' }}
+
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
@@ -69,12 +73,10 @@ jobs:
 
       - name: run tests
         run: uv run poe test
-        env:
-          RUSTFLAGS: "-C instrument-coverage"
 
       - name: prepare coverage
         if: ${{ matrix.coverage == 'cov' }}
-        run:
+        run: |
           $(rustc --print=target-libdir)/../bin/llvm-profdata merge -sparse default_*.profraw -o tests.profdata
           $(rustc --print=target-libdir)/../bin/llvm-cov export -format=lcov --ignore-filename-regex='/.cargo/registry' --ignore-filename-regex='.cargo/git/checkouts' --ignore-filename-regex='.rustup/toolchains' -instr-profile tests.profdata pyvoy/_bin/libpyvoy.so > tests.lcov
 
