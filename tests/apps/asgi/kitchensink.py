@@ -383,7 +383,7 @@ async def _client_closed_before_response(
     try:
         await _send_success(send)
     except OSError:
-        pass
+        print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
     except Exception as e:
         msg = f"Unexpected exception type: {e!s}"
         raise RuntimeError(msg) from e

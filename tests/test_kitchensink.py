@@ -259,7 +259,11 @@ async def test_client_closed_before_response(
     except httpx.TimeoutException:
         pass
     await assert_logs_contains(
-        logs_asgi, ["client-closed-before-response assertions passed"]
+        logs_asgi,
+        [
+            "send raised OSError as expected",
+            "client-closed-before-response assertions passed",
+        ],
     )
 
 

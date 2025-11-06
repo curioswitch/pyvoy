@@ -596,11 +596,13 @@ impl SendCallable {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     } else {
                         self.closed = true;
+                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                     }
                 } else if self.send_tx.send(SendEvent::Body(body_event)).is_ok() {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     self.closed = true;
+                    return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                 }
                 Ok(ret)
             }
@@ -632,7 +634,10 @@ impl SendCallable {
                         .is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
-                    };
+                    } else {
+                        self.closed = true;
+                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
+                    }
                 }
                 EmptyAwaitable::new_py(py)
             }
