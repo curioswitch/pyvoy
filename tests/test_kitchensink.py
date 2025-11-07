@@ -332,3 +332,96 @@ async def test_standard_logs(
     await assert_logs_contains(
         logs, ["This is a stdout print", "This is a stderr print"]
     )
+
+
+@pytest.mark.asyncio
+async def test_all_the_headers(url: str, client: httpx.AsyncClient) -> None:
+    # We memoize header names when passing to the app and test as many as we can.
+    # Skipped headers are handled by envoy and not passed to our filter.
+    headers = [
+        ("accept", "accept"),
+        ("accept-charset", "accept-charset"),
+        ("accept-encoding", "accept-encoding"),
+        ("accept-language", "accept-language"),
+        ("accept-ranges", "accept-ranges"),
+        ("access-control-allow-credentials", "access-control-allow-credentials"),
+        ("access-control-allow-headers", "access-control-allow-headers"),
+        ("access-control-allow-methods", "access-control-allow-methods"),
+        ("access-control-allow-origin", "access-control-allow-origin"),
+        ("access-control-expose-headers", "access-control-expose-headers"),
+        ("access-control-max-age", "access-control-max-age"),
+        ("access-control-request-headers", "access-control-request-headers"),
+        ("access-control-request-method", "access-control-request-method"),
+        ("age", "age"),
+        ("allow", "allow"),
+        ("alt-svc", "alt-svc"),
+        ("authorization", "authorization"),
+        ("cache-control", "cache-control"),
+        ("cache-status", "cache-status"),
+        ("cdn-cache-control", "cdn-cache-control"),
+        # Skip connection
+        ("content-disposition", "content-disposition"),
+        ("content-encoding", "content-encoding"),
+        ("content-language", "content-language"),
+        # Skip content-length
+        ("content-location", "content-location"),
+        ("content-range", "content-range"),
+        ("content-security-policy", "content-security-policy"),
+        ("content-security-policy-report-only", "content-security-policy-report-only"),
+        ("content-type", "content-type"),
+        ("cookie", "cookie"),
+        ("dnt", "dnt"),
+        ("date", "date"),
+        ("etag", "etag"),
+        ("expect", "expect"),
+        ("expires", "expires"),
+        ("forwarded", "forwarded"),
+        ("from", "from"),
+        # Skip host
+        ("if-match", "if-match"),
+        ("if-modified-since", "if-modified-since"),
+        ("if-none-match", "if-none-match"),
+        ("if-range", "if-range"),
+        ("if-unmodified-since", "if-unmodified-since"),
+        ("last-modified", "last-modified"),
+        ("link", "link"),
+        ("location", "location"),
+        ("max-forwards", "max-forwards"),
+        ("origin", "origin"),
+        ("pragma", "pragma"),
+        ("proxy-authenticate", "proxy-authenticate"),
+        ("proxy-authorization", "proxy-authorization"),
+        ("public-key-pins", "public-key-pins"),
+        ("public-key-pins-report-only", "public-key-pins-report-only"),
+        ("range", "range"),
+        ("referer", "referer"),
+        ("referrer-policy", "referrer-policy"),
+        ("refresh", "refresh"),
+        ("retry-after", "retry-after"),
+        ("sec-websocket-accept", "sec-websocket-accept"),
+        ("sec-websocket-extensions", "sec-websocket-extensions"),
+        ("sec-websocket-key", "sec-websocket-key"),
+        ("sec-websocket-protocol", "sec-websocket-protocol"),
+        ("sec-websocket-version", "sec-websocket-version"),
+        ("server", "server"),
+        ("set-cookie", "set-cookie"),
+        ("strict-transport-security", "strict-transport-security"),
+        # Skip te
+        ("trailer", "trailer"),
+        # Skip transfer-encoding
+        ("user-agent", "user-agent"),
+        # Skip upgrade
+        ("upgrade-insecure-requests", "upgrade-insecure-requests"),
+        ("vary", "vary"),
+        ("via", "via"),
+        ("warning", "warning"),
+        ("www-authenticate", "www-authenticate"),
+        ("x-content-type-options", "x-content-type-options"),
+        ("x-dns-prefetch-control", "x-dns-prefetch-control"),
+        ("x-frame-options", "x-frame-options"),
+        ("x-xss-protection", "x-xss-protection"),
+        ("x-pyvoy", "x-pyvoy"),
+        ("x-pyvoy", "x-pyvoy-2"),
+    ]
+    response = await client.get(f"{url}/all-the-headers", headers=headers)
+    assert response.status_code == 200, response.text
