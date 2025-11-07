@@ -1,5 +1,10 @@
 # pyvoy
 
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/curioswitch/pyvoy/actions/workflows/ci.yaml/badge.svg)](https://github.com/curioswitch/pyvoy/actions/workflows/ci.yaml)
+[![codecov](https://codecov.io/github/curioswitch/pyvoy/graph/badge.svg)](https://codecov.io/github/curioswitch/pyvoy)
+[![PyPI version](https://img.shields.io/pypi/v/pyvoy)](https://pypi.org/project/pyvoy)
+
 pyvoy is a Python application server, based on [envoy][]. It is based on [envoy dynamic modules][], embedding a
 Python interpreter into a module that can be loaded by a stock envoy binary.
 
