@@ -1,7 +1,7 @@
 import sys
 import time
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
     if sys.version_info >= (3, 11):
@@ -19,6 +19,37 @@ else:
 def _failure(msg: str, start_response: StartResponse) -> Iterable[bytes]:
     start_response("500 Internal Server Error", [("content-type", "text/plain")])
     return [b"Assertion Failure: " + msg.encode()]
+
+
+class AssertionFailed(Exception):
+    def __init__(self, response: Iterable[bytes]) -> None:
+        super().__init__()
+        self.response = response
+
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+def _assert_dict_value(
+    actual: dict[K, V], key: K, expected: V, start_response: StartResponse
+) -> None:
+    if key not in actual:
+        raise AssertionFailed(
+            _failure(f"Key {key!r} not found in headers", start_response)
+        )
+    if actual[key] != expected:
+        raise AssertionFailed(
+            _failure(
+                f"Value for key {key!r} is {actual[key]!r}, expected {expected!r}",
+                start_response,
+            )
+        )
+
+
+def _success(start_response: StartResponse) -> Iterable[bytes]:
+    start_response("200 OK", [("content-type", "text/plain")])
+    return [b"Ok"]
 
 
 def _headers_only(
@@ -201,6 +232,239 @@ def _print_logs(
     return []
 
 
+def _all_the_headers(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    try:
+        _assert_dict_value(environ, "HTTP_ACCEPT", "accept", start_response)
+        _assert_dict_value(
+            environ, "HTTP_ACCEPT_CHARSET", "accept-charset", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_ACCEPT_ENCODING", "accept-encoding", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_ACCEPT_LANGUAGE", "accept-language", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_ACCEPT_RANGES", "accept-ranges", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_ALLOW_CREDENTIALS",
+            "access-control-allow-credentials",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_ALLOW_HEADERS",
+            "access-control-allow-headers",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_ALLOW_METHODS",
+            "access-control-allow-methods",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_ALLOW_ORIGIN",
+            "access-control-allow-origin",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_EXPOSE_HEADERS",
+            "access-control-expose-headers",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_MAX_AGE",
+            "access-control-max-age",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_REQUEST_HEADERS",
+            "access-control-request-headers",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_ACCESS_CONTROL_REQUEST_METHOD",
+            "access-control-request-method",
+            start_response,
+        )
+        _assert_dict_value(environ, "HTTP_AGE", "age", start_response)
+        _assert_dict_value(environ, "HTTP_ALLOW", "allow", start_response)
+        _assert_dict_value(environ, "HTTP_ALT_SVC", "alt-svc", start_response)
+        _assert_dict_value(
+            environ, "HTTP_AUTHORIZATION", "authorization", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_CACHE_CONTROL", "cache-control", start_response
+        )
+        _assert_dict_value(environ, "HTTP_CACHE_STATUS", "cache-status", start_response)
+        _assert_dict_value(
+            environ, "HTTP_CDN_CACHE_CONTROL", "cdn-cache-control", start_response
+        )
+        # Skip connection
+        _assert_dict_value(
+            environ, "HTTP_CONTENT_DISPOSITION", "content-disposition", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_CONTENT_ENCODING", "content-encoding", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_CONTENT_LANGUAGE", "content-language", start_response
+        )
+        # Skip content-length
+        _assert_dict_value(
+            environ, "HTTP_CONTENT_LOCATION", "content-location", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_CONTENT_RANGE", "content-range", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_CONTENT_SECURITY_POLICY",
+            "content-security-policy",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_CONTENT_SECURITY_POLICY_REPORT_ONLY",
+            "content-security-policy-report-only",
+            start_response,
+        )
+        # Doesn't follow the HTTP_ prefix convention
+        _assert_dict_value(environ, "CONTENT_TYPE", "content-type", start_response)
+        _assert_dict_value(environ, "HTTP_COOKIE", "cookie", start_response)
+        _assert_dict_value(environ, "HTTP_DNT", "dnt", start_response)
+        _assert_dict_value(environ, "HTTP_DATE", "date", start_response)
+        _assert_dict_value(environ, "HTTP_ETAG", "etag", start_response)
+        _assert_dict_value(environ, "HTTP_EXPECT", "expect", start_response)
+        _assert_dict_value(environ, "HTTP_EXPIRES", "expires", start_response)
+        _assert_dict_value(environ, "HTTP_FORWARDED", "forwarded", start_response)
+        _assert_dict_value(environ, "HTTP_FROM", "from", start_response)
+        # Skip host
+        _assert_dict_value(environ, "HTTP_IF_MATCH", "if-match", start_response)
+        _assert_dict_value(
+            environ, "HTTP_IF_MODIFIED_SINCE", "if-modified-since", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_IF_NONE_MATCH", "if-none-match", start_response
+        )
+        _assert_dict_value(environ, "HTTP_IF_RANGE", "if-range", start_response)
+        _assert_dict_value(
+            environ, "HTTP_IF_UNMODIFIED_SINCE", "if-unmodified-since", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_LAST_MODIFIED", "last-modified", start_response
+        )
+        _assert_dict_value(environ, "HTTP_LINK", "link", start_response)
+        _assert_dict_value(environ, "HTTP_LOCATION", "location", start_response)
+        _assert_dict_value(environ, "HTTP_MAX_FORWARDS", "max-forwards", start_response)
+        _assert_dict_value(environ, "HTTP_ORIGIN", "origin", start_response)
+        _assert_dict_value(environ, "HTTP_PRAGMA", "pragma", start_response)
+        _assert_dict_value(
+            environ, "HTTP_PROXY_AUTHENTICATE", "proxy-authenticate", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_PROXY_AUTHORIZATION", "proxy-authorization", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_PUBLIC_KEY_PINS", "public-key-pins", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_PUBLIC_KEY_PINS_REPORT_ONLY",
+            "public-key-pins-report-only",
+            start_response,
+        )
+        _assert_dict_value(environ, "HTTP_RANGE", "range", start_response)
+        _assert_dict_value(environ, "HTTP_REFERER", "referer", start_response)
+        _assert_dict_value(
+            environ, "HTTP_REFERRER_POLICY", "referrer-policy", start_response
+        )
+        _assert_dict_value(environ, "HTTP_REFRESH", "refresh", start_response)
+        _assert_dict_value(environ, "HTTP_RETRY_AFTER", "retry-after", start_response)
+        _assert_dict_value(
+            environ, "HTTP_SEC_WEBSOCKET_ACCEPT", "sec-websocket-accept", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_SEC_WEBSOCKET_EXTENSIONS",
+            "sec-websocket-extensions",
+            start_response,
+        )
+        _assert_dict_value(
+            environ, "HTTP_SEC_WEBSOCKET_KEY", "sec-websocket-key", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_SEC_WEBSOCKET_PROTOCOL",
+            "sec-websocket-protocol",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_SEC_WEBSOCKET_VERSION",
+            "sec-websocket-version",
+            start_response,
+        )
+        _assert_dict_value(environ, "HTTP_SERVER", "server", start_response)
+        _assert_dict_value(environ, "HTTP_SET_COOKIE", "set-cookie", start_response)
+        _assert_dict_value(
+            environ,
+            "HTTP_STRICT_TRANSPORT_SECURITY",
+            "strict-transport-security",
+            start_response,
+        )
+        # Skip te
+        _assert_dict_value(environ, "HTTP_TRAILER", "trailer", start_response)
+        # Skip transfer-encoding
+        _assert_dict_value(environ, "HTTP_USER_AGENT", "user-agent", start_response)
+        # Skip upgrade
+        _assert_dict_value(
+            environ,
+            "HTTP_UPGRADE_INSECURE_REQUESTS",
+            "upgrade-insecure-requests",
+            start_response,
+        )
+        _assert_dict_value(environ, "HTTP_VARY", "vary", start_response)
+        _assert_dict_value(environ, "HTTP_VIA", "via", start_response)
+        _assert_dict_value(environ, "HTTP_WARNING", "warning", start_response)
+        _assert_dict_value(
+            environ, "HTTP_WWW_AUTHENTICATE", "www-authenticate", start_response
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_X_CONTENT_TYPE_OPTIONS",
+            "x-content-type-options",
+            start_response,
+        )
+        _assert_dict_value(
+            environ,
+            "HTTP_X_DNS_PREFETCH_CONTROL",
+            "x-dns-prefetch-control",
+            start_response,
+        )
+        _assert_dict_value(
+            environ, "HTTP_X_FRAME_OPTIONS", "x-frame-options", start_response
+        )
+        _assert_dict_value(
+            environ, "HTTP_X_XSS_PROTECTION", "x-xss-protection", start_response
+        )
+        _assert_dict_value(environ, "HTTP_X_PYVOY", "x-pyvoy,x-pyvoy-2", start_response)
+    except AssertionFailed as e:
+        return e.response
+
+    return _success(start_response)
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -225,5 +489,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _controlled(environ, start_response)
         case "/print-logs":
             return _print_logs(environ, start_response)
+        case "/all-the-headers":
+            return _all_the_headers(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)
