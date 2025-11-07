@@ -232,7 +232,7 @@ async def _trailers_only(send: ASGISendCallable) -> None:
             "trailers": True,
         }
     )
-    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    await send(cast("Any", {"type": "http.response.body"}))
     await send(
         {
             "type": "http.response.trailers",
@@ -412,6 +412,51 @@ async def _client_closed_before_response(
 
     # An escaped client disconnection error should not be logged.
     await _send_success(send)
+
+
+async def _client_closed_after_response_start(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    for _ in range(10000):
+        try:
+            await send({"type": "http.response.body", "body": b"", "more_body": True})
+        except OSError:
+            print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
+            break
+        await asyncio.sleep(0.1)
+    print("client-closed-after-response-start assertions passed", file=sys.stderr)  # noqa: T201
+
+
+async def _client_closed_after_trailers_start(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": True,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    for _ in range(10000):
+        try:
+            await send(
+                {"type": "http.response.trailers", "headers": [], "more_trailers": True}
+            )
+        except OSError:
+            print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
+            break
+        await asyncio.sleep(0.1)
+    print("client-closed-after-trailers-start assertions passed", file=sys.stderr)  # noqa: T201
 
 
 async def _controlled(
@@ -886,6 +931,10 @@ async def app(
             await _exception_after_response_complete(send)
         case "/client-closed-before-response":
             await _client_closed_before_response(scope, recv, send)
+        case "/client-closed-after-response-start":
+            await _client_closed_after_response_start(scope, recv, send)
+        case "/client-closed-after-trailers-start":
+            await _client_closed_after_trailers_start(scope, recv, send)
         case "/controlled":
             await _controlled(scope, recv, send)
         case "/bad-app-missing-type":

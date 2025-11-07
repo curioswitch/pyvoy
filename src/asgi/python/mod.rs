@@ -586,14 +586,14 @@ impl SendCallable {
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
                     } else {
+                        // send_future will be completed with exception when dropped if needed.
                         self.closed = true;
-                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                     }
                 } else if self.send_tx.send(SendEvent::Body(body_event)).is_ok() {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
+                    // send_future will be completed with exception when dropped if needed.
                     self.closed = true;
-                    return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                 }
                 Ok(ret)
             }
