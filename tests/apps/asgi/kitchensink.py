@@ -648,7 +648,7 @@ async def _bad_app_start_instead_of_trailers(
                 send,
             )
             return
-        await send(cast("Any", {"type": "http.response.trailers", "headers": []}))
+        await send(cast("Any", {"type": "http.response.trailers"}))
     else:
         await _send_failure("No exception raised for body before start", send)
 
