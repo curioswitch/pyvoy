@@ -1,5 +1,7 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use http::{HeaderName, HeaderValue};
+use pyo3::Python;
+use pyo3::types::PyTracebackMethods as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
@@ -18,8 +20,11 @@ impl Config {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let executor = match python::Executor::new(module, attr, constants) {
             Ok(executor) => executor,
-            Err(err) => {
-                eprintln!("Failed to initialize ASGI app: {err}");
+            Err(e) => {
+                Python::attach(|py| {
+                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                    eprintln!("Failed to initialize ASGI app\n{}{}", tb, e);
+                });
                 return None;
             }
         };
