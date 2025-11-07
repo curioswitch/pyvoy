@@ -372,17 +372,10 @@ async def _exception_after_response_body(send: ASGISendCallable) -> None:
 
 
 async def _exception_after_response_complete(send: ASGISendCallable) -> None:
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [(b"content-type", b"text/plain")],
-            "trailers": False,
-        }
-    )
-    await send(
-        {"type": "http.response.body", "body": b"Hello World!!!", "more_body": False}
-    )
+    # A bit lazy, but add coverage for handling of default values in dict here
+    # instead of adding yet another test handler.
+    await send(cast("Any", {"type": "http.response.start", "status": 200}))
+    await send(cast("Any", {"type": "http.response.body", "body": b"Hello World!!!"}))
     msg = "We have failed after response complete"
     raise RuntimeError(msg)
 
@@ -408,7 +401,17 @@ async def _client_closed_before_response(
     except Exception as e:
         msg = f"Unexpected exception type: {e!s}"
         raise RuntimeError(msg) from e
+    try:
+        await _send_success(send)
+    except OSError:
+        print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
+    except Exception as e:
+        msg = f"Unexpected exception type: {e!s}"
+        raise RuntimeError(msg) from e
     print("client-closed-before-response assertions passed", file=sys.stderr)  # noqa: T201
+
+    # An escaped client disconnection error should not be logged.
+    await _send_success(send)
 
 
 async def _controlled(
@@ -645,9 +648,7 @@ async def _bad_app_start_instead_of_trailers(
                 send,
             )
             return
-        await send(
-            {"type": "http.response.trailers", "headers": [], "more_trailers": False}
-        )
+        await send(cast("Any", {"type": "http.response.trailers", "headers": []}))
     else:
         await _send_failure("No exception raised for body before start", send)
 

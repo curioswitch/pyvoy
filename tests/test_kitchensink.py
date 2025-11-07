@@ -28,7 +28,9 @@ async def _find_logs_lines(
     return found_lines, read_lines
 
 
-async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) -> None:
+async def assert_logs_contains(
+    logs: StreamReader, expected_lines: list[str]
+) -> list[str]:
     found_lines, read_lines = await asyncio.wait_for(
         _find_logs_lines(logs, expected_lines), timeout=3.0
     )
@@ -36,6 +38,7 @@ async def assert_logs_contains(logs: StreamReader, expected_lines: list[str]) ->
     assert not missing_lines, (
         f"Missing log lines: {missing_lines}\nRead lines: {''.join(read_lines)}"
     )
+    return read_lines
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -230,7 +233,6 @@ async def test_exception_after_response_complete(
 ) -> None:
     response = await client.get(f"{url_asgi}/exception-after-response-complete")
     assert response.status_code == 200, response.text
-    assert response.headers["content-type"] == "text/plain"
     assert response.content == b"Hello World!!!"
     await assert_logs_contains(
         logs_asgi,
@@ -258,13 +260,20 @@ async def test_client_closed_before_response(
             await response.aclose()
     except httpx.TimeoutException:
         pass
-    await assert_logs_contains(
+    read_lines = await assert_logs_contains(
         logs_asgi,
         [
             "send raised OSError as expected",
             "client-closed-before-response assertions passed",
         ],
     )
+    assert "Traceback (most recent call last):" not in read_lines
+    # Hard to assert this precisely but wait for a bit of time for more logs
+    # to see if the exception appears.
+    _, read_lines = await asyncio.wait_for(
+        _find_logs_lines(logs_asgi, ["not happening"]), timeout=0.5
+    )
+    assert "Traceback (most recent call last):" not in read_lines
 
 
 @pytest.mark.asyncio

@@ -466,8 +466,7 @@ impl AppFutureHandler {
 
 enum NextASGIEvent {
     Start,
-    BodyWithoutTrailers,
-    BodyWithTrailers,
+    Body { trailers: bool },
     Trailers,
     Done,
 }
@@ -527,11 +526,7 @@ impl SendCallable {
                     Some(v) => v.extract()?,
                     None => false,
                 };
-                if trailers {
-                    self.next_event = NextASGIEvent::BodyWithTrailers;
-                } else {
-                    self.next_event = NextASGIEvent::BodyWithoutTrailers;
-                };
+                self.next_event = NextASGIEvent::Body { trailers };
                 self.response_start.replace(ResponseStartEvent {
                     status,
                     headers,
@@ -539,7 +534,7 @@ impl SendCallable {
                 });
                 EmptyAwaitable::new_py(py)
             }
-            NextASGIEvent::BodyWithoutTrailers | NextASGIEvent::BodyWithTrailers => {
+            NextASGIEvent::Body { trailers } => {
                 if event_type != "http.response.body" {
                     return ErrorAwaitable::new_py(
                         py,
@@ -555,17 +550,13 @@ impl SendCallable {
                 };
                 let body: Box<[u8]> = match event.get_item(&self.constants.body)? {
                     Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
-                    _ => Box::new([]),
+                    _ => Box::default(),
                 };
                 if !more_body {
-                    match &self.next_event {
-                        NextASGIEvent::BodyWithTrailers => {
-                            self.next_event = NextASGIEvent::Trailers;
-                        }
-                        NextASGIEvent::BodyWithoutTrailers => {
-                            self.next_event = NextASGIEvent::Done;
-                        }
-                        _ => {}
+                    self.next_event = if *trailers {
+                        NextASGIEvent::Trailers
+                    } else {
+                        NextASGIEvent::Done
                     }
                 }
                 let (ret, send_future) = if more_body {
@@ -678,7 +669,7 @@ fn extract_headers_from_event<'py>(
             }
             Ok(headers)
         }
-        None => Ok(Vec::new()),
+        None => Ok(Vec::default()),
     }
 }
 
