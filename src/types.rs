@@ -316,8 +316,6 @@ pub(crate) struct Constants {
     pub head: Py<PyString>,
     /// The string "TRACE".
     pub trace: Py<PyString>,
-    /// The string "CONNECT".
-    pub connect: Py<PyString>,
     /// The string "PATCH".
     pub patch: Py<PyString>,
 
@@ -458,7 +456,6 @@ impl Constants {
             delete: PyString::new(py, "DELETE").unbind(),
             head: PyString::new(py, "HEAD").unbind(),
             trace: PyString::new(py, "TRACE").unbind(),
-            connect: PyString::new(py, "CONNECT").unbind(),
             patch: PyString::new(py, "PATCH").unbind(),
 
             raw_path: PyString::new(py, "raw_path").unbind(),
@@ -566,6 +563,8 @@ impl PyDictExt for Bound<'_, PyDict> {
             http::Method::PATCH => {
                 self.set_item(key, &constants.patch)?;
             }
+            // We don't fast-path CONNECT since it can't really be used with apps,
+            // it's for tunneling / websockets.
             _ => {
                 self.set_item(key, method.as_str())?;
             }
