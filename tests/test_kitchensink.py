@@ -376,6 +376,22 @@ async def test_asgi_bad_app_start_instead_of_trailers(
 
 
 @pytest.mark.asyncio
+async def test_asgi_bad_app_invalid_header_name(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-invalid-header-name")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_asgi_bad_app_invalid_header_value(
+    url_asgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_asgi}/bad-app-invalid-header-value")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
 async def test_standard_logs(
     url: str, client: httpx.AsyncClient, logs: StreamReader
 ) -> None:

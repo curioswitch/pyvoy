@@ -19,6 +19,25 @@ from ._bin import get_envoy_path, get_pyvoy_dir_path
 Interface = Literal["asgi", "wsgi"]
 
 
+def get_envoy_environ() -> dict[str, str]:
+    env = {
+        "PYTHONPATH": os.pathsep.join(sys.path),
+        "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
+        "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": str(get_pyvoy_dir_path()),
+    }
+
+    if os.name == "posix":
+        libpython_path = find_libpython()
+        if libpython_path:
+            if sys.platform == "darwin":
+                libpython_dir = str(Path(libpython_path).parent)
+                env["DYLD_LIBRARY_PATH"] = libpython_dir
+            else:
+                env["LD_PRELOAD"] = libpython_path
+
+    return env
+
+
 class PyvoyServer:
     _listener_address: str
     _listener_port: int
@@ -82,23 +101,7 @@ class PyvoyServer:
             print(yaml.dump(config))  # noqa: T201
             return
 
-        pythonpath = os.pathsep.join(sys.path)
-
-        env = {
-            **os.environ,
-            "PYTHONPATH": pythonpath,
-            "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
-            "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": get_pyvoy_dir_path(),
-        }
-
-        if os.name == "posix":
-            libpython_path = find_libpython()
-            if libpython_path:
-                if sys.platform == "darwin":
-                    libpython_dir = str(Path(libpython_path).parent)
-                    env["DYLD_LIBRARY_PATH"] = libpython_dir
-                else:
-                    env["LD_PRELOAD"] = libpython_path
+        env = {**os.environ, **get_envoy_environ()}
 
         with NamedTemporaryFile("r") as admin_address_file:
             self._process = await asyncio.create_subprocess_exec(

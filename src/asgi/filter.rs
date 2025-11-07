@@ -22,8 +22,11 @@ impl Config {
             Ok(executor) => executor,
             Err(e) => {
                 Python::attach(|py| {
-                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-                    eprintln!("Failed to initialize ASGI app\n{}{}", tb, e);
+                    let tb = e
+                        .traceback(py)
+                        .and_then(|tb| tb.format().ok())
+                        .unwrap_or_default();
+                    envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
                 });
                 return None;
             }
