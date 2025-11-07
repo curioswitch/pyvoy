@@ -1,16 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import sys
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    # We don't use asgiref code so only import from it for type checking
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
-else:
-    ASGIReceiveCallable = "asgiref.typing.ASGIReceiveCallable"
-    ASGISendCallable = "asgiref.typing.ASGISendCallable"
-    HTTPScope = "asgiref.typing.HTTPScope"
-    Scope = "asgiref.typing.Scope"
 
 
 async def _send_failure(msg: str, send: ASGISendCallable) -> None:
@@ -39,7 +35,7 @@ V = TypeVar("V")
 
 
 async def _assert_dict_value(
-    actual: "dict[str, V] | HTTPScope", key: str, expected: V, send: ASGISendCallable
+    actual: dict[str, V] | HTTPScope, key: str, expected: V, send: ASGISendCallable
 ) -> None:
     obj = "scope" if actual.get("type") == "http" else "headers"
     if key not in actual:

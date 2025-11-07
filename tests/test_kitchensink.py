@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 import subprocess
 from asyncio import StreamReader
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 import pytest_asyncio
 
 from pyvoy import Interface, PyvoyServer
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 async def _find_logs_lines(
