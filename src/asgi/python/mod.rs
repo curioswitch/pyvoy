@@ -655,12 +655,10 @@ fn extract_headers_from_event<'py>(
                 let key_bytes = key_item.cast::<PyBytes>()?;
                 let value_bytes = value_item.cast::<PyBytes>()?;
                 headers.push((
-                    HeaderName::from_bytes(key_bytes.as_bytes()).map_err(|e| {
-                        PyValueError::new_err(format!("invalid header name: {}", e))
-                    })?,
-                    HeaderValue::from_bytes(value_bytes.as_bytes()).map_err(|e| {
-                        PyValueError::new_err(format!("invalid header value: {}", e))
-                    })?,
+                    HeaderName::from_bytes(key_bytes.as_bytes())
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?,
+                    HeaderValue::from_bytes(value_bytes.as_bytes())
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?,
                 ));
             }
             Ok(headers)

@@ -23,7 +23,8 @@ fn init() -> bool {
     });
 
     if let Err(e) = init_result {
-        eprintln!("Python runtime initialization failed: {}", e);
+        // Shouldn't happen in practice.
+        envoy_log_error!("Python runtime initialization failed: {}", e);
         return false;
     }
 
@@ -39,14 +40,18 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     {
         Ok(conf) => conf,
         Err(e) => {
-            eprintln!("pyvoy: failed to parse filter config YAML: {}", e);
+            envoy_log_error!("Failed to parse filter config YAML: {}", e);
             return None;
         }
     };
+    if filter_config.is_empty() {
+        envoy_log_error!("Filter config is empty");
+        return None;
+    }
     let filter_config = &filter_config[0];
 
     let Some(app) = filter_config["app"].as_str() else {
-        eprintln!("pyvoy: config missing required 'app' field");
+        envoy_log_error!("Filter config missing required 'app' field");
         return None;
     };
     let interface = filter_config["interface"].as_str().unwrap_or("asgi");
@@ -59,7 +64,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
         "wsgi" => wsgi::filter::Config::new(app, constants)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
-            eprintln!("pyvoy: unsupported interface: {}", interface);
+            envoy_log_error!("Unsupported python interface: {}", interface);
             None
         }
     }

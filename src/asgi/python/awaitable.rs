@@ -45,6 +45,7 @@ impl ValueAwaitable {
         if let Some(value) = self.value.take() {
             Err(PyStopIteration::new_err(value))
         } else {
+            // Shouldn't happen in practice.
             Err(PyStopIteration::new_err(()))
         }
     }

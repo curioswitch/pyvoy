@@ -718,6 +718,48 @@ async def _bad_app_start_instead_of_trailers(
         await _send_failure("No exception raised for body before start", send)
 
 
+async def _bad_app_invalid_header_name(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"\x00\x01\x02", b"text/plain")],
+                "trailers": False,
+            }
+        )
+    except ValueError as e:
+        if str(e) != "invalid HTTP header name":
+            await _send_failure(f'{e!s} != "invalid HTTP header name"', send)
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for invalid header name", send)
+
+
+async def _bad_app_invalid_header_value(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"\x00\x01\x02")],
+                "trailers": False,
+            }
+        )
+    except ValueError as e:
+        if str(e) != "failed to parse header value":
+            await _send_failure(f'{e!s} != "failed to parse header value"', send)
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for invalid header value", send)
+
+
 async def _print_logs(
     _scope: HTTPScope, _recv: ASGIReceiveCallable, _send: ASGISendCallable
 ) -> None:
@@ -994,6 +1036,10 @@ async def app(
             await _bad_app_body_after_complete(scope, recv, send)
         case "/bad-app-start-instead-of-trailers":
             await _bad_app_start_instead_of_trailers(scope, recv, send)
+        case "/bad-app-invalid-header-name":
+            await _bad_app_invalid_header_name(scope, recv, send)
+        case "/bad-app-invalid-header-value":
+            await _bad_app_invalid_header_value(scope, recv, send)
         case "/print-logs":
             await _print_logs(scope, recv, send)
         case "/all-the-headers":
