@@ -250,7 +250,9 @@ async def test_exception_after_response_complete(
 async def test_client_closed_before_response(
     url_asgi: str, logs_asgi: StreamReader, content: bytes
 ) -> None:
-    try:
+    # httpx seems to response.aclose() until there are response headers, so
+    # we use a timeout instead.
+    with pytest.raises(httpx.TimeoutException):
         async with (
             httpx.AsyncClient(timeout=0.1) as client,
             client.stream(
@@ -258,8 +260,6 @@ async def test_client_closed_before_response(
             ) as response,
         ):
             await response.aclose()
-    except httpx.TimeoutException:
-        pass
     read_lines = await assert_logs_contains(
         logs_asgi,
         [
@@ -274,6 +274,45 @@ async def test_client_closed_before_response(
         _find_logs_lines(logs_asgi, ["not happening"]), timeout=0.5
     )
     assert "Traceback (most recent call last):" not in read_lines
+
+
+@pytest.mark.asyncio
+async def test_client_closed_after_response_start(
+    url_asgi: str, client: httpx.AsyncClient, logs_asgi: StreamReader
+) -> None:
+    try:
+        async with client.stream(
+            "GET", f"{url_asgi}/client-closed-after-response-start"
+        ) as response:
+            await response.aclose()
+    except httpx.TimeoutException:
+        pass
+    await assert_logs_contains(
+        logs_asgi,
+        [
+            "send raised OSError as expected",
+            "client-closed-after-response-start assertions passed",
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_client_closed_after_trailers_start(
+    url_asgi: str, client: httpx.AsyncClient, logs_asgi: StreamReader
+) -> None:
+    async with client.stream(
+        "GET",
+        f"{url_asgi}/client-closed-after-trailers-start",
+        headers={"te": "trailers"},
+    ) as response:
+        await response.aclose()
+    await assert_logs_contains(
+        logs_asgi,
+        [
+            "send raised OSError as expected",
+            "client-closed-after-trailers-start assertions passed",
+        ],
+    )
 
 
 @pytest.mark.asyncio
