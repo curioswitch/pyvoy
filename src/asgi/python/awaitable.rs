@@ -17,10 +17,6 @@ impl EmptyAwaitable {
         slf
     }
 
-    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
     fn __next__(&self) -> Option<()> {
         None
     }
@@ -42,10 +38,6 @@ impl ValueAwaitable {
 #[pymethods]
 impl ValueAwaitable {
     fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
         slf
     }
 
@@ -74,10 +66,6 @@ impl ErrorAwaitable {
 #[pymethods]
 impl ErrorAwaitable {
     fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        slf
-    }
-
-    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
         slf
     }
 
