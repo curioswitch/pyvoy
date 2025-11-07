@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 # Because there aren't any Python HTTP clients that support HTTP/2 fully,
 # we have tests written in Go for exercising advanced functionality.
 # Go must be installed to run these tests.
-
 import subprocess
 from pathlib import Path
 

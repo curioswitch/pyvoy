@@ -1,19 +1,18 @@
+from __future__ import annotations
+
 import sys
 import time
-from collections.abc import Iterable
 from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     if sys.version_info >= (3, 11):
         from wsgiref.types import InputStream as WSGIInputStream
         from wsgiref.types import StartResponse, WSGIEnvironment
     else:
         from _typeshed.wsgi import InputStream as WSGIInputStream
         from _typeshed.wsgi import StartResponse, WSGIEnvironment
-else:
-    StartResponse = "wsgiref.types.StartResponse"
-    WSGIEnvironment = "wsgiref.types.WSGIEnvironment"
-    WSGIInputStream = "wsgiref.types.InputStream"
 
 
 def _failure(msg: str, start_response: StartResponse) -> Iterable[bytes]:
@@ -465,6 +464,30 @@ def _all_the_headers(
     return _success(start_response)
 
 
+def _nihongo(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    # Can't actually get raw path in WSGI
+    return _success(start_response)
+
+
+def _echo_scope(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response(
+        "200 OK",
+        [
+            ("x-scope-method", environ["REQUEST_METHOD"]),
+            ("x-scope-scheme", environ.get("wsgi.url_scheme", "")),
+            ("x-scope-query", environ.get("QUERY_STRING", "")),
+            ("x-scope-content-length", environ.get("CONTENT_LENGTH", "")),
+            ("x-scope-content-type", environ.get("CONTENT_TYPE", "")),
+            ("x-scope-http-version", environ.get("SERVER_PROTOCOL", "")),
+        ],
+    )
+    return [b"Ok"]
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -491,5 +514,9 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _print_logs(environ, start_response)
         case "/all-the-headers":
             return _all_the_headers(environ, start_response)
+        case "/日本語":
+            return _nihongo(environ, start_response)
+        case "/echo-scope":
+            return _echo_scope(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

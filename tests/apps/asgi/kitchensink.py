@@ -1,16 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import sys
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    # We don't use asgiref code so only import from it for type checking
-    from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope, Scope
-else:
-    ASGIReceiveCallable = "asgiref.typing.ASGIReceiveCallable"
-    ASGISendCallable = "asgiref.typing.ASGISendCallable"
-    HTTPScope = "asgiref.typing.HTTPScope"
-    Scope = "asgiref.typing.Scope"
+    from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
 
 
 async def _send_failure(msg: str, send: ASGISendCallable) -> None:
@@ -35,20 +31,32 @@ class AssertionFailed(Exception):
     pass
 
 
-K = TypeVar("K")
 V = TypeVar("V")
 
 
 async def _assert_dict_value(
-    actual: dict[K, V], key: K, expected: V, send: ASGISendCallable
+    actual: dict[str, V] | HTTPScope, key: str, expected: V, send: ASGISendCallable
 ) -> None:
+    obj = "scope" if actual.get("type") == "http" else "headers"
     if key not in actual:
-        await _send_failure(f"Key {key!r} not found in headers", send)
+        await _send_failure(f'{obj}["{key}"] not found', send)
         raise AssertionFailed
     if actual[key] != expected:
-        await _send_failure(
-            f"Value for key {key!r} is {actual[key]!r}, expected {expected!r}", send
-        )
+        await _send_failure(f'{obj}["{key}"] != {expected!r}, is {actual[key]!r}', send)
+        raise AssertionFailed
+
+
+async def _assert_scope_address(
+    address: tuple[str, int | None] | None, key: str, send: ASGISendCallable
+) -> None:
+    if address is None:
+        await _send_failure(f'scope["{key}"] is None', send)
+        raise AssertionFailed
+    host, port = address
+    if host != "127.0.0.1":
+        await _send_failure(f'scope["{key}"][0] != "127.0.0.1", is {host!r}', send)
+    if port is None or port <= 0:
+        await _send_failure(f'scope["{key}"][1] <= 0, is {port!r}', send)
         raise AssertionFailed
 
 
@@ -67,30 +75,41 @@ async def _send_success(send: ASGISendCallable) -> None:
 async def _headers_only(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
-    if scope["method"] != "GET":
-        await _send_failure('scope["method"] != "GET"', send)
-        return
+    try:
+        await _assert_dict_value(scope, "type", "http", send)
+        await _assert_dict_value(
+            cast("dict[str, str]", scope["asgi"]), "version", "3.0", send
+        )
+        await _assert_dict_value(
+            cast("dict[str, str]", scope["asgi"]), "spec_version", "2.5", send
+        )
+        await _assert_dict_value(scope, "http_version", "1.1", send)
+        await _assert_dict_value(scope, "method", "GET", send)
+        await _assert_dict_value(scope, "scheme", "http", send)
+        await _assert_dict_value(scope, "path", "/headers-only", send)
+        await _assert_dict_value(scope, "raw_path", b"/headers-only", send)
+        await _assert_dict_value(scope, "query_string", b"", send)
+        await _assert_dict_value(scope, "root_path", "", send)
+        await _assert_scope_address(scope.get("client"), "client", send)
+        await _assert_scope_address(scope.get("server"), "server", send)
+    except AssertionFailed:
+        return None
 
     headers = defaultdict(list)
     for name, value in scope.get("headers", []):
         headers[name].append(value)
     if headers.get(b"accept") != [b"text/plain"]:
-        await _send_failure('headers.get(b"accept") != [b"text/plain"]', send)
-        return
+        return await _send_failure('headers.get(b"accept") != [b"text/plain"]', send)
     if headers.get(b"multiple") != [b"v1", b"v2"]:
-        await _send_failure('headers.get(b"multiple") != [b"v1", b"v2"]', send)
-        return
+        return await _send_failure('headers.get(b"multiple") != [b"v1", b"v2"]', send)
 
     msg = await recv()
     if msg["type"] != "http.request":
-        await _send_failure('msg["type"] != "http.request"', send)
-        return
+        return await _send_failure('msg["type"] != "http.request"', send)
     if msg.get("body", b"") != b"":
-        await _send_failure('msg.get("body", b"") != b""', send)
-        return
+        return await _send_failure('msg.get("body", b"") != b""', send)
     if msg.get("more_body", False):
-        await _send_failure('msg.get("more_body", False)', send)
-        return
+        return await _send_failure('msg.get("more_body", False)', send)
 
     await send(
         {
@@ -101,6 +120,7 @@ async def _headers_only(
         }
     )
     await send({"type": "http.response.body", "body": b"", "more_body": False})
+    return None
 
 
 async def _request_body(
@@ -709,196 +729,221 @@ async def _print_logs(
 async def _all_the_headers(
     scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
-    headers: dict[bytes, list[bytes]] = defaultdict(list)
+    headers: dict[str, list[str]] = defaultdict(list)
     for name, value in scope["headers"]:
-        headers[name].append(value)
+        headers[name.decode()].append(value.decode())
 
     try:
-        await _assert_dict_value(headers, b"accept", [b"accept"], send)
-        await _assert_dict_value(headers, b"accept-charset", [b"accept-charset"], send)
-        await _assert_dict_value(
-            headers, b"accept-encoding", [b"accept-encoding"], send
-        )
-        await _assert_dict_value(
-            headers, b"accept-language", [b"accept-language"], send
-        )
-        await _assert_dict_value(headers, b"accept-ranges", [b"accept-ranges"], send)
+        await _assert_dict_value(headers, "accept", ["accept"], send)
+        await _assert_dict_value(headers, "accept-charset", ["accept-charset"], send)
+        await _assert_dict_value(headers, "accept-encoding", ["accept-encoding"], send)
+        await _assert_dict_value(headers, "accept-language", ["accept-language"], send)
+        await _assert_dict_value(headers, "accept-ranges", ["accept-ranges"], send)
         await _assert_dict_value(
             headers,
-            b"access-control-allow-credentials",
-            [b"access-control-allow-credentials"],
+            "access-control-allow-credentials",
+            ["access-control-allow-credentials"],
             send,
         )
         await _assert_dict_value(
             headers,
-            b"access-control-allow-headers",
-            [b"access-control-allow-headers"],
+            "access-control-allow-headers",
+            ["access-control-allow-headers"],
             send,
         )
         await _assert_dict_value(
             headers,
-            b"access-control-allow-methods",
-            [b"access-control-allow-methods"],
+            "access-control-allow-methods",
+            ["access-control-allow-methods"],
             send,
         )
         await _assert_dict_value(
             headers,
-            b"access-control-allow-origin",
-            [b"access-control-allow-origin"],
+            "access-control-allow-origin",
+            ["access-control-allow-origin"],
             send,
         )
         await _assert_dict_value(
             headers,
-            b"access-control-expose-headers",
-            [b"access-control-expose-headers"],
+            "access-control-expose-headers",
+            ["access-control-expose-headers"],
             send,
         )
         await _assert_dict_value(
-            headers, b"access-control-max-age", [b"access-control-max-age"], send
+            headers, "access-control-max-age", ["access-control-max-age"], send
         )
         await _assert_dict_value(
             headers,
-            b"access-control-request-headers",
-            [b"access-control-request-headers"],
+            "access-control-request-headers",
+            ["access-control-request-headers"],
             send,
         )
         await _assert_dict_value(
             headers,
-            b"access-control-request-method",
-            [b"access-control-request-method"],
+            "access-control-request-method",
+            ["access-control-request-method"],
             send,
         )
-        await _assert_dict_value(headers, b"age", [b"age"], send)
-        await _assert_dict_value(headers, b"allow", [b"allow"], send)
-        await _assert_dict_value(headers, b"alt-svc", [b"alt-svc"], send)
-        await _assert_dict_value(headers, b"authorization", [b"authorization"], send)
-        await _assert_dict_value(headers, b"cache-control", [b"cache-control"], send)
-        await _assert_dict_value(headers, b"cache-status", [b"cache-status"], send)
+        await _assert_dict_value(headers, "age", ["age"], send)
+        await _assert_dict_value(headers, "allow", ["allow"], send)
+        await _assert_dict_value(headers, "alt-svc", ["alt-svc"], send)
+        await _assert_dict_value(headers, "authorization", ["authorization"], send)
+        await _assert_dict_value(headers, "cache-control", ["cache-control"], send)
+        await _assert_dict_value(headers, "cache-status", ["cache-status"], send)
         await _assert_dict_value(
-            headers, b"cdn-cache-control", [b"cdn-cache-control"], send
+            headers, "cdn-cache-control", ["cdn-cache-control"], send
         )
         # Skip connection
         await _assert_dict_value(
-            headers, b"content-disposition", [b"content-disposition"], send
+            headers, "content-disposition", ["content-disposition"], send
         )
         await _assert_dict_value(
-            headers, b"content-encoding", [b"content-encoding"], send
+            headers, "content-encoding", ["content-encoding"], send
         )
         await _assert_dict_value(
-            headers, b"content-language", [b"content-language"], send
+            headers, "content-language", ["content-language"], send
         )
         # Skip content-length
         await _assert_dict_value(
-            headers, b"content-location", [b"content-location"], send
+            headers, "content-location", ["content-location"], send
         )
-        await _assert_dict_value(headers, b"content-range", [b"content-range"], send)
+        await _assert_dict_value(headers, "content-range", ["content-range"], send)
         await _assert_dict_value(
-            headers, b"content-security-policy", [b"content-security-policy"], send
+            headers, "content-security-policy", ["content-security-policy"], send
         )
         await _assert_dict_value(
             headers,
-            b"content-security-policy-report-only",
-            [b"content-security-policy-report-only"],
+            "content-security-policy-report-only",
+            ["content-security-policy-report-only"],
             send,
         )
-        await _assert_dict_value(headers, b"content-type", [b"content-type"], send)
-        await _assert_dict_value(headers, b"cookie", [b"cookie"], send)
-        await _assert_dict_value(headers, b"dnt", [b"dnt"], send)
-        await _assert_dict_value(headers, b"date", [b"date"], send)
-        await _assert_dict_value(headers, b"etag", [b"etag"], send)
-        await _assert_dict_value(headers, b"expect", [b"expect"], send)
-        await _assert_dict_value(headers, b"expires", [b"expires"], send)
-        await _assert_dict_value(headers, b"forwarded", [b"forwarded"], send)
-        await _assert_dict_value(headers, b"from", [b"from"], send)
+        await _assert_dict_value(headers, "content-type", ["content-type"], send)
+        await _assert_dict_value(headers, "cookie", ["cookie"], send)
+        await _assert_dict_value(headers, "dnt", ["dnt"], send)
+        await _assert_dict_value(headers, "date", ["date"], send)
+        await _assert_dict_value(headers, "etag", ["etag"], send)
+        await _assert_dict_value(headers, "expect", ["expect"], send)
+        await _assert_dict_value(headers, "expires", ["expires"], send)
+        await _assert_dict_value(headers, "forwarded", ["forwarded"], send)
+        await _assert_dict_value(headers, "from", ["from"], send)
         # Skip host
-        await _assert_dict_value(headers, b"if-match", [b"if-match"], send)
+        await _assert_dict_value(headers, "if-match", ["if-match"], send)
         await _assert_dict_value(
-            headers, b"if-modified-since", [b"if-modified-since"], send
+            headers, "if-modified-since", ["if-modified-since"], send
         )
-        await _assert_dict_value(headers, b"if-none-match", [b"if-none-match"], send)
-        await _assert_dict_value(headers, b"if-range", [b"if-range"], send)
+        await _assert_dict_value(headers, "if-none-match", ["if-none-match"], send)
+        await _assert_dict_value(headers, "if-range", ["if-range"], send)
         await _assert_dict_value(
-            headers, b"if-unmodified-since", [b"if-unmodified-since"], send
+            headers, "if-unmodified-since", ["if-unmodified-since"], send
         )
-        await _assert_dict_value(headers, b"last-modified", [b"last-modified"], send)
-        await _assert_dict_value(headers, b"link", [b"link"], send)
-        await _assert_dict_value(headers, b"location", [b"location"], send)
-        await _assert_dict_value(headers, b"max-forwards", [b"max-forwards"], send)
-        await _assert_dict_value(headers, b"origin", [b"origin"], send)
-        await _assert_dict_value(headers, b"pragma", [b"pragma"], send)
+        await _assert_dict_value(headers, "last-modified", ["last-modified"], send)
+        await _assert_dict_value(headers, "link", ["link"], send)
+        await _assert_dict_value(headers, "location", ["location"], send)
+        await _assert_dict_value(headers, "max-forwards", ["max-forwards"], send)
+        await _assert_dict_value(headers, "origin", ["origin"], send)
+        await _assert_dict_value(headers, "pragma", ["pragma"], send)
         await _assert_dict_value(
-            headers, b"proxy-authenticate", [b"proxy-authenticate"], send
-        )
-        await _assert_dict_value(
-            headers, b"proxy-authorization", [b"proxy-authorization"], send
+            headers, "proxy-authenticate", ["proxy-authenticate"], send
         )
         await _assert_dict_value(
-            headers, b"public-key-pins", [b"public-key-pins"], send
+            headers, "proxy-authorization", ["proxy-authorization"], send
         )
+        await _assert_dict_value(headers, "public-key-pins", ["public-key-pins"], send)
         await _assert_dict_value(
             headers,
-            b"public-key-pins-report-only",
-            [b"public-key-pins-report-only"],
+            "public-key-pins-report-only",
+            ["public-key-pins-report-only"],
             send,
         )
-        await _assert_dict_value(headers, b"range", [b"range"], send)
-        await _assert_dict_value(headers, b"referer", [b"referer"], send)
+        await _assert_dict_value(headers, "range", ["range"], send)
+        await _assert_dict_value(headers, "referer", ["referer"], send)
+        await _assert_dict_value(headers, "referrer-policy", ["referrer-policy"], send)
+        await _assert_dict_value(headers, "refresh", ["refresh"], send)
+        await _assert_dict_value(headers, "retry-after", ["retry-after"], send)
         await _assert_dict_value(
-            headers, b"referrer-policy", [b"referrer-policy"], send
-        )
-        await _assert_dict_value(headers, b"refresh", [b"refresh"], send)
-        await _assert_dict_value(headers, b"retry-after", [b"retry-after"], send)
-        await _assert_dict_value(
-            headers, b"sec-websocket-accept", [b"sec-websocket-accept"], send
+            headers, "sec-websocket-accept", ["sec-websocket-accept"], send
         )
         await _assert_dict_value(
-            headers, b"sec-websocket-extensions", [b"sec-websocket-extensions"], send
+            headers, "sec-websocket-extensions", ["sec-websocket-extensions"], send
         )
         await _assert_dict_value(
-            headers, b"sec-websocket-key", [b"sec-websocket-key"], send
+            headers, "sec-websocket-key", ["sec-websocket-key"], send
         )
         await _assert_dict_value(
-            headers, b"sec-websocket-protocol", [b"sec-websocket-protocol"], send
+            headers, "sec-websocket-protocol", ["sec-websocket-protocol"], send
         )
         await _assert_dict_value(
-            headers, b"sec-websocket-version", [b"sec-websocket-version"], send
+            headers, "sec-websocket-version", ["sec-websocket-version"], send
         )
-        await _assert_dict_value(headers, b"server", [b"server"], send)
-        await _assert_dict_value(headers, b"set-cookie", [b"set-cookie"], send)
+        await _assert_dict_value(headers, "server", ["server"], send)
+        await _assert_dict_value(headers, "set-cookie", ["set-cookie"], send)
         await _assert_dict_value(
-            headers, b"strict-transport-security", [b"strict-transport-security"], send
+            headers, "strict-transport-security", ["strict-transport-security"], send
         )
         # Skip te
-        await _assert_dict_value(headers, b"trailer", [b"trailer"], send)
+        await _assert_dict_value(headers, "trailer", ["trailer"], send)
         # Skip transfer-encoding
-        await _assert_dict_value(headers, b"user-agent", [b"user-agent"], send)
+        await _assert_dict_value(headers, "user-agent", ["user-agent"], send)
         # Skip upgrade
         await _assert_dict_value(
-            headers, b"upgrade-insecure-requests", [b"upgrade-insecure-requests"], send
+            headers, "upgrade-insecure-requests", ["upgrade-insecure-requests"], send
         )
-        await _assert_dict_value(headers, b"vary", [b"vary"], send)
-        await _assert_dict_value(headers, b"via", [b"via"], send)
-        await _assert_dict_value(headers, b"warning", [b"warning"], send)
+        await _assert_dict_value(headers, "vary", ["vary"], send)
+        await _assert_dict_value(headers, "via", ["via"], send)
+        await _assert_dict_value(headers, "warning", ["warning"], send)
         await _assert_dict_value(
-            headers, b"www-authenticate", [b"www-authenticate"], send
-        )
-        await _assert_dict_value(
-            headers, b"x-content-type-options", [b"x-content-type-options"], send
+            headers, "www-authenticate", ["www-authenticate"], send
         )
         await _assert_dict_value(
-            headers, b"x-dns-prefetch-control", [b"x-dns-prefetch-control"], send
+            headers, "x-content-type-options", ["x-content-type-options"], send
         )
         await _assert_dict_value(
-            headers, b"x-frame-options", [b"x-frame-options"], send
+            headers, "x-dns-prefetch-control", ["x-dns-prefetch-control"], send
         )
+        await _assert_dict_value(headers, "x-frame-options", ["x-frame-options"], send)
         await _assert_dict_value(
-            headers, b"x-xss-protection", [b"x-xss-protection"], send
+            headers, "x-xss-protection", ["x-xss-protection"], send
         )
-        await _assert_dict_value(headers, b"x-pyvoy", [b"x-pyvoy", b"x-pyvoy-2"], send)
+        await _assert_dict_value(headers, "x-pyvoy", ["x-pyvoy", "x-pyvoy-2"], send)
     except AssertionFailed:
         return
 
     await _send_success(send)
+
+
+async def _nihongo(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        await _assert_dict_value(
+            _scope, "raw_path", b"/%E6%97%A5%E6%9C%AC%E8%AA%9E", send
+        )
+    except AssertionFailed:
+        return
+
+    await _send_success(send)
+
+
+async def _echo_scope(
+    scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    headers = dict(scope["headers"])
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"x-scope-method", scope["method"].encode()),
+                (b"x-scope-scheme", scope["scheme"].encode()),
+                (b"x-scope-query", scope["query_string"]),
+                (b"x-scope-content-length", headers.get(b"content-length", b"")),
+                (b"x-scope-content-type", headers.get(b"content-type", b"")),
+                (b"x-scope-http-version", scope["http_version"].encode()),
+            ],
+            "trailers": False,
+        }
+    )
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
 async def app(
@@ -953,5 +998,9 @@ async def app(
             await _print_logs(scope, recv, send)
         case "/all-the-headers":
             await _all_the_headers(scope, recv, send)
+        case "/日本語":
+            await _nihongo(scope, recv, send)
+        case "/echo-scope":
+            await _echo_scope(scope, recv, send)
         case _:
             await _send_failure("unknown path", send)
