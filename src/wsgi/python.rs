@@ -63,7 +63,7 @@ impl PyExecutor {
                 environ.set_http_method(&constants, &constants.request_method, &scope.method)?;
 
                 // TODO: support root_path etc
-                environ.set_item(&constants.script_name, "")?;
+                environ.set_item(&constants.script_name, &constants.empty_string)?;
                 environ.set_item(
                     &constants.path_info,
                     PyString::from_bytes(py, &scope.raw_path)?,
@@ -86,9 +86,6 @@ impl PyExecutor {
                             PyString::from_bytes(py, value.as_bytes())?,
                         )?,
                         _ => {
-                            if key.as_str().as_bytes()[0] == b':' {
-                                continue;
-                            }
                             let key_str = key.as_str().to_uppercase().replace("-", "_");
                             let header_name = format!("HTTP_{}", key_str);
                             if let Some(existing) = environ.get_item(&header_name)? {
