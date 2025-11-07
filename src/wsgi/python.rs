@@ -64,13 +64,14 @@ impl PyExecutor {
 
                 // TODO: support root_path etc
                 environ.set_item(&constants.script_name, &constants.empty_string)?;
+                let decoded_path = urlencoding::decode_binary(&scope.raw_path);
                 environ.set_item(
                     &constants.path_info,
-                    PyString::from_bytes(py, &scope.raw_path)?,
+                    PyString::from_bytes(py, &decoded_path)?,
                 )?;
                 if !scope.query_string.is_empty() {
                     environ.set_item(
-                        &constants.query_string,
+                        &constants.wsgi_query_string,
                         PyString::from_bytes(py, &scope.query_string)?,
                     )?;
                 }
@@ -112,11 +113,7 @@ impl PyExecutor {
                     environ.set_item(&constants.server_port, "0")?;
                 }
 
-                environ.set_http_version(
-                    &constants,
-                    &constants.server_protocol,
-                    &scope.http_version,
-                )?;
+                environ.set_http_version_wsgi(&constants, &scope.http_version)?;
 
                 environ.set_item(&constants.wsgi_version, (1, 0))?;
                 environ.set_http_scheme(&constants, &constants.wsgi_url_scheme, &scope.scheme)?;

@@ -473,3 +473,57 @@ async def test_all_the_headers(url: str, client: httpx.AsyncClient) -> None:
     ]
     response = await client.get(f"{url}/all-the-headers", headers=headers)
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_nihongo(url: str, client: httpx.AsyncClient) -> None:
+    response = await client.get(f"{url}/日本語")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_scope_content(url: str, client: httpx.AsyncClient) -> None:
+    response = await client.post(
+        f"{url}/echo-scope", content=b"Hello", headers={"content-type": "text/plain"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scope-content-length"] == "5"
+    assert response.headers["x-scope-content-type"] == "text/plain"
+
+
+@pytest.mark.asyncio
+async def test_scope_query(url: str, client: httpx.AsyncClient) -> None:
+    response = await client.get(f"{url}/echo-scope?message=hello&lang=英語")
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scope-query"] == "message=hello&lang=%E8%8B%B1%E8%AA%9E"
+
+
+@pytest.mark.asyncio
+# Skip CONNECT since it's only for websockets
+@pytest.mark.parametrize(
+    "method", ["OPTIONS", "GET", "POST", "PUT", "DELETE", "HEAD", "TRACE", "PATCH"]
+)
+async def test_scope_http_method(
+    url: str, client: httpx.AsyncClient, method: str
+) -> None:
+    response = await client.request(method, f"{url}/echo-scope")
+    assert response.status_code == 200, response.text
+    assert response.headers["x-scope-method"] == method
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("http2", [False, True])
+async def test_scope_http_version(url: str, http2: bool, interface: Interface) -> None:
+    async with httpx.AsyncClient(http2=http2, http1=not http2) as client:
+        response = await client.get(f"{url}/echo-scope")
+    assert response.status_code == 200, response.text
+    match http2, interface:
+        case True, "asgi":
+            expected = "2"
+        case False, "asgi":
+            expected = "1.1"
+        case True, "wsgi":
+            expected = "HTTP/2"
+        case False, "wsgi":
+            expected = "HTTP/1.1"
+    assert response.headers["x-scope-http-version"] == expected

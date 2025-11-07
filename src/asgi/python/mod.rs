@@ -92,7 +92,7 @@ impl Executor {
             let app = module.getattr(app_attr)?;
             let asgi = PyDict::new(py);
             asgi.set_item("version", "3.0")?;
-            asgi.set_item("spec_version", "2.2")?;
+            asgi.set_item("spec_version", "2.5")?;
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
             Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind()))
@@ -225,11 +225,7 @@ impl ExecutorInner {
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
         scope_dict.set_item(&self.constants.asgi, &self.asgi)?;
         scope_dict.set_item(&self.constants.extensions, &self.extensions)?;
-        scope_dict.set_http_version(
-            &self.constants,
-            &self.constants.http_version,
-            &scope.http_version,
-        )?;
+        scope_dict.set_http_version(&self.constants, &scope.http_version)?;
         scope_dict.set_http_method(&self.constants, &self.constants.method, &scope.method)?;
         scope_dict.set_http_scheme(&self.constants, &self.constants.scheme, &scope.scheme)?;
         let decoded_path = urlencoding::decode_binary(&scope.raw_path);

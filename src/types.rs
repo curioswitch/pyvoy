@@ -395,6 +395,8 @@ pub(crate) struct Constants {
     pub content_type: Py<PyString>,
     /// The string "CONTENT_LENGTH".
     pub content_length: Py<PyString>,
+    /// The string "QUERY_STRING".
+    pub wsgi_query_string: Py<PyString>,
     /// The string "SERVER_NAME".
     pub server_name: Py<PyString>,
     /// The string "SERVER_PORT".
@@ -413,6 +415,14 @@ pub(crate) struct Constants {
     pub wsgi_multiprocess: Py<PyString>,
     /// The string "wsgi.run_once".
     pub wsgi_run_once: Py<PyString>,
+    /// The string "HTTP/1.0".
+    pub wsgi_http_10: Py<PyString>,
+    /// The string "HTTP/1.1".
+    pub wsgi_http_11: Py<PyString>,
+    /// The string "HTTP/2".
+    pub wsgi_http_2: Py<PyString>,
+    /// The string "HTTP/3".
+    pub wsgi_http_3: Py<PyString>,
 
     // Misc
     /// The string "close".
@@ -481,6 +491,7 @@ impl Constants {
             path_info: PyString::new(py, "PATH_INFO").unbind(),
             content_type: PyString::new(py, "CONTENT_TYPE").unbind(),
             content_length: PyString::new(py, "CONTENT_LENGTH").unbind(),
+            wsgi_query_string: PyString::new(py, "QUERY_STRING").unbind(),
             server_name: PyString::new(py, "SERVER_NAME").unbind(),
             server_port: PyString::new(py, "SERVER_PORT").unbind(),
             server_protocol: PyString::new(py, "SERVER_PROTOCOL").unbind(),
@@ -490,6 +501,10 @@ impl Constants {
             wsgi_multithread: PyString::new(py, "wsgi.multithread").unbind(),
             wsgi_multiprocess: PyString::new(py, "wsgi.multiprocess").unbind(),
             wsgi_run_once: PyString::new(py, "wsgi.run_once").unbind(),
+            wsgi_http_10: PyString::new(py, "HTTP/1.0").unbind(),
+            wsgi_http_11: PyString::new(py, "HTTP/1.1").unbind(),
+            wsgi_http_2: PyString::new(py, "HTTP/2").unbind(),
+            wsgi_http_3: PyString::new(py, "HTTP/3").unbind(),
 
             close: PyString::new(py, "close").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
@@ -513,12 +528,10 @@ pub(crate) trait PyDictExt {
         scheme: &uri::Scheme,
     ) -> PyResult<()>;
 
-    fn set_http_version(
-        &self,
-        constants: &Constants,
-        key: &Py<PyString>,
-        version: &http::Version,
-    ) -> PyResult<()>;
+    fn set_http_version(&self, constants: &Constants, version: &http::Version) -> PyResult<()>;
+
+    fn set_http_version_wsgi(&self, constants: &Constants, version: &http::Version)
+    -> PyResult<()>;
 }
 
 impl PyDictExt for Bound<'_, PyDict> {
@@ -550,9 +563,6 @@ impl PyDictExt for Bound<'_, PyDict> {
             http::Method::TRACE => {
                 self.set_item(key, &constants.trace)?;
             }
-            http::Method::CONNECT => {
-                self.set_item(key, &constants.connect)?;
-            }
             http::Method::PATCH => {
                 self.set_item(key, &constants.patch)?;
             }
@@ -579,20 +589,33 @@ impl PyDictExt for Bound<'_, PyDict> {
         Ok(())
     }
 
-    fn set_http_version(
-        &self,
-        constants: &Constants,
-        key: &Py<PyString>,
-        version: &http::Version,
-    ) -> PyResult<()> {
+    fn set_http_version(&self, constants: &Constants, version: &http::Version) -> PyResult<()> {
         self.set_item(
-            key,
+            &constants.http_version,
             match *version {
                 http::Version::HTTP_10 => &constants.http_10,
                 http::Version::HTTP_11 => &constants.http_11,
                 http::Version::HTTP_2 => &constants.http_2,
                 http::Version::HTTP_3 => &constants.http_3,
                 _ => &constants.http_11,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn set_http_version_wsgi(
+        &self,
+        constants: &Constants,
+        version: &http::Version,
+    ) -> PyResult<()> {
+        self.set_item(
+            &constants.server_protocol,
+            match *version {
+                http::Version::HTTP_10 => &constants.wsgi_http_10,
+                http::Version::HTTP_11 => &constants.wsgi_http_11,
+                http::Version::HTTP_2 => &constants.wsgi_http_2,
+                http::Version::HTTP_3 => &constants.wsgi_http_3,
+                _ => &constants.wsgi_http_11,
             },
         )?;
         Ok(())
