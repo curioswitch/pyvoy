@@ -198,6 +198,7 @@ class PyvoyServer:
             "stat_prefix": "ingress_http",
             "route_config": {"virtual_hosts": [virtual_host_config]},
             "http_filters": http_filters,
+            "generate_request_id": False,
         }
         if enable_http3:
             http_config["http3_protocol_options"] = {}

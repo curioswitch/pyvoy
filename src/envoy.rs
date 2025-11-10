@@ -6,15 +6,27 @@ use http::{HeaderName, HeaderValue};
 /// to avoid reallocation if shrinking (which would always happen for HTTP/2).
 pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(
     envoy_filter: &EHF,
-    http_version: &http::Version,
 ) -> Vec<(HeaderName, HeaderValue)> {
     let envoy_headers = envoy_filter.get_request_headers();
     let mut headers = Vec::with_capacity(envoy_headers.len());
     for (name_bytes, value_bytes) in envoy_headers.iter() {
         let name_slice = name_bytes.as_slice();
-        if is_pseudoheader(http_version, name_slice) {
-            continue;
+
+        match name_slice {
+            b":method" | b":scheme" | b":authority" | b":path" => {
+                // Pseudo-headers are skipped. We don't guard by http_version because Envoy will
+                // normalize to always include them.
+                continue;
+            }
+            b"x-forwarded-proto" => {
+                // There seems to be no way of disabling Envoy's addition of this. We don't need it
+                // since we're not propagating to an upstream - we keep the scheme in the scope
+                // instead.
+                continue;
+            }
+            _ => {}
         }
+
         match (
             HeaderName::from_bytes(name_slice),
             HeaderValue::from_bytes(value_bytes.as_slice()),
@@ -24,11 +36,6 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(
         }
     }
     headers
-}
-
-fn is_pseudoheader(http_version: &http::Version, name: &[u8]) -> bool {
-    http_version >= &http::Version::HTTP_2
-        && matches!(name, b":method" | b":scheme" | b":authority" | b":path")
 }
 
 /// Checks if there is any request body that can be read.
