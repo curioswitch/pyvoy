@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize},
-    },
+    sync::{Arc, atomic::AtomicBool},
     thread,
 };
 
@@ -26,20 +23,11 @@ mod awaitable;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
-static GIL_BATCH_SIZE: AtomicUsize = AtomicUsize::new(0);
-
 fn get_gil_batch_size() -> usize {
-    let size = GIL_BATCH_SIZE.load(std::sync::atomic::Ordering::Relaxed);
-    if size == 0 {
-        let new_size = std::env::var("PYVOY_GIL_BATCH_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(20);
-        GIL_BATCH_SIZE.store(new_size, std::sync::atomic::Ordering::Relaxed);
-        new_size
-    } else {
-        size
-    }
+    std::env::var("PYVOY_GIL_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(40)
 }
 
 struct ExecutorInner {
@@ -131,16 +119,17 @@ impl Executor {
         };
 
         thread::spawn(move || {
+            let gil_batch_size = get_gil_batch_size();
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
                     inner.handle_event(py, event)?;
                     // We don't want to be too agressive and starve the event loop but do
                     // suffer significantly reduced throughput when acquiring the GIL each
                     // event since the operations are very fast (we just schedule on the
-                    // event loop without actually executing logic). We go ahead and drain
-                    // to a magic number limit to keep a cap while getting a reasonable
-                    // batch size.
-                    for event in rx.try_iter().take(get_gil_batch_size()).collect::<Vec<_>>() {
+                    // event loop without actually executing logic). We go ahead and
+                    // process any more events that may be present up to a cap to improve
+                    // throughput while still having a relatively low upper bound on time.
+                    for event in rx.try_iter().take(gil_batch_size) {
                         inner.handle_event(py, event)?;
                     }
                     Ok::<_, PyErr>(())
