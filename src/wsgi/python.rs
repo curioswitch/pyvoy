@@ -64,17 +64,23 @@ impl PyExecutor {
 
                 // TODO: support root_path etc
                 environ.set_item(&constants.script_name, &constants.empty_string)?;
-                let decoded_path = urlencoding::decode_binary(&scope.raw_path);
+
+                let raw_path: &[u8] =
+                    if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
+                        environ.set_item(
+                            &constants.wsgi_query_string,
+                            PyString::from_bytes(py, &scope.raw_path[query_idx + 1..])?,
+                        )?;
+                        &scope.raw_path[..query_idx]
+                    } else {
+                        &scope.raw_path
+                    };
+
+                let decoded_path = urlencoding::decode_binary(&raw_path);
                 environ.set_item(
                     &constants.path_info,
                     PyString::from_bytes(py, &decoded_path)?,
                 )?;
-                if !scope.query_string.is_empty() {
-                    environ.set_item(
-                        &constants.wsgi_query_string,
-                        PyString::from_bytes(py, &scope.query_string)?,
-                    )?;
-                }
 
                 for (key, value) in scope.headers.iter() {
                     match *key {

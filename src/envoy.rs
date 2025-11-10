@@ -1,24 +1,45 @@
 use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler};
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, uri};
+
+pub(crate) struct HeadersInfo {
+    pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
+    pub(crate) method: http::Method,
+    pub(crate) raw_path: Box<[u8]>,
+    pub(crate) scheme: uri::Scheme,
+}
 
 /// Reads request headers from Envoy, skipping pseudo-headers.
 /// As this is an implementation detail of the filters, we return a Vec instead of Box
 /// to avoid reallocation if shrinking (which would always happen for HTTP/2).
-pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(
-    envoy_filter: &EHF,
-) -> Vec<(HeaderName, HeaderValue)> {
+pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> HeadersInfo {
     let envoy_headers = envoy_filter.get_request_headers();
     let mut headers = Vec::with_capacity(envoy_headers.len());
+    let mut method = http::Method::GET;
+    let mut raw_path: Box<[u8]> = Box::default();
+    let mut scheme = uri::Scheme::HTTP;
+
     for (name_bytes, value_bytes) in envoy_headers.iter() {
         let name_slice = name_bytes.as_slice();
+        let value_slice = value_bytes.as_slice();
 
         match name_slice {
-            b":method" | b":scheme" | b":authority" | b":path" => {
-                // Pseudo-headers are skipped. We don't guard by http_version because Envoy will
-                // normalize to always include them.
+            b":method" => {
+                if let Ok(m) = http::Method::from_bytes(value_slice) {
+                    method = m;
+                }
                 continue;
             }
-            b"x-forwarded-proto" => {
+            b":scheme" => {
+                if let Ok(s) = uri::Scheme::try_from(value_slice) {
+                    scheme = s;
+                }
+                continue;
+            }
+            b":path" => {
+                raw_path = Box::from(value_slice);
+                continue;
+            }
+            b":authority" | b"x-forwarded-proto" => {
                 // There seems to be no way of disabling Envoy's addition of this. We don't need it
                 // since we're not propagating to an upstream - we keep the scheme in the scope
                 // instead.
@@ -35,7 +56,12 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(
             _ => continue,
         }
     }
-    headers
+    HeadersInfo {
+        headers,
+        method,
+        raw_path,
+        scheme,
+    }
 }
 
 /// Checks if there is any request body that can be read.
