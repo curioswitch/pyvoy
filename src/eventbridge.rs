@@ -50,10 +50,7 @@ impl<T> EventBridge<T> {
                 let Inner::Single(first) = std::mem::replace(&mut *inner, Inner::Empty) else {
                     unreachable!()
                 };
-                let mut events = Vec::with_capacity(2);
-                events.push(first);
-                events.push(event);
-                *inner = Inner::Multiple(events);
+                *inner = Inner::Multiple(vec![first, event]);
             }
             Inner::Multiple(ref mut events) => {
                 events.push(event);
