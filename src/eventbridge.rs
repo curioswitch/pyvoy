@@ -7,7 +7,7 @@ enum Inner<T> {
     Multiple(Vec<T>),
 }
 
-/// An optimized event bridge between Envoy and Python.
+/// An optimized event bridge from Python back to Envoy.
 ///
 /// Because of the design of the Envoy SDK, we cannot directly pass an event to
 /// an Envoy callback - we always push the event and then schedule Envoy to process

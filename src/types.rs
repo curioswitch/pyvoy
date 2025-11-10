@@ -858,7 +858,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         .map(|v| Box::from(v.as_slice()))
         .unwrap_or_default();
 
-    let headers = read_request_headers(envoy_filter, &http_version);
+    let headers = read_request_headers(envoy_filter);
 
     let client = get_address(
         envoy_filter,
