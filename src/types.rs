@@ -818,8 +818,8 @@ pub(crate) struct Scope {
     pub http_version: http::Version,
     pub method: Method,
     pub scheme: Scheme,
+    /// The full raw path, percent-encoded with query string.
     pub raw_path: Box<[u8]>,
-    pub query_string: Box<[u8]>,
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub client: Option<(Box<str>, i64)>,
     pub server: Option<(Box<str>, i64)>,
@@ -838,27 +838,13 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         },
         None => http::Version::HTTP_11,
     };
-    let method = envoy_filter
-        .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestMethod)
-        .and_then(|v| http::Method::from_bytes(v.as_slice()).ok())
-        .unwrap_or(http::Method::GET);
 
-    let scheme = envoy_filter
-        .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestScheme)
-        .and_then(|v| uri::Scheme::try_from(v.as_slice()).ok())
-        .unwrap_or(uri::Scheme::HTTP);
-
-    let raw_path: Box<[u8]> = envoy_filter
-        .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestUrlPath)
-        .map(|v| Box::from(v.as_slice()))
-        .unwrap_or_else(|| Box::from(b"/" as &[u8]));
-
-    let query_string = envoy_filter
-        .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestQuery)
-        .map(|v| Box::from(v.as_slice()))
-        .unwrap_or_default();
-
-    let headers = read_request_headers(envoy_filter);
+    let HeadersInfo {
+        headers,
+        method,
+        raw_path,
+        scheme,
+    } = read_request_headers(envoy_filter);
 
     let client = get_address(
         envoy_filter,
@@ -876,7 +862,6 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         method,
         scheme,
         raw_path,
-        query_string,
         headers,
         client,
         server,

@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize},
+    },
     thread,
 };
 
@@ -22,6 +25,22 @@ use std::sync::mpsc::Sender;
 mod awaitable;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
+
+static GIL_BATCH_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+fn get_gil_batch_size() -> usize {
+    let size = GIL_BATCH_SIZE.load(std::sync::atomic::Ordering::Relaxed);
+    if size == 0 {
+        let new_size = std::env::var("PYVOY_GIL_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20);
+        GIL_BATCH_SIZE.store(new_size, std::sync::atomic::Ordering::Relaxed);
+        new_size
+    } else {
+        size
+    }
+}
 
 struct ExecutorInner {
     app: Py<PyAny>,
@@ -115,6 +134,15 @@ impl Executor {
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
                     inner.handle_event(py, event)?;
+                    // We don't want to be too agressive and starve the event loop but do
+                    // suffer significantly reduced throughput when acquiring the GIL each
+                    // event since the operations are very fast (we just schedule on the
+                    // event loop without actually executing logic). We go ahead and drain
+                    // to a magic number limit to keep a cap while getting a reasonable
+                    // batch size.
+                    for event in rx.try_iter().take(get_gil_batch_size()).collect::<Vec<_>>() {
+                        inner.handle_event(py, event)?;
+                    }
                     Ok::<_, PyErr>(())
                 }) {
                     eprintln!(
@@ -229,16 +257,25 @@ impl ExecutorInner {
         scope_dict.set_http_version(&self.constants, &scope.http_version)?;
         scope_dict.set_http_method(&self.constants, &self.constants.method, &scope.method)?;
         scope_dict.set_http_scheme(&self.constants, &self.constants.scheme, &scope.scheme)?;
-        let decoded_path = urlencoding::decode_binary(&scope.raw_path);
+
+        let raw_path: &[u8] =
+            if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
+                scope_dict.set_item(
+                    &self.constants.query_string,
+                    PyBytes::new(py, &scope.raw_path[query_idx + 1..]),
+                )?;
+                &scope.raw_path[..query_idx]
+            } else {
+                scope_dict.set_item(&self.constants.query_string, &self.constants.empty_bytes)?;
+                &scope.raw_path
+            };
+
+        let decoded_path = urlencoding::decode_binary(&raw_path);
         scope_dict.set_item(
             &self.constants.path,
             PyString::from_bytes(py, &decoded_path)?,
         )?;
-        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, &scope.raw_path))?;
-        scope_dict.set_item(
-            &self.constants.query_string,
-            PyBytes::new(py, &scope.query_string),
-        )?;
+        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, &raw_path))?;
         scope_dict.set_item(&self.constants.root_path, &self.constants.empty_string)?;
         let headers = PyList::new(
             py,
