@@ -62,6 +62,10 @@ impl<T> EventBridge<T> {
         Ok(())
     }
 
+    /// Drains all events on the bridge, calling `f` for each.
+    ///
+    /// We only lock the mutex to drain and then `send` calls can continue while
+    /// processing.
     pub(crate) fn process(&self, mut f: impl FnMut(T)) {
         let mut inner = self.inner.lock().unwrap();
         match std::mem::replace(&mut *inner, Inner::Empty) {
@@ -79,6 +83,7 @@ impl<T> EventBridge<T> {
         }
     }
 
+    /// Closes the bridge. Further `send` calls will fail.
     pub(crate) fn close(&self) {
         let mut inner = self.inner.lock().unwrap();
         *inner = Inner::Closed;
