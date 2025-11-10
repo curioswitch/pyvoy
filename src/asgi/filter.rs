@@ -2,13 +2,13 @@ use envoy_proxy_dynamic_modules_rust_sdk::*;
 use http::{HeaderName, HeaderValue};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, mpsc};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
 use crate::envoy::*;
+use crate::eventbridge::EventBridge;
 use crate::types::*;
 
 pub struct Config {
@@ -37,17 +37,13 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (recv_tx, recv_rx) = mpsc::channel::<RecvFuture>();
-        let (send_tx, send_rx) = mpsc::channel::<SendEvent>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
             response_closed: Arc::new(AtomicBool::new(false)),
             response_trailers: None,
-            recv_rx,
-            recv_tx: Some(recv_tx),
-            send_rx,
-            send_tx: Some(send_tx),
+            recv_bridge: EventBridge::new(),
+            send_bridge: EventBridge::new(),
         })
     }
 }
@@ -60,10 +56,8 @@ struct Filter {
 
     response_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
 
-    recv_rx: Receiver<RecvFuture>,
-    recv_tx: Option<Sender<RecvFuture>>,
-    send_rx: Receiver<SendEvent>,
-    send_tx: Option<Sender<SendEvent>>,
+    recv_bridge: EventBridge<RecvFuture>,
+    send_bridge: EventBridge<SendEvent>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -87,8 +81,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             end_of_stream,
             trailers_accepted,
             self.response_closed.clone(),
-            self.recv_tx.take().unwrap(),
-            self.send_tx.take().unwrap(),
+            self.recv_bridge.clone(),
+            self.send_bridge.clone(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
@@ -103,34 +97,37 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        if let Ok(future) = self.recv_rx.try_recv() {
+        self.recv_bridge.process(|future| {
             self.executor.handle_recv_future(
                 read_request_body(envoy_filter),
-                !end_of_stream,
+                !self.request_closed,
                 future,
             );
-        }
+        });
+
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
 
     fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
         self.response_closed.store(true, Ordering::Relaxed);
+        self.recv_bridge.close();
+        self.send_bridge.close();
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            if (self.request_closed || has_request_body(envoy_filter))
-                && let Ok(future) = self.recv_rx.try_recv()
-            {
-                self.executor.handle_recv_future(
-                    read_request_body(envoy_filter),
-                    !self.request_closed,
-                    future,
-                );
+            if self.request_closed || has_request_body(envoy_filter) {
+                self.recv_bridge.process(|future| {
+                    self.executor.handle_recv_future(
+                        read_request_body(envoy_filter),
+                        !self.request_closed,
+                        future,
+                    );
+                });
             }
             return;
         }
-        for event in self.send_rx.try_iter() {
+        self.send_bridge.process(|event| {
             match event {
                 SendEvent::Start(start_event, mut body_event) => {
                     if start_event.trailers {
@@ -197,6 +194,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     return;
                 }
             }
-        }
+        });
     }
 }

@@ -13,3 +13,5 @@ pyvoy/_bin/libpyvoy.so
 *.profraw
 *.profdata
 *.lcov
+
+profile.json.gz

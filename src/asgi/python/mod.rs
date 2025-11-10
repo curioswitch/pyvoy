@@ -6,6 +6,7 @@ use std::{
 use crate::{
     asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
     envoy::SyncScheduler,
+    eventbridge::EventBridge,
     types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope},
 };
 use http::{HeaderName, HeaderValue};
@@ -132,8 +133,8 @@ impl Executor {
         request_closed: bool,
         trailers_accepted: bool,
         response_closed: Arc<AtomicBool>,
-        recv_tx: Sender<RecvFuture>,
-        send_tx: Sender<SendEvent>,
+        recv_bridge: EventBridge<RecvFuture>,
+        send_bridge: EventBridge<SendEvent>,
         scheduler: SyncScheduler,
     ) {
         self.tx
@@ -142,8 +143,8 @@ impl Executor {
                 request_closed,
                 trailers_accepted,
                 response_closed,
-                recv_tx,
-                send_tx,
+                recv_bridge,
+                send_bridge,
                 scheduler,
             })
             .unwrap();
@@ -184,8 +185,8 @@ impl ExecutorInner {
                 request_closed,
                 trailers_accepted,
                 response_closed,
-                recv_tx,
-                send_tx,
+                recv_bridge,
+                send_bridge,
                 scheduler,
             } => self.execute_app(
                 py,
@@ -193,8 +194,8 @@ impl ExecutorInner {
                 request_closed,
                 trailers_accepted,
                 response_closed,
-                recv_tx,
-                send_tx,
+                recv_bridge,
+                send_bridge,
                 scheduler,
             ),
             Event::HandleRecvFuture {
@@ -217,8 +218,8 @@ impl ExecutorInner {
         request_closed: bool,
         trailers_accepted: bool,
         response_closed: Arc<AtomicBool>,
-        recv_tx: Sender<RecvFuture>,
-        send_tx: Sender<SendEvent>,
+        recv_bridge: EventBridge<RecvFuture>,
+        send_bridge: EventBridge<SendEvent>,
         scheduler: SyncScheduler,
     ) -> PyResult<()> {
         let scope_dict = PyDict::new(py);
@@ -268,7 +269,7 @@ impl ExecutorInner {
             .into_bound_py_any(py)?
         } else {
             RecvCallable {
-                recv_tx,
+                recv_bridge,
                 scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -285,7 +286,7 @@ impl ExecutorInner {
                 response_start: None,
                 trailers_accepted,
                 closed: false,
-                send_tx: send_tx.clone(),
+                send_bridge: send_bridge.clone(),
                 scheduler: scheduler.clone(),
                 loop_: self.loop_.clone_ref(py),
                 executor: self.executor.clone(),
@@ -300,7 +301,7 @@ impl ExecutorInner {
         future.call_method1(
             &self.constants.add_done_callback,
             (AppFutureHandler {
-                send_tx,
+                send_bridge,
                 scheduler,
                 constants: self.constants.clone(),
             },),
@@ -368,8 +369,8 @@ enum Event {
         request_closed: bool,
         trailers_accepted: bool,
         response_closed: Arc<AtomicBool>,
-        recv_tx: Sender<RecvFuture>,
-        send_tx: Sender<SendEvent>,
+        recv_bridge: EventBridge<RecvFuture>,
+        send_bridge: EventBridge<SendEvent>,
         scheduler: SyncScheduler,
     },
     HandleRecvFuture {
@@ -384,7 +385,7 @@ enum Event {
 
 #[pyclass]
 struct RecvCallable {
-    recv_tx: Sender<RecvFuture>,
+    recv_bridge: EventBridge<RecvFuture>,
     scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
@@ -404,7 +405,7 @@ impl RecvCallable {
             future: Some(future.clone().unbind()),
             executor: self.executor.clone(),
         };
-        if self.recv_tx.send(recv_future).is_ok() {
+        if self.recv_bridge.send(recv_future).is_ok() {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future)
@@ -437,7 +438,7 @@ impl EmptyRecvCallable {
 
 #[pyclass]
 struct AppFutureHandler {
-    send_tx: Sender<SendEvent>,
+    send_bridge: EventBridge<SendEvent>,
     scheduler: Arc<SyncScheduler>,
     constants: Arc<Constants>,
 }
@@ -453,7 +454,7 @@ impl AppFutureHandler {
             }
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
-            if self.send_tx.send(SendEvent::Exception).is_ok() {
+            if self.send_bridge.send(SendEvent::Exception).is_ok() {
                 self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
@@ -473,7 +474,7 @@ struct SendCallable {
     response_start: Option<ResponseStartEvent>,
     trailers_accepted: bool,
     closed: bool,
-    send_tx: Sender<SendEvent>,
+    send_bridge: EventBridge<SendEvent>,
     scheduler: Arc<SyncScheduler>,
     loop_: Py<PyAny>,
     executor: Executor,
@@ -576,7 +577,7 @@ impl SendCallable {
                 };
                 if let Some(start_event) = self.response_start.take() {
                     if self
-                        .send_tx
+                        .send_bridge
                         .send(SendEvent::Start(start_event, body_event))
                         .is_ok()
                     {
@@ -585,7 +586,7 @@ impl SendCallable {
                         // send_future will be completed with exception when dropped if needed.
                         self.closed = true;
                     }
-                } else if self.send_tx.send(SendEvent::Body(body_event)).is_ok() {
+                } else if self.send_bridge.send(SendEvent::Body(body_event)).is_ok() {
                     self.scheduler.commit(EVENT_ID_RESPONSE);
                 } else {
                     // send_future will be completed with exception when dropped if needed.
@@ -613,7 +614,7 @@ impl SendCallable {
                 if self.trailers_accepted {
                     let headers = extract_headers_from_event(py, &self.constants, &event)?;
                     if self
-                        .send_tx
+                        .send_bridge
                         .send(SendEvent::Trailers(ResponseTrailersEvent {
                             headers,
                             more_trailers,

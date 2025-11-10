@@ -8,6 +8,8 @@ use yaml_rust2::YamlLoader;
 mod asgi;
 /// Helpers for working with Envoy's SDK.
 mod envoy;
+/// An optimized event bridge between Envoy and Python.
+mod eventbridge;
 mod types;
 mod wsgi;
 
