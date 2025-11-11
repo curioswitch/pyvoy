@@ -47,8 +47,12 @@ pub(crate) struct ExecutorHandles {
 
 impl ExecutorHandles {
     pub(crate) fn join(&mut self) {
-        let _ = self.loop_handle.take().unwrap().join();
-        let _ = self.gil_handle.take().unwrap().join();
+        if let Some(handle) = self.loop_handle.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.gil_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
