@@ -13,12 +13,13 @@ use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
+    _handles: python::ExecutorHandles,
 }
 
 impl Config {
     pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let executor = match python::Executor::new(module, attr, constants) {
+        let (executor, handles) = match python::Executor::new(module, attr, constants) {
             Ok(executor) => executor,
             Err(e) => {
                 Python::attach(|py| {
@@ -31,7 +32,16 @@ impl Config {
                 return None;
             }
         };
-        Some(Self { executor })
+        Some(Self {
+            executor,
+            _handles: handles,
+        })
+    }
+}
+
+impl Drop for Config {
+    fn drop(&mut self) {
+        self.executor.shutdown();
     }
 }
 
