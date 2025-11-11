@@ -381,6 +381,8 @@ pub(crate) struct Constants {
     pub create_future: Py<PyString>,
     /// The string "result".
     pub result: Py<PyString>,
+    /// The string "stop".
+    pub stop: Py<PyString>,
 
     // WSGI environ keys
     /// The string "REQUEST_METHOD".
@@ -478,6 +480,7 @@ impl Constants {
             set_exception: PyString::new(py, "set_exception").unbind(),
             create_future: PyString::new(py, "create_future").unbind(),
             result: PyString::new(py, "result").unbind(),
+            stop: PyString::new(py, "stop").unbind(),
 
             status: PyString::new(py, "status").unbind(),
             trailers: PyString::new(py, "trailers").unbind(),

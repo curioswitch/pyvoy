@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, atomic::AtomicBool},
-    thread,
+    thread::{self, JoinHandle},
 };
 
 use crate::{
@@ -39,6 +39,19 @@ struct ExecutorInner {
     executor: Executor,
 }
 
+/// Holds [`JoinHandle`] for threads created by [`Executor`].
+pub(crate) struct ExecutorHandles {
+    loop_handle: JoinHandle<()>,
+    gil_handle: JoinHandle<()>,
+}
+
+impl ExecutorHandles {
+    pub(crate) fn join(self) {
+        let _ = self.loop_handle.join();
+        let _ = self.gil_handle.join();
+    }
+}
+
 /// An executor of Python code.
 ///
 /// We separate execution of Python code from Rust code because the Python GIL
@@ -63,7 +76,7 @@ impl Executor {
         app_module: &str,
         app_attr: &str,
         constants: Arc<Constants>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<(Self, ExecutorHandles)> {
         // Import threading on this thread because Python records the first thread
         // that imports threading as the main thread. When running the Python interpreter, this
         // happens to work, but not when embedding. For our purposes, we just need the asyncio
@@ -75,7 +88,7 @@ impl Executor {
         })?;
 
         let (loop_tx, loop_rx) = mpsc::sync_channel(0);
-        thread::spawn(move || {
+        let loop_handle = thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let uvloop = py.import("uvloop")?;
                 let asyncio = py.import("asyncio")?;
@@ -118,19 +131,26 @@ impl Executor {
             executor: executor.clone(),
         };
 
-        thread::spawn(move || {
+        let gil_handle = thread::spawn(move || {
             let gil_batch_size = get_gil_batch_size();
+            let mut shutdown = false;
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
-                    inner.handle_event(py, event)?;
-                    // We don't want to be too agressive and starve the event loop but do
-                    // suffer significantly reduced throughput when acquiring the GIL each
-                    // event since the operations are very fast (we just schedule on the
-                    // event loop without actually executing logic). We go ahead and
-                    // process any more events that may be present up to a cap to improve
-                    // throughput while still having a relatively low upper bound on time.
-                    for event in rx.try_iter().take(gil_batch_size) {
-                        inner.handle_event(py, event)?;
+                    if !inner.handle_event(py, event)? {
+                        shutdown = true;
+                    } else {
+                        // We don't want to be too agressive and starve the event loop but do
+                        // suffer significantly reduced throughput when acquiring the GIL each
+                        // event since the operations are very fast (we just schedule on the
+                        // event loop without actually executing logic). We go ahead and
+                        // process any more events that may be present up to a cap to improve
+                        // throughput while still having a relatively low upper bound on time.
+                        for event in rx.try_iter().take(gil_batch_size) {
+                            if !inner.handle_event(py, event)? {
+                                shutdown = true;
+                                break;
+                            }
+                        }
                     }
                     Ok::<_, PyErr>(())
                 }) {
@@ -139,9 +159,18 @@ impl Executor {
                         e
                     );
                 }
+                if shutdown {
+                    return;
+                }
             }
         });
-        Ok(executor)
+        Ok((
+            executor,
+            ExecutorHandles {
+                loop_handle,
+                gil_handle,
+            },
+        ))
     }
 
     pub(crate) fn execute_app(
@@ -192,10 +221,14 @@ impl Executor {
             .send(Event::HandleDroppedSendFuture(future))
             .unwrap();
     }
+
+    pub(crate) fn shutdown(&self) {
+        self.tx.send(Event::Shutdown).unwrap();
+    }
 }
 
 impl ExecutorInner {
-    fn handle_event<'py>(&self, py: Python<'py>, event: Event) -> PyResult<()> {
+    fn handle_event<'py>(&self, py: Python<'py>, event: Event) -> PyResult<bool> {
         match event {
             Event::ExecuteApp {
                 scope,
@@ -205,27 +238,40 @@ impl ExecutorInner {
                 recv_bridge,
                 send_bridge,
                 scheduler,
-            } => self.execute_app(
-                py,
-                scope,
-                request_closed,
-                trailers_accepted,
-                response_closed,
-                recv_bridge,
-                send_bridge,
-                scheduler,
-            ),
+            } => {
+                self.execute_app(
+                    py,
+                    scope,
+                    request_closed,
+                    trailers_accepted,
+                    response_closed,
+                    recv_bridge,
+                    send_bridge,
+                    scheduler,
+                )?;
+            }
             Event::HandleRecvFuture {
                 body,
                 more_body,
                 mut future,
-            } => self.handle_recv_future(py, body, more_body, future.future.take().unwrap()),
-            Event::HandleDroppedRecvFuture(future) => self.handle_dropped_recv_future(py, future),
-            Event::HandleSendFuture(mut send_future) => {
-                self.handle_send_future(py, send_future.future.take().unwrap())
+            } => {
+                self.handle_recv_future(py, body, more_body, future.future.take().unwrap())?;
             }
-            Event::HandleDroppedSendFuture(future) => self.handle_dropped_send_future(py, future),
+            Event::HandleDroppedRecvFuture(future) => {
+                self.handle_dropped_recv_future(py, future)?;
+            }
+            Event::HandleSendFuture(mut send_future) => {
+                self.handle_send_future(py, send_future.future.take().unwrap())?;
+            }
+            Event::HandleDroppedSendFuture(future) => {
+                self.handle_dropped_send_future(py, future)?;
+            }
+            Event::Shutdown => {
+                self.shutdown(py)?;
+                return Ok(false);
+            }
         }
+        Ok(true)
     }
 
     fn execute_app<'py>(
@@ -259,12 +305,12 @@ impl ExecutorInner {
                 &scope.raw_path
             };
 
-        let decoded_path = urlencoding::decode_binary(&raw_path);
+        let decoded_path = urlencoding::decode_binary(raw_path);
         scope_dict.set_item(
             &self.constants.path,
             PyString::from_bytes(py, &decoded_path)?,
         )?;
-        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, &raw_path))?;
+        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, raw_path))?;
         scope_dict.set_item(&self.constants.root_path, &self.constants.empty_string)?;
         let headers = PyList::new(
             py,
@@ -387,6 +433,13 @@ impl ExecutorInner {
         )?;
         Ok(())
     }
+
+    fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
+        let stop = self.loop_.getattr(py, &self.constants.stop)?;
+        self.loop_
+            .call_method1(py, &self.constants.call_soon_threadsafe, (stop,))?;
+        Ok(())
+    }
 }
 
 enum Event {
@@ -407,6 +460,7 @@ enum Event {
     HandleDroppedRecvFuture(Py<PyAny>),
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(Py<PyAny>),
+    Shutdown,
 }
 
 #[pyclass]

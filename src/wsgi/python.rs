@@ -76,7 +76,7 @@ impl PyExecutor {
                         &scope.raw_path
                     };
 
-                let decoded_path = urlencoding::decode_binary(&raw_path);
+                let decoded_path = urlencoding::decode_binary(raw_path);
                 environ.set_item(
                     &constants.path_info,
                     PyString::from_bytes(py, &decoded_path)?,
