@@ -41,18 +41,14 @@ struct ExecutorInner {
 
 /// Holds [`JoinHandle`] for threads created by [`Executor`].
 pub(crate) struct ExecutorHandles {
-    loop_handle: Option<JoinHandle<()>>,
-    gil_handle: Option<JoinHandle<()>>,
+    loop_handle: JoinHandle<()>,
+    gil_handle: JoinHandle<()>,
 }
 
 impl ExecutorHandles {
-    pub(crate) fn join(&mut self) {
-        if let Some(handle) = self.loop_handle.take() {
-            let _ = handle.join();
-        }
-        if let Some(handle) = self.gil_handle.take() {
-            let _ = handle.join();
-        }
+    pub(crate) fn join(self) {
+        let _ = self.loop_handle.join();
+        let _ = self.gil_handle.join();
     }
 }
 
@@ -171,8 +167,8 @@ impl Executor {
         Ok((
             executor,
             ExecutorHandles {
-                loop_handle: Some(loop_handle),
-                gil_handle: Some(gil_handle),
+                loop_handle,
+                gil_handle,
             },
         ))
     }
@@ -309,12 +305,12 @@ impl ExecutorInner {
                 &scope.raw_path
             };
 
-        let decoded_path = urlencoding::decode_binary(&raw_path);
+        let decoded_path = urlencoding::decode_binary(raw_path);
         scope_dict.set_item(
             &self.constants.path,
             PyString::from_bytes(py, &decoded_path)?,
         )?;
-        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, &raw_path))?;
+        scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, raw_path))?;
         scope_dict.set_item(&self.constants.root_path, &self.constants.empty_string)?;
         let headers = PyList::new(
             py,
@@ -439,7 +435,7 @@ impl ExecutorInner {
     }
 
     fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        let stop = self.loop_.getattr(py, "stop")?;
+        let stop = self.loop_.getattr(py, &self.constants.stop)?;
         self.loop_
             .call_method1(py, &self.constants.call_soon_threadsafe, (stop,))?;
         Ok(())

@@ -13,7 +13,7 @@ use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
-    handles: python::ExecutorHandles,
+    handles: Option<python::ExecutorHandles>,
 }
 
 impl Config {
@@ -32,14 +32,17 @@ impl Config {
                 return None;
             }
         };
-        Some(Self { executor, handles })
+        Some(Self {
+            executor,
+            handles: Some(handles),
+        })
     }
 }
 
 impl Drop for Config {
     fn drop(&mut self) {
         self.executor.shutdown();
-        self.handles.join();
+        self.handles.take().unwrap().join();
     }
 }
 
@@ -160,7 +163,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             envoy_filter.send_response_headers(headers, false);
                             envoy_filter.send_response_data(&body_event.body, true);
                         }
-                        return;
                     } else {
                         envoy_filter.send_response_headers(headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
@@ -172,9 +174,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         self.executor.handle_send_future(future);
                     }
                     envoy_filter.send_response_data(&event.body, end_stream);
-                    if end_stream {
-                        return;
-                    }
+                    if end_stream {}
                 }
                 SendEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
@@ -185,7 +185,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                                 .map(|(k, v)| (k.as_str(), v.as_bytes()))
                                 .collect();
                             envoy_filter.send_response_trailers(trailers_ref);
-                            return;
                         }
                     }
                 }
@@ -199,7 +198,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         ],
                         Some(b"Internal Server Error"),
                     );
-                    return;
                 }
             }
         });
