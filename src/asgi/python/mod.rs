@@ -40,16 +40,13 @@ struct ExecutorInner {
 }
 
 /// Holds [`JoinHandle`] for threads created by [`Executor`].
-///
-/// The handles will be joined on drop to ensure all tasks are completed during
-/// server shutdown.
 pub(crate) struct ExecutorHandles {
     loop_handle: Option<JoinHandle<()>>,
     gil_handle: Option<JoinHandle<()>>,
 }
 
-impl Drop for ExecutorHandles {
-    fn drop(&mut self) {
+impl ExecutorHandles {
+    pub(crate) fn join(&mut self) {
         let _ = self.loop_handle.take().unwrap().join();
         let _ = self.gil_handle.take().unwrap().join();
     }

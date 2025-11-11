@@ -13,7 +13,7 @@ use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
-    _handles: python::ExecutorHandles,
+    handles: python::ExecutorHandles,
 }
 
 impl Config {
@@ -32,16 +32,14 @@ impl Config {
                 return None;
             }
         };
-        Some(Self {
-            executor,
-            _handles: handles,
-        })
+        Some(Self { executor, handles })
     }
 }
 
 impl Drop for Config {
     fn drop(&mut self) {
         self.executor.shutdown();
+        self.handles.join();
     }
 }
 
