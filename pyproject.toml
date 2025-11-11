@@ -1,13 +1,13 @@
 [project]
 name = "pyvoy"
-version = "0.0.7"
+version = "0.0.8"
 description = "A Python app server based on envoy"
 authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
 readme = "README.md"
 license-files = ["LICENSE"]
 
-dependencies = ["find-libpython", "pyyaml"]
+dependencies = ["find-libpython", "pyyaml", "uvloop"]
 
 [dependency-groups]
 dev = [
@@ -23,7 +23,6 @@ dev = [
     "ruff",
     "toml",
     "uvicorn[standard]",
-    "uvloop",
     "wheel",
 ]
 

@@ -593,11 +593,12 @@ wheels = [
 
 [[package]]
 name = "pyvoy"
-version = "0.0.7"
+version = "0.0.8"
 source = { editable = "." }
 dependencies = [
     { name = "find-libpython" },
     { name = "pyyaml" },
+    { name = "uvloop" },
 ]
 
 [package.dev-dependencies]
@@ -614,7 +615,6 @@ dev = [
     { name = "ruff" },
     { name = "toml" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "uvloop" },
     { name = "wheel" },
 ]
 
@@ -622,6 +622,7 @@ dev = [
 requires-dist = [
     { name = "find-libpython" },
     { name = "pyyaml" },
+    { name = "uvloop" },
 ]
 
 [package.metadata.requires-dev]
@@ -638,7 +639,6 @@ dev = [
     { name = "ruff" },
     { name = "toml" },
     { name = "uvicorn", extras = ["standard"] },
-    { name = "uvloop" },
     { name = "wheel" },
 ]
 
