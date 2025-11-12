@@ -9,7 +9,6 @@ use crate::{
 };
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
-    IntoPyObjectExt,
     exceptions::PyRuntimeError,
     prelude::*,
     types::{PyDict, PyString},
@@ -132,10 +131,9 @@ pub(crate) fn execute_lifespan<'py>(
         next_event: NextLifespanEvent::Startup,
         lifespan_tx: lifespan_tx.clone(),
         constants: constants.clone(),
-    }
-    .into_bound_py_any(py)?;
+    };
 
-    let coro = match app.call1((scope, recv_callable, &send_callable)) {
+    let coro = match app.call1((scope, recv_callable, send_callable)) {
         Ok(coro) => coro,
         Err(e) => {
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
@@ -153,10 +151,15 @@ pub(crate) fn execute_lifespan<'py>(
         }
     };
 
-    let handle_app_future = send_callable.getattr(&constants.handle_app_future)?;
     let asyncio = py.import(&constants.asyncio)?;
     let future = asyncio.call_method1(&constants.run_coroutine_threadsafe, (coro, loop_))?;
-    future.call_method1(&constants.add_done_callback, (handle_app_future,))?;
+    future.call_method1(
+        &constants.add_done_callback,
+        (FutureHandler {
+            lifespan_tx,
+            constants: constants.clone(),
+        },),
+    )?;
 
     Ok(Lifespan {
         state: Some(state.unbind()),
@@ -313,13 +316,24 @@ impl SendCallable {
         }
         EmptyAwaitable::new_py(py)
     }
+}
 
-    /// Handler for the lifespan coroutine future.
-    ///
-    /// Usually the coroutine won't complete until the server is shutting down,
-    /// but if it doesn't support lifespan at all it will raise an exception immediately
-    /// which indicates the server should continue without lifespan.
-    fn handle_app_future<'py>(&self, py: Python<'py>, future: Bound<'py, PyAny>) {
+/// Handler for the lifespan coroutine future.
+///
+/// Usually the coroutine won't complete until the server is shutting down,
+/// but if it doesn't support lifespan at all it will raise an exception immediately
+/// which indicates the server should continue without lifespan.
+#[pyclass]
+struct FutureHandler {
+    lifespan_tx: Sender<LifespanEvent>,
+    constants: Arc<Constants>,
+}
+
+unsafe impl Sync for FutureHandler {}
+
+#[pymethods]
+impl FutureHandler {
+    fn __call__<'py>(&self, py: Python<'py>, future: Bound<'py, PyAny>) {
         if let Err(e) = future.call_method1(&self.constants.result, (0,)) {
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
