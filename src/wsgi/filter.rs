@@ -1,5 +1,6 @@
 use crate::envoy::{SyncScheduler, has_request_body};
-use crate::wsgi::python::PyExecutor;
+use crate::eventbridge::EventBridge;
+use crate::wsgi::python::Executor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
@@ -7,13 +8,13 @@ use std::sync::{Arc, mpsc};
 use super::types::*;
 use crate::types::*;
 pub struct Config {
-    executor: PyExecutor,
+    executor: Executor,
 }
 
 impl Config {
     pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let executor = match PyExecutor::new(module, attr, 200, constants) {
+        let executor = match Executor::new(module, attr, 200, constants) {
             Ok(executor) => executor,
             Err(err) => {
                 eprintln!("Failed to initialize ASGI app: {err}");
@@ -26,22 +27,18 @@ impl Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        let (request_read_tx, request_read_rx) = mpsc::channel::<isize>();
         let (request_body_tx, request_body_rx) = mpsc::channel::<RequestBody>();
-        let (response_tx, response_rx) = mpsc::channel::<ResponseEvent>();
         let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
             response_closed: false,
-            request_read_rx,
-            request_read_tx: Some(request_read_tx),
+            request_read_bridge: EventBridge::new(),
+            response_bridge: EventBridge::new(),
             request_body_rx: Some(request_body_rx),
             request_body_tx,
             pending_read: 0,
             read_buffer: Vec::new(),
-            response_rx,
-            response_tx: Some(response_tx),
             response_written_tx,
             response_written_rx: Some(response_written_rx),
         })
@@ -49,20 +46,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 }
 
 struct Filter {
-    executor: PyExecutor,
+    executor: Executor,
 
     request_closed: bool,
     response_closed: bool,
 
-    request_read_rx: Receiver<isize>,
-    request_read_tx: Option<Sender<isize>>,
-    request_body_rx: Option<Receiver<RequestBody>>,
-    request_body_tx: Sender<RequestBody>,
+    request_read_bridge: EventBridge<isize>,
+    response_bridge: EventBridge<ResponseEvent>,
     pending_read: isize,
     read_buffer: Vec<u8>,
 
-    response_rx: Receiver<ResponseEvent>,
-    response_tx: Option<Sender<ResponseEvent>>,
+    request_body_rx: Option<Receiver<RequestBody>>,
+    request_body_tx: Sender<RequestBody>,
+
     response_written_tx: Sender<()>,
     response_written_rx: Option<Receiver<()>>,
 }
@@ -77,9 +73,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.executor.execute_app(
             scope,
-            self.request_read_tx.take().unwrap(),
+            self.request_read_bridge.clone(),
             self.request_body_rx.take().unwrap(),
-            self.response_tx.take().unwrap(),
+            self.response_bridge.clone(),
             self.response_written_rx.take().unwrap(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
         );
@@ -105,64 +101,61 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            match self.request_read_rx.recv() {
-                Ok(n) => {
-                    self.pending_read = n;
-                }
-                Err(_) => {
-                    // TODO: Handle
-                }
+            let mut processed = false;
+            self.request_read_bridge.process(|n| {
+                self.pending_read = n;
+                processed = true;
+            });
+            if processed {
+                self.process_read(envoy_filter);
             }
-            self.process_read(envoy_filter);
         }
-        for event in self.response_rx.try_iter().collect::<Vec<_>>() {
-            match event {
-                ResponseEvent::Start(start_event, body_event) => {
-                    let mut status_buf = itoa::Buffer::new();
-                    let mut headers: Vec<(&str, &[u8])> =
-                        Vec::with_capacity(start_event.headers.len() + 1);
-                    headers.push((":status", status_buf.format(start_event.status).as_bytes()));
-                    for (k, v) in start_event.headers.iter() {
-                        headers.push((k.as_str(), v.as_bytes()));
-                    }
-                    let end_stream = !body_event.more_body;
-                    if !end_stream {
-                        send_or_log(&self.response_written_tx, ());
-                    }
-                    if end_stream {
-                        if body_event.body.is_empty() {
-                            envoy_filter.send_response_headers(headers, true);
-                        } else {
-                            envoy_filter.send_response_headers(headers, false);
-                            envoy_filter.send_response_data(&body_event.body, true);
-                        }
+        self.response_bridge.process(|event| match event {
+            ResponseEvent::Start(start_event, body_event) => {
+                let mut status_buf = itoa::Buffer::new();
+                let mut headers: Vec<(&str, &[u8])> =
+                    Vec::with_capacity(start_event.headers.len() + 1);
+                headers.push((":status", status_buf.format(start_event.status).as_bytes()));
+                for (k, v) in start_event.headers.iter() {
+                    headers.push((k.as_str(), v.as_bytes()));
+                }
+                let end_stream = !body_event.more_body;
+                if !end_stream {
+                    send_or_log(&self.response_written_tx, ());
+                }
+                if end_stream {
+                    if body_event.body.is_empty() {
+                        envoy_filter.send_response_headers(headers, true);
                     } else {
                         envoy_filter.send_response_headers(headers, false);
-                        envoy_filter.send_response_data(&body_event.body, false);
+                        envoy_filter.send_response_data(&body_event.body, true);
                     }
-                }
-                ResponseEvent::Body(event) => {
-                    let end_stream = !event.more_body;
-                    if !end_stream {
-                        send_or_log(&self.response_written_tx, ());
-                    }
-                    envoy_filter.send_response_data(&event.body, end_stream);
-                }
-                ResponseEvent::Exception => {
-                    if !self.response_closed {
-                        self.response_closed = true;
-                        envoy_filter.send_response(
-                            500,
-                            vec![
-                                ("content-type", b"text/plain; charset=utf-8"),
-                                ("connection", b"close"),
-                            ],
-                            Some(b"Internal Server Error"),
-                        );
-                    }
+                } else {
+                    envoy_filter.send_response_headers(headers, false);
+                    envoy_filter.send_response_data(&body_event.body, false);
                 }
             }
-        }
+            ResponseEvent::Body(event) => {
+                let end_stream = !event.more_body;
+                if !end_stream {
+                    send_or_log(&self.response_written_tx, ());
+                }
+                envoy_filter.send_response_data(&event.body, end_stream);
+            }
+            ResponseEvent::Exception => {
+                if !self.response_closed {
+                    self.response_closed = true;
+                    envoy_filter.send_response(
+                        500,
+                        vec![
+                            ("content-type", b"text/plain; charset=utf-8"),
+                            ("connection", b"close"),
+                        ],
+                        Some(b"Internal Server Error"),
+                    );
+                }
+            }
+        });
     }
 }
 
