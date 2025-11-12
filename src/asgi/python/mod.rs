@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+    asgi::python::{
+        awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+        lifespan::{Lifespan, execute_lifespan},
+    },
     envoy::SyncScheduler,
     eventbridge::EventBridge,
     types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope},
@@ -20,6 +23,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 mod awaitable;
+mod lifespan;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
@@ -34,6 +38,7 @@ struct ExecutorInner {
     app: Py<PyAny>,
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
+    state: Option<Py<PyDict>>,
     loop_: Py<PyAny>,
     constants: Arc<Constants>,
     executor: Executor,
@@ -41,12 +46,16 @@ struct ExecutorInner {
 
 /// Holds [`JoinHandle`] for threads created by [`Executor`].
 pub(crate) struct ExecutorHandles {
+    lifespan: Option<Lifespan>,
     loop_handle: JoinHandle<()>,
     gil_handle: JoinHandle<()>,
 }
 
 impl ExecutorHandles {
-    pub(crate) fn join(self) {
+    pub(crate) fn close(self) {
+        if let Some(lifespan) = self.lifespan {
+            lifespan.shutdown();
+        }
         let _ = self.loop_handle.join();
         let _ = self.gil_handle.join();
     }
@@ -108,7 +117,7 @@ impl Executor {
             ))
         })?;
 
-        let (app, asgi, extensions) = Python::attach(|py| {
+        let (app, asgi, extensions, mut lifespan) = Python::attach(|py| {
             let module = py.import(app_module)?;
             let app = module.getattr(app_attr)?;
             let asgi = PyDict::new(py);
@@ -116,16 +125,28 @@ impl Executor {
             asgi.set_item("spec_version", "2.5")?;
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
-            Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind()))
+
+            let lifespan = execute_lifespan(&app, &asgi, loop_.bind(py), &constants)?;
+
+            Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind(), lifespan))
         })?;
+
+        let lifespan_supported = lifespan.startup()?;
 
         let (tx, rx) = mpsc::channel::<Event>();
         let executor = Self { tx };
+
+        let state = if lifespan_supported {
+            Some(lifespan.state.take().unwrap())
+        } else {
+            None
+        };
 
         let inner = ExecutorInner {
             app,
             asgi,
             extensions,
+            state,
             loop_,
             constants,
             executor: executor.clone(),
@@ -167,6 +188,11 @@ impl Executor {
         Ok((
             executor,
             ExecutorHandles {
+                lifespan: if lifespan_supported {
+                    Some(lifespan)
+                } else {
+                    None
+                },
                 loop_handle,
                 gil_handle,
             },
@@ -289,6 +315,10 @@ impl ExecutorInner {
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
         scope_dict.set_item(&self.constants.asgi, &self.asgi)?;
         scope_dict.set_item(&self.constants.extensions, &self.extensions)?;
+        if let Some(state) = &self.state {
+            scope_dict.set_item(&self.constants.state, state)?;
+        }
+
         scope_dict.set_http_version(&self.constants, &scope.http_version)?;
         scope_dict.set_http_method(&self.constants, &self.constants.method, &scope.method)?;
         scope_dict.set_http_scheme(&self.constants, &self.constants.scheme, &scope.scheme)?;

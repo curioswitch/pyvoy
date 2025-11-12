@@ -14,36 +14,7 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-
-async def _find_logs_lines(
-    logs: StreamReader, expected_lines: list[str]
-) -> tuple[set[str], list[str]]:
-    found_lines: set[str] = set()
-    read_lines: list[str] = []
-    try:
-        async for line in logs:
-            read_lines.append(line.decode())
-            decoded_line = line.decode().rstrip()
-            if decoded_line in expected_lines:
-                found_lines.add(decoded_line)
-            if len(found_lines) == len(expected_lines):
-                break
-    except asyncio.CancelledError:
-        pass
-    return found_lines, read_lines
-
-
-async def assert_logs_contains(
-    logs: StreamReader, expected_lines: list[str]
-) -> list[str]:
-    found_lines, read_lines = await asyncio.wait_for(
-        _find_logs_lines(logs, expected_lines), timeout=3.0
-    )
-    missing_lines = set(expected_lines) - found_lines
-    assert not missing_lines, (
-        f"Missing log lines: {missing_lines}\nRead lines: {''.join(read_lines)}"
-    )
-    return read_lines
+from ._util import assert_logs_contains, find_logs_lines
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -276,7 +247,7 @@ async def test_client_closed_before_response(
     # Hard to assert this precisely but wait for a bit of time for more logs
     # to see if the exception appears.
     _, read_lines = await asyncio.wait_for(
-        _find_logs_lines(logs_asgi, ["not happening"]), timeout=0.5
+        find_logs_lines(logs_asgi, ["not happening"]), timeout=0.5
     )
     assert "Traceback (most recent call last):" not in read_lines
 

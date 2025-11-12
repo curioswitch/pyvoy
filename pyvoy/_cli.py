@@ -104,6 +104,11 @@ async def amain() -> None:
         return
 
     async with server:
+        if server.stopped:
+            print(  # noqa: T201
+                "Failed to start Envoy server, see logs for details.", file=sys.stderr
+            )
+            return
         print(  # noqa: T201
             f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
             file=sys.stderr,
