@@ -92,6 +92,9 @@ async def _headers_only(
         await _assert_dict_value(scope, "root_path", "", send)
         await _assert_scope_address(scope.get("client"), "client", send)
         await _assert_scope_address(scope.get("server"), "server", send)
+        if "state" in scope:
+            await _send_failure('scope["state"] should not be present', send)
+            return None
     except AssertionFailed:
         return None
 

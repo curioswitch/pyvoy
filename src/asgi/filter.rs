@@ -42,7 +42,7 @@ impl Config {
 impl Drop for Config {
     fn drop(&mut self) {
         self.executor.shutdown();
-        self.handles.take().unwrap().join();
+        self.handles.take().unwrap().close();
     }
 }
 

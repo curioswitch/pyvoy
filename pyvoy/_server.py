@@ -116,6 +116,9 @@ class PyvoyServer:
                 env=env,
             )
             for _ in range(100):
+                if self._process.returncode is not None:
+                    self._stopped = True
+                    return
                 with contextlib.suppress(Exception):
                     admin_address = Path(admin_address_file.name).read_text()
                     if admin_address:
@@ -170,6 +173,10 @@ class PyvoyServer:
     @property
     def stderr(self) -> asyncio.StreamReader | None:
         return self._process.stderr
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
 
     def get_envoy_config(self) -> dict:
         enable_http3 = self._tls_enable_http3 and (

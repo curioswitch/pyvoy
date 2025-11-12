@@ -329,6 +329,14 @@ pub(crate) struct Constants {
     pub extensions: Py<PyString>,
     /// The string "type".
     pub typ: Py<PyString>,
+    /// The string "lifespan".
+    pub lifespan: Py<PyString>,
+    /// The string "lifespan.startup"
+    pub lifespan_startup: Py<PyString>,
+    /// The string "lifespan.shutdown"
+    pub lifespan_shutdown: Py<PyString>,
+    /// The string "message".
+    pub message: Py<PyString>,
     /// The string "method".
     pub method: Py<PyString>,
     /// The string "path".
@@ -347,6 +355,8 @@ pub(crate) struct Constants {
     pub client: Py<PyString>,
     /// The string "server".
     pub server: Py<PyString>,
+    /// The string "state".
+    pub state: Py<PyString>,
 
     // ASGI event fields
     /// The string "body".
@@ -438,9 +448,14 @@ impl Constants {
             extensions: PyString::new(py, "extensions").unbind(),
             http: PyString::new(py, "http").unbind(),
             https: PyString::new(py, "https").unbind(),
+            lifespan: PyString::new(py, "lifespan").unbind(),
+            lifespan_startup: PyString::new(py, "lifespan.startup").unbind(),
+            lifespan_shutdown: PyString::new(py, "lifespan.shutdown").unbind(),
+            message: PyString::new(py, "message").unbind(),
             method: PyString::new(py, "method").unbind(),
             path: PyString::new(py, "path").unbind(),
             scheme: PyString::new(py, "scheme").unbind(),
+            state: PyString::new(py, "state").unbind(),
             typ: PyString::new(py, "type").unbind(),
 
             http_version: PyString::new(py, "http_version").unbind(),
