@@ -358,6 +358,9 @@ pub(crate) struct Constants {
     /// The string "state".
     pub state: Py<PyString>,
 
+    /// The string "handle_app_future".
+    pub handle_app_future: Py<PyString>,
+
     // ASGI event fields
     /// The string "body".
     pub body: Py<PyString>,
@@ -457,6 +460,8 @@ impl Constants {
             scheme: PyString::new(py, "scheme").unbind(),
             state: PyString::new(py, "state").unbind(),
             typ: PyString::new(py, "type").unbind(),
+
+            handle_app_future: PyString::new(py, "handle_app_future").unbind(),
 
             http_version: PyString::new(py, "http_version").unbind(),
             http_10: PyString::new(py, "1.0").unbind(),

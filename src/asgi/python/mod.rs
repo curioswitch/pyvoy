@@ -380,34 +380,30 @@ impl ExecutorInner {
             .into_bound_py_any(py)?
         };
 
-        let coro = self.app.bind(py).call1((
-            scope_dict,
-            recv,
-            SendCallable {
-                next_event: NextASGIEvent::Start,
-                response_start: None,
-                trailers_accepted,
-                closed: false,
-                send_bridge: send_bridge.clone(),
-                scheduler: scheduler.clone(),
-                loop_: self.loop_.clone_ref(py),
-                executor: self.executor.clone(),
-                constants: self.constants.clone(),
-            },
-        ))?;
+        let send_callable = SendCallable {
+            next_event: NextASGIEvent::Start,
+            response_start: None,
+            trailers_accepted,
+            closed: false,
+            send_bridge: send_bridge,
+            scheduler: scheduler,
+            loop_: self.loop_.clone_ref(py),
+            executor: self.executor.clone(),
+            constants: self.constants.clone(),
+        }
+        .into_bound_py_any(py)?;
+
+        let coro = self
+            .app
+            .bind(py)
+            .call1((scope_dict, recv, &send_callable))?;
         let asyncio = py.import(&self.constants.asyncio)?;
         let future = asyncio.call_method1(
             &self.constants.run_coroutine_threadsafe,
             (coro, &self.loop_),
         )?;
-        future.call_method1(
-            &self.constants.add_done_callback,
-            (AppFutureHandler {
-                send_bridge,
-                scheduler,
-                constants: self.constants.clone(),
-            },),
-        )?;
+        let handle_app_future = send_callable.getattr(&self.constants.handle_app_future)?;
+        future.call_method1(&self.constants.add_done_callback, (handle_app_future,))?;
 
         Ok(())
     }
@@ -543,31 +539,6 @@ impl EmptyRecvCallable {
             event.set_item(&self.constants.more_body, false)?;
         }
         ValueAwaitable::new_py(py, event.into_any().unbind())
-    }
-}
-
-#[pyclass]
-struct AppFutureHandler {
-    send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<SyncScheduler>,
-    constants: Arc<Constants>,
-}
-
-unsafe impl Sync for AppFutureHandler {}
-
-#[pymethods]
-impl AppFutureHandler {
-    fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        if let Err(e) = future.call_method1(&self.constants.result, (0,)) {
-            if e.is_instance_of::<ClientDisconnectedError>(py) {
-                return;
-            }
-            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-            eprintln!("Exception in ASGI application\n{}{}", tb, e);
-            if self.send_bridge.send(SendEvent::Exception).is_ok() {
-                self.scheduler.commit(EVENT_ID_EXCEPTION);
-            }
-        }
     }
 }
 
@@ -746,6 +717,21 @@ impl SendCallable {
                     event_type
                 )),
             ),
+        }
+    }
+
+    /// Handles the result from the app coroutine. This is primarily to close a response
+    /// when there was an unhandled exception.
+    fn handle_app_future<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
+        if let Err(e) = future.call_method1(&self.constants.result, (0,)) {
+            if e.is_instance_of::<ClientDisconnectedError>(py) {
+                return;
+            }
+            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+            eprintln!("Exception in ASGI application\n{}{}", tb, e);
+            if self.send_bridge.send(SendEvent::Exception).is_ok() {
+                self.scheduler.commit(EVENT_ID_EXCEPTION);
+            }
         }
     }
 }
