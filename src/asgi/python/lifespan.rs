@@ -102,16 +102,7 @@ pub(crate) enum LifespanEvent {
     LifespanFailed(String),
 }
 
-/// Executes the ASGI lifespan protocol.
-///
-/// This function:
-/// 1. Creates a lifespan scope
-/// 2. Calls the app with the scope and send/receive callables
-/// 3. Sends a lifespan.startup message
-/// 4. Waits for the app to complete startup
-/// 5. Returns the state dict and a future for shutdown
-///
-/// If the app raises an exception during execution, an error is sent back.
+/// Executes the ASGI app with a lifespan scope.
 pub(crate) fn execute_lifespan<'py>(
     app: &Bound<'py, PyAny>,
     asgi: &Bound<'py, PyDict>,
