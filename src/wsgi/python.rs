@@ -1,4 +1,4 @@
-use executors::{Executor, crossbeam_channel_pool::ThreadPool};
+use executors::{Executor as _, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue, header};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
@@ -7,22 +7,19 @@ use pyo3::{
 };
 
 use super::types::*;
-use crate::envoy::SyncScheduler;
 use crate::types::*;
-use std::sync::{
-    Arc, Mutex,
-    mpsc::{Receiver, Sender},
-};
+use crate::{envoy::SyncScheduler, eventbridge::EventBridge};
+use std::sync::{Arc, Mutex, mpsc::Receiver};
 
 #[derive(Clone)]
-pub(crate) struct PyExecutor {
+pub(crate) struct Executor {
     pool: ThreadPool,
     app_module: Box<str>,
     app_attr: Box<str>,
     constants: Arc<Constants>,
 }
 
-impl PyExecutor {
+impl Executor {
     pub(crate) fn new(
         app_module: &str,
         app_attr: &str,
@@ -42,9 +39,9 @@ impl PyExecutor {
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
-        request_read_tx: Sender<isize>,
+        request_read_bridge: EventBridge<isize>,
         request_body_rx: Receiver<RequestBody>,
-        response_tx: Sender<ResponseEvent>,
+        response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
         scheduler: SyncScheduler,
     ) {
@@ -126,7 +123,7 @@ impl PyExecutor {
                 environ.set_item(
                     &constants.wsgi_input,
                     RequestInput {
-                        request_read_tx,
+                        request_read_bridge,
                         request_body_rx,
                         scheduler: scheduler.clone(),
                         closed: false,
@@ -148,14 +145,14 @@ impl PyExecutor {
                 )?;
                 let response = app.call1((environ, start_response.borrow()))?;
 
-                // We ignore all channel errors here since they only happen if the filter was dropped meaning
+                // We ignore all send errors here since they only happen if the filter was dropped meaning
                 // the request was closed, usually by the client. This is not an application error, and we just need
                 // to make sure a close() method for a generator is called before returning.
 
                 match response.len() {
                     Ok(0) => {
                         let mut start_response = start_response.borrow_mut();
-                        let _ = response_tx.send(ResponseEvent::Start(
+                        let _ = response_bridge.send(ResponseEvent::Start(
                             ResponseStartEvent {
                                 status: start_response.status,
                                 headers: start_response.headers.take().unwrap_or_default(),
@@ -174,7 +171,7 @@ impl PyExecutor {
                             ))??;
                         let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
                         let mut start_response = start_response.borrow_mut();
-                        let _ = response_tx.send(ResponseEvent::Start(
+                        let _ = response_bridge.send(ResponseEvent::Start(
                             ResponseStartEvent {
                                 status: start_response.status,
                                 headers: start_response.headers.take().unwrap_or_default(),
@@ -192,7 +189,7 @@ impl PyExecutor {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
                             if !started {
                                 let mut start_response = start_response.borrow_mut();
-                                let _ = response_tx.send(ResponseEvent::Start(
+                                let _ = response_bridge.send(ResponseEvent::Start(
                                     ResponseStartEvent {
                                         status: start_response.status,
                                         headers: start_response.headers.take().unwrap_or_default(),
@@ -204,17 +201,18 @@ impl PyExecutor {
                                 ));
                                 started = true;
                             } else {
-                                let _ = response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
-                                    body,
-                                    more_body: true,
-                                }));
+                                let _ =
+                                    response_bridge.send(ResponseEvent::Body(ResponseBodyEvent {
+                                        body,
+                                        more_body: true,
+                                    }));
                             }
                             scheduler.commit(EVENT_ID_RESPONSE);
                             py.detach(|| {
                                 let _ = response_written_rx.lock().unwrap().recv();
                             });
                         }
-                        let _ = response_tx.send(ResponseEvent::Body(ResponseBodyEvent {
+                        let _ = response_bridge.send(ResponseEvent::Body(ResponseBodyEvent {
                             body: Box::from([]),
                             more_body: false,
                         }));
@@ -238,7 +236,7 @@ impl PyExecutor {
                     let tb = e.traceback(py).unwrap().format().unwrap_or_default();
                     eprintln!("Exception in WSGI application\n{}{}", tb, e);
                 });
-                let _ = response_tx.send(ResponseEvent::Exception);
+                let _ = response_bridge.send(ResponseEvent::Exception);
                 scheduler.commit(EVENT_ID_EXCEPTION);
             }
         });
@@ -289,7 +287,7 @@ impl StartResponseCallable {
 
 #[pyclass]
 struct RequestInput {
-    request_read_tx: Sender<isize>,
+    request_read_bridge: EventBridge<isize>,
     request_body_rx: Mutex<Receiver<RequestBody>>,
     scheduler: Arc<SyncScheduler>,
     closed: bool,
@@ -310,7 +308,7 @@ impl RequestInput {
         if size == 0 {
             Ok(PyBytes::new(py, &[]))
         } else {
-            let _ = self.request_read_tx.send(size);
+            let _ = self.request_read_bridge.send(size);
             self.scheduler.commit(EVENT_ID_REQUEST);
 
             let body = py.detach::<PyResult<RequestBody>, _>(|| {

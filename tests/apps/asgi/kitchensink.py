@@ -1049,4 +1049,4 @@ async def app(
         case "/echo-scope":
             await _echo_scope(scope, recv, send)
         case _:
-            await _send_failure("unknown path", send)
+            await _send_failure(f"unknown path: {scope['path']}", send)
