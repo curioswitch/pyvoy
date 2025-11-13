@@ -566,7 +566,7 @@ def _errors_output(
     errors.write("Pizza\nDrink: ")
     errors.write("Beer\n\n\n")
 
-    errors.write("Country: ")
+    errors.write("Country: \n\n")
     errors.flush()
     errors.write("Japan")
 
