@@ -540,3 +540,10 @@ async def test_wsgi_readlines(url_wsgi: str, client: httpx.AsyncClient) -> None:
     content = b"Food\nPizza\nBurrito"
     response = await client.post(f"{url_wsgi}/readlines", content=content)
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_wsgi_write_callable(url_wsgi: str, client: httpx.AsyncClient) -> None:
+    response = await client.get(f"{url_wsgi}/write-callable")
+    assert response.status_code == 200, response.text
+    assert response.text == "Hello World and Goodbye!"

@@ -17,7 +17,7 @@ impl Config {
         let executor = match Executor::new(module, attr, 200, constants) {
             Ok(executor) => executor,
             Err(err) => {
-                eprintln!("Failed to initialize ASGI app: {err}");
+                eprintln!("Failed to initialize WSGI app: {err}");
                 return None;
             }
         };
@@ -41,6 +41,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             read_buffer: Vec::new(),
             response_written_tx,
             response_written_rx: Some(response_written_rx),
+            start_event: None,
         })
     }
 }
@@ -50,6 +51,12 @@ struct Filter {
 
     request_closed: bool,
     response_closed: bool,
+
+    /// The start event sent by the application. In ASGI, we buffer this within the ASGI
+    /// implementation itself to reduce filter wakeups, but because of the
+    /// WSGI write function allowing the body to be sent from two different locations,
+    /// it ends up far easier to buffer it in the filter for WSGI.
+    start_event: Option<ResponseStartEvent>,
 
     request_read_bridge: EventBridge<RequestReadEvent>,
     response_bridge: EventBridge<ResponseEvent>,
@@ -99,6 +106,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
 
+    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
+        self.response_closed = true;
+        self.request_read_bridge.close();
+        self.response_bridge.close();
+    }
+
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             let mut processed = false;
@@ -109,38 +122,43 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             if processed {
                 self.process_read(envoy_filter);
             }
+            return;
         }
         self.response_bridge.process(|event| match event {
-            ResponseEvent::Start(start_event, body_event) => {
-                let mut status_buf = itoa::Buffer::new();
-                let mut headers: Vec<(&str, &[u8])> =
-                    Vec::with_capacity(start_event.headers.len() + 1);
-                headers.push((":status", status_buf.format(start_event.status).as_bytes()));
-                for (k, v) in start_event.headers.iter() {
-                    headers.push((k.as_str(), v.as_bytes()));
-                }
-                let end_stream = !body_event.more_body;
-                if !end_stream {
-                    send_or_log(&self.response_written_tx, ());
-                }
-                if end_stream {
-                    if body_event.body.is_empty() {
-                        envoy_filter.send_response_headers(headers, true);
+            ResponseEvent::Start(start_event) => {
+                self.start_event.replace(start_event);
+            }
+            ResponseEvent::Body(body_event) => {
+                if let Some(start_event) = self.start_event.take() {
+                    let mut status_buf = itoa::Buffer::new();
+                    let mut headers: Vec<(&str, &[u8])> =
+                        Vec::with_capacity(start_event.headers.len() + 1);
+                    headers.push((":status", status_buf.format(start_event.status).as_bytes()));
+                    for (k, v) in start_event.headers.iter() {
+                        headers.push((k.as_str(), v.as_bytes()));
+                    }
+                    let end_stream = !body_event.more_body;
+                    if !end_stream {
+                        send_or_log(&self.response_written_tx, ());
+                    }
+                    if end_stream {
+                        if body_event.body.is_empty() {
+                            envoy_filter.send_response_headers(headers, true);
+                        } else {
+                            envoy_filter.send_response_headers(headers, false);
+                            envoy_filter.send_response_data(&body_event.body, true);
+                        }
                     } else {
                         envoy_filter.send_response_headers(headers, false);
-                        envoy_filter.send_response_data(&body_event.body, true);
+                        envoy_filter.send_response_data(&body_event.body, false);
                     }
                 } else {
-                    envoy_filter.send_response_headers(headers, false);
-                    envoy_filter.send_response_data(&body_event.body, false);
+                    let end_stream = !body_event.more_body;
+                    if !end_stream {
+                        send_or_log(&self.response_written_tx, ());
+                    }
+                    envoy_filter.send_response_data(&body_event.body, end_stream);
                 }
-            }
-            ResponseEvent::Body(event) => {
-                let end_stream = !event.more_body;
-                if !end_stream {
-                    send_or_log(&self.response_written_tx, ());
-                }
-                envoy_filter.send_response_data(&event.body, end_stream);
             }
             ResponseEvent::Exception => {
                 if !self.response_closed {
@@ -161,6 +179,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
 impl Filter {
     fn process_read<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+        // Reads always block until there is data or the request is finished,
+        // so don't process them otherwise.
         if !has_request_body(envoy_filter) && !self.request_closed {
             return;
         }

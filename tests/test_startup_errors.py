@@ -231,3 +231,48 @@ static_resources:
     )
     assert result.returncode != 0
     assert "Failed to initialize ASGI app" in result.stderr
+
+
+def test_python_wsgi_app_failure():
+    conf = """
+static_resources:
+  listeners:
+  - address:
+      socket_address:
+        address: 127.0.0.1
+        port_value: 0
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http_filters:
+          - name: pyvoy
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
+              dynamic_module_config:
+                name: pyvoy
+              filter_config:
+                '@type': type.googleapis.com/google.protobuf.StringValue
+                value: |
+                  app: tests.apps.wsgi.kitchensink:notthere
+                  interface: wsgi
+              filter_name: pyvoy
+              terminal_filter: true
+          route_config:
+            virtual_hosts:
+            - domains:
+              - '*'
+              name: local_service
+          stat_prefix: ingress_http
+    name: listener
+"""
+    result = subprocess.run(
+        [envoy_path, "--config-yaml", conf],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=envoy_env,
+    )
+    assert result.returncode != 0
+    assert "Failed to initialize WSGI app" in result.stderr

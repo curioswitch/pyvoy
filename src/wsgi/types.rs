@@ -11,7 +11,7 @@ pub(crate) struct ResponseBodyEvent {
 }
 
 pub(crate) enum ResponseEvent {
-    Start(ResponseStartEvent, ResponseBodyEvent),
+    Start(ResponseStartEvent),
     Body(ResponseBodyEvent),
     Exception,
 }

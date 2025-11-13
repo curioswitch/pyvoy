@@ -1,6 +1,7 @@
 use executors::{Executor as _, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue, header};
 use pyo3::{
+    IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyString, PyTuple},
@@ -14,8 +15,7 @@ use std::sync::{Arc, Mutex, mpsc::Receiver};
 #[derive(Clone)]
 pub(crate) struct Executor {
     pool: ThreadPool,
-    app_module: Box<str>,
-    app_attr: Box<str>,
+    app: Arc<Py<PyAny>>,
     constants: Arc<Constants>,
 }
 
@@ -26,12 +26,17 @@ impl Executor {
         num_threads: usize,
         constants: Arc<Constants>,
     ) -> PyResult<Self> {
+        let app = Python::attach(|py| {
+            let module = py.import(app_module)?;
+            let app = module.getattr(app_attr)?;
+            Ok::<_, PyErr>(app.unbind())
+        })?;
+
         let pool = ThreadPool::new(num_threads);
 
         Ok(Self {
             pool,
-            app_module: Box::from(app_module),
-            app_attr: Box::from(app_attr),
+            app: Arc::new(app),
             constants,
         })
     }
@@ -45,16 +50,13 @@ impl Executor {
         response_written_rx: Receiver<()>,
         scheduler: SyncScheduler,
     ) {
-        let app_module = self.app_module.clone();
-        let app_attr = self.app_attr.clone();
-        let request_body_rx = Mutex::new(request_body_rx);
-        let response_written_rx = Mutex::new(response_written_rx);
+        let response_written_rx = SyncReceiver(response_written_rx);
         let constants = self.constants.clone();
+        let app = self.app.clone();
         self.pool.execute(move || {
             let scheduler = Arc::new(scheduler);
             let result: PyResult<()> = Python::attach(|py| {
-                let app_module = py.import(&app_module[..])?;
-                let app = app_module.getattr(&app_attr[..])?;
+                let app = app.bind(py);
 
                 let environ = PyDict::new(py);
                 environ.set_http_method(&constants, &constants.request_method, &scope.method)?;
@@ -124,7 +126,7 @@ impl Executor {
                     &constants.wsgi_input,
                     RequestInput {
                         request_read_bridge,
-                        request_body_rx,
+                        request_body_rx: SyncReceiver(request_body_rx),
                         scheduler: scheduler.clone(),
                         closed: false,
                         constants: constants.clone(),
@@ -138,14 +140,14 @@ impl Executor {
                 environ.set_item(&constants.wsgi_multiprocess, false)?;
                 environ.set_item(&constants.wsgi_run_once, false)?;
 
-                let start_response = Bound::new(
-                    py,
+                let response = app.call1((
+                    environ,
                     StartResponseCallable {
-                        status: 0,
-                        headers: None,
+                        called: false,
+                        response_bridge: response_bridge.clone(),
+                        scheduler: scheduler.clone(),
                     },
-                )?;
-                let response = app.call1((environ, start_response.borrow()))?;
+                ))?;
 
                 // We ignore all send errors here since they only happen if the filter was dropped meaning
                 // the request was closed, usually by the client. This is not an application error, and we just need
@@ -153,18 +155,15 @@ impl Executor {
 
                 match response.len() {
                     Ok(0) => {
-                        let mut start_response = start_response.borrow_mut();
-                        let _ = response_bridge.send(ResponseEvent::Start(
-                            ResponseStartEvent {
-                                status: start_response.status,
-                                headers: start_response.headers.take().unwrap_or_default(),
-                            },
-                            ResponseBodyEvent {
-                                body: Box::from([]),
+                        if response_bridge
+                            .send(ResponseEvent::Body(ResponseBodyEvent {
+                                body: Box::default(),
                                 more_body: false,
-                            },
-                        ));
-                        scheduler.commit(EVENT_ID_RESPONSE);
+                            }))
+                            .is_ok()
+                        {
+                            scheduler.commit(EVENT_ID_RESPONSE);
+                        }
                     }
                     Ok(1) => {
                         let item =
@@ -172,58 +171,46 @@ impl Executor {
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
                         let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
-                        let mut start_response = start_response.borrow_mut();
-                        let _ = response_bridge.send(ResponseEvent::Start(
-                            ResponseStartEvent {
-                                status: start_response.status,
-                                headers: start_response.headers.take().unwrap_or_default(),
-                            },
-                            ResponseBodyEvent {
+                        if response_bridge
+                            .send(ResponseEvent::Body(ResponseBodyEvent {
                                 body,
                                 more_body: false,
-                            },
-                        ));
-                        scheduler.commit(EVENT_ID_RESPONSE);
+                            }))
+                            .is_ok()
+                        {
+                            scheduler.commit(EVENT_ID_RESPONSE);
+                        }
                     }
                     _ => {
-                        let mut started = false;
                         for item in response.try_iter()? {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
-                            if !started {
-                                let mut start_response = start_response.borrow_mut();
-                                let _ = response_bridge.send(ResponseEvent::Start(
-                                    ResponseStartEvent {
-                                        status: start_response.status,
-                                        headers: start_response.headers.take().unwrap_or_default(),
-                                    },
-                                    ResponseBodyEvent {
-                                        body,
-                                        more_body: true,
-                                    },
-                                ));
-                                started = true;
-                            } else {
-                                let _ =
-                                    response_bridge.send(ResponseEvent::Body(ResponseBodyEvent {
-                                        body,
-                                        more_body: true,
-                                    }));
+                            if response_bridge
+                                .send(ResponseEvent::Body(ResponseBodyEvent {
+                                    body,
+                                    more_body: true,
+                                }))
+                                .is_ok()
+                            {
+                                scheduler.commit(EVENT_ID_RESPONSE);
+                                py.detach(|| {
+                                    let _ = response_written_rx.recv();
+                                });
                             }
+                        }
+                        if response_bridge
+                            .send(ResponseEvent::Body(ResponseBodyEvent {
+                                body: Box::from([]),
+                                more_body: false,
+                            }))
+                            .is_ok()
+                        {
                             scheduler.commit(EVENT_ID_RESPONSE);
                             py.detach(|| {
-                                let _ = response_written_rx.lock().unwrap().recv();
+                                // RecvError only is request filter was dropped, but since this
+                                // is the end always safe to ignore.
+                                let _ = response_written_rx.recv();
                             });
                         }
-                        let _ = response_bridge.send(ResponseEvent::Body(ResponseBodyEvent {
-                            body: Box::from([]),
-                            more_body: false,
-                        }));
-                        scheduler.commit(EVENT_ID_RESPONSE);
-                        py.detach(|| {
-                            // RecvError only is request filter was dropped, but since this
-                            // is the end always safe to ignore.
-                            let _ = response_written_rx.lock().unwrap().recv();
-                        });
                     }
                 }
 
@@ -245,10 +232,18 @@ impl Executor {
     }
 }
 
+/// The start_response callable passed to the WSGI application.
+///
+/// It is used to provide response header information, but we cannot immediately flush them to the client.
+/// So the callable's job is to record the information provided to then use when iterating the app's
+/// response.
+///
+/// https://peps.python.org/pep-3333/#the-start-response-callable
 #[pyclass]
 struct StartResponseCallable {
-    status: u16,
-    headers: Option<Vec<(HeaderName, HeaderValue)>>,
+    response_bridge: EventBridge<ResponseEvent>,
+    scheduler: Arc<SyncScheduler>,
+    called: bool,
 }
 
 #[pymethods]
@@ -256,10 +251,19 @@ impl StartResponseCallable {
     #[pyo3(signature = (status, response_headers, _exc_info=None))]
     fn __call__<'py>(
         &mut self,
+        py: Python<'py>,
         status: &str,
         response_headers: Bound<'py, PyList>,
         _exc_info: Option<Bound<'py, PyTuple>>,
-    ) -> PyResult<()> {
+    ) -> PyResult<Bound<'py, PyAny>> {
+        if self.called {
+            // TODO: Allow when exc_info is provided.
+            return Err(PyRuntimeError::new_err(
+                "start_response called multiple times",
+            ));
+        }
+
+        self.called = true;
         let mut headers = Vec::with_capacity(response_headers.len());
         for item in response_headers.iter() {
             let key_item = item.get_item(0)?;
@@ -278,12 +282,23 @@ impl StartResponseCallable {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        self.status = status_code
+        let status = status_code
             .parse::<u16>()
             .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
-        self.headers.replace(headers);
-        // TODO: Return a write function.
-        Ok(())
+
+        if self
+            .response_bridge
+            .send(ResponseEvent::Start(ResponseStartEvent { status, headers }))
+            .is_ok()
+        {
+            self.scheduler.commit(EVENT_ID_RESPONSE);
+        }
+
+        WriteCallable {
+            response_bridge: self.response_bridge.clone(),
+            scheduler: self.scheduler.clone(),
+        }
+        .into_bound_py_any(py)
     }
 }
 
@@ -299,7 +314,7 @@ struct RequestInput {
     /// The event bridge to send read requests.
     request_read_bridge: EventBridge<RequestReadEvent>,
     /// The channel receiver to receive body chunks.
-    request_body_rx: Mutex<Receiver<RequestBody>>,
+    request_body_rx: SyncReceiver<RequestBody>,
     /// The scheduler to wake up the filter to process read events.
     scheduler: Arc<SyncScheduler>,
     /// Whether the request body is closed.
@@ -389,7 +404,7 @@ impl RequestInput {
         self.scheduler.commit(EVENT_ID_REQUEST);
 
         let body = py.detach::<PyResult<RequestBody>, _>(|| {
-            self.request_body_rx.lock().unwrap().recv().map_err(|e| {
+            self.request_body_rx.recv().map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
             })
         })?;
@@ -400,3 +415,47 @@ impl RequestInput {
         Ok(PyBytes::new(py, &body.body))
     }
 }
+
+/// The write callable returned by start_response which can be used to write response body imperatively.
+///
+/// It should not be commonly used anymore per the WSGI guidance but is luckily easy to implement.
+///
+/// https://peps.python.org/pep-3333/#the-write-callable
+#[pyclass(module = "_pyvoy.wsgi")]
+struct WriteCallable {
+    response_bridge: EventBridge<ResponseEvent>,
+    scheduler: Arc<SyncScheduler>,
+}
+
+#[pymethods]
+impl WriteCallable {
+    fn __call__<'py>(&mut self, data: Bound<'py, PyBytes>) -> PyResult<()> {
+        let body: Box<[u8]> = Box::from(data.as_bytes());
+        if self
+            .response_bridge
+            .send(ResponseEvent::Body(ResponseBodyEvent {
+                body,
+                more_body: true,
+            }))
+            .is_ok()
+        {
+            self.scheduler.commit(EVENT_ID_RESPONSE);
+        }
+        Ok(())
+    }
+}
+
+/// Wrapper to mark Receiver as Sync. PyO3 hackily uses Sync as a signal for whether
+/// a type is safe to be used with the GIL detached, even though the thread doesn't change.
+/// We know it is fine for our usage.
+struct SyncReceiver<T>(Receiver<T>);
+
+impl<T> std::ops::Deref for SyncReceiver<T> {
+    type Target = Receiver<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+unsafe impl<T> Sync for SyncReceiver<T> {}
