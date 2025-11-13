@@ -536,6 +536,15 @@ def _readlines(
     return _success(start_response)
 
 
+def _write_callable(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    write = start_response("200 OK", [("content-type", "text/plain")])
+    write(b"Hello")
+    write(b" World")
+    return [b" and Goodbye!"]
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -572,5 +581,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _iterlines(environ, start_response)
         case "/readlines":
             return _readlines(environ, start_response)
+        case "/write-callable":
+            return _write_callable(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)
