@@ -519,3 +519,24 @@ async def test_scope_http_version(url: str, http2: bool, interface: Interface) -
         case False, "wsgi":
             expected = "HTTP/1.1"
     assert response.headers["x-scope-http-version"] == expected
+
+
+@pytest.mark.asyncio
+async def test_wsgi_readline(url_wsgi: str, client: httpx.AsyncClient) -> None:
+    content = b"Hello\nWorld\nGoodbye"
+    response = await client.post(f"{url_wsgi}/readline", content=content)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_wsgi_iterlines(url_wsgi: str, client: httpx.AsyncClient) -> None:
+    content = b"Animal\nBear\nCat"
+    response = await client.post(f"{url_wsgi}/iterlines", content=content)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_wsgi_readlines(url_wsgi: str, client: httpx.AsyncClient) -> None:
+    content = b"Food\nPizza\nBurrito"
+    response = await client.post(f"{url_wsgi}/readlines", content=content)
+    assert response.status_code == 200, response.text

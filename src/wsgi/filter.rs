@@ -37,7 +37,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_bridge: EventBridge::new(),
             request_body_rx: Some(request_body_rx),
             request_body_tx,
-            pending_read: 0,
+            pending_read: RequestReadEvent::Wait,
             read_buffer: Vec::new(),
             response_written_tx,
             response_written_rx: Some(response_written_rx),
@@ -51,9 +51,9 @@ struct Filter {
     request_closed: bool,
     response_closed: bool,
 
-    request_read_bridge: EventBridge<isize>,
+    request_read_bridge: EventBridge<RequestReadEvent>,
     response_bridge: EventBridge<ResponseEvent>,
-    pending_read: isize,
+    pending_read: RequestReadEvent,
     read_buffer: Vec<u8>,
 
     request_body_rx: Option<Receiver<RequestBody>>,
@@ -102,8 +102,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             let mut processed = false;
-            self.request_read_bridge.process(|n| {
-                self.pending_read = n;
+            self.request_read_bridge.process(|event| {
+                self.pending_read = event;
                 processed = true;
             });
             if processed {
@@ -165,8 +165,7 @@ impl Filter {
             return;
         }
         match self.pending_read {
-            0 => (),
-            n if n > 0 => {
+            RequestReadEvent::Raw(n) if n > 0 => {
                 let mut remaining = n as usize;
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
                 if let Some(buffers) = envoy_filter.get_request_body() {
@@ -180,7 +179,7 @@ impl Filter {
                     }
                     envoy_filter.drain_request_body(body.len());
                 }
-                self.pending_read = 0;
+                self.pending_read = RequestReadEvent::Wait;
                 send_or_log(
                     &self.request_body_tx,
                     RequestBody {
@@ -189,7 +188,7 @@ impl Filter {
                     },
                 );
             }
-            _ => {
+            RequestReadEvent::Raw(_) => {
                 if let Some(buffers) = envoy_filter.get_request_body() {
                     let mut read = 0;
                     for buffer in buffers {
@@ -199,7 +198,7 @@ impl Filter {
                     envoy_filter.drain_request_body(read);
                 }
                 if self.request_closed {
-                    self.pending_read = 0;
+                    self.pending_read = RequestReadEvent::Wait;
                     send_or_log(
                         &self.request_body_tx,
                         RequestBody {
@@ -209,6 +208,35 @@ impl Filter {
                     );
                 }
             }
+            RequestReadEvent::Line(n) => {
+                if let Some(buffers) = envoy_filter.get_request_body() {
+                    let mut read = 0;
+                    let mut send = false;
+                    'outer: for buffer in buffers {
+                        for &b in buffer.as_slice() {
+                            self.read_buffer.push(b);
+                            read += 1;
+                            if b == b'\n' || (n > 0 && self.read_buffer.len() >= n as usize) {
+                                send = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+                    envoy_filter.drain_request_body(read);
+                    if send || self.request_closed {
+                        let body = std::mem::take(&mut self.read_buffer);
+                        self.pending_read = RequestReadEvent::Wait;
+                        send_or_log(
+                            &self.request_body_tx,
+                            RequestBody {
+                                body: body.into_boxed_slice(),
+                                closed: !has_request_body(envoy_filter) && self.request_closed,
+                            },
+                        );
+                    }
+                }
+            }
+            _ => (),
         }
     }
 }

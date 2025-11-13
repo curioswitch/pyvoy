@@ -1,7 +1,7 @@
 use executors::{Executor as _, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue, header};
 use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
+    exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyString, PyTuple},
 };
@@ -39,7 +39,7 @@ impl Executor {
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
-        request_read_bridge: EventBridge<isize>,
+        request_read_bridge: EventBridge<RequestReadEvent>,
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
@@ -127,6 +127,8 @@ impl Executor {
                         request_body_rx,
                         scheduler: scheduler.clone(),
                         closed: false,
+                        constants: constants.clone(),
+                        lock: Mutex::new(()),
                     },
                 )?;
 
@@ -285,12 +287,29 @@ impl StartResponseCallable {
     }
 }
 
+/// The WSGI input stream to read the request body.
+///
+/// We send requests to read body to the filter which returns the requested amount, buffering as needed.
+/// Buffering in the filter allows us to drain only as much request body as was requested to allow for
+/// proper backpressure. Because in WSGI we block on reads, we use channels for the bodies themselves.
+///
+/// https://peps.python.org/pep-3333/#input-and-error-streams
 #[pyclass]
 struct RequestInput {
-    request_read_bridge: EventBridge<isize>,
+    /// The event bridge to send read requests.
+    request_read_bridge: EventBridge<RequestReadEvent>,
+    /// The channel receiver to receive body chunks.
     request_body_rx: Mutex<Receiver<RequestBody>>,
+    /// The scheduler to wake up the filter to process read events.
     scheduler: Arc<SyncScheduler>,
+    /// Whether the request body is closed.
     closed: bool,
+    /// Memoized constants.
+    constants: Arc<Constants>,
+    /// Lock to ensure only one read is executed at a time. No well behaved app should
+    /// call read concurrently since the order cannot be determined, but it's not hard
+    /// to protect against it either.
+    lock: Mutex<()>,
 }
 
 unsafe impl Sync for RequestInput {}
@@ -299,28 +318,85 @@ unsafe impl Sync for RequestInput {}
 impl RequestInput {
     #[pyo3(signature = (size=-1))]
     fn read<'py>(&mut self, py: Python<'py>, size: Option<isize>) -> PyResult<Bound<'py, PyBytes>> {
-        if self.closed {
-            return Ok(PyBytes::new(py, &[]));
-        }
-
         let size = size.unwrap_or(-1);
-
         if size == 0 {
-            Ok(PyBytes::new(py, &[]))
+            Ok(self.constants.empty_bytes.bind(py).clone())
         } else {
-            let _ = self.request_read_bridge.send(size);
-            self.scheduler.commit(EVENT_ID_REQUEST);
-
-            let body = py.detach::<PyResult<RequestBody>, _>(|| {
-                self.request_body_rx.lock().unwrap().recv().map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
-                })
-            })?;
-            if body.closed {
-                self.closed = true;
-            }
-
-            Ok(PyBytes::new(py, &body.body))
+            self.do_read(py, RequestReadEvent::Raw(size))
         }
+    }
+
+    #[pyo3(signature = (size=-1))]
+    fn readline<'py>(
+        &mut self,
+        py: Python<'py>,
+        size: Option<isize>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let size = size.unwrap_or(-1);
+        if size == 0 {
+            Ok(self.constants.empty_bytes.bind(py).clone())
+        } else {
+            self.do_read(py, RequestReadEvent::Line(size))
+        }
+    }
+
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        slf
+    }
+
+    fn __next__<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let line = self.do_read(py, RequestReadEvent::Line(-1))?;
+        if line.as_bytes().is_empty() {
+            Err(PyStopIteration::new_err(()))
+        } else {
+            Ok(line)
+        }
+    }
+
+    #[pyo3(signature = (hint=-1))]
+    fn readlines<'py>(
+        &mut self,
+        py: Python<'py>,
+        hint: Option<isize>,
+    ) -> PyResult<Bound<'py, PyList>> {
+        // We ignore hint as is common but want to keep the parameter name matching Python.
+        let _ = hint;
+
+        // Follow gunicorn's example of reading the entire request body and splitting it into lines to reduce I/O.
+        // This makes sense since it's trivial to use list(iter(input)) to stream lines instead if desired.
+        let body = self.do_read(py, RequestReadEvent::Raw(-1))?;
+        let res = PyList::empty(py);
+        for line in body.as_bytes().split_inclusive(|&b| b == b'\n') {
+            res.append(PyBytes::new(py, line))?;
+        }
+        Ok(res)
+    }
+}
+
+impl RequestInput {
+    fn do_read<'py>(
+        &mut self,
+        py: Python<'py>,
+        event: RequestReadEvent,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        if self.closed {
+            return Ok(self.constants.empty_bytes.bind(py).clone());
+        }
+
+        let _lock = self.lock.lock().unwrap();
+
+        let _ = self.request_read_bridge.send(event);
+        self.scheduler.commit(EVENT_ID_REQUEST);
+
+        let body = py.detach::<PyResult<RequestBody>, _>(|| {
+            self.request_body_rx.lock().unwrap().recv().map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to receive request body: {}", e))
+            })
+        })?;
+        if body.closed {
+            self.closed = true;
+        }
+
+        Ok(PyBytes::new(py, &body.body))
     }
 }
