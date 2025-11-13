@@ -419,6 +419,8 @@ pub(crate) struct Constants {
     pub wsgi_url_scheme: Py<PyString>,
     /// The string "wsgi.input".
     pub wsgi_input: Py<PyString>,
+    /// The string "wsgi.errors".
+    pub wsgi_errors: Py<PyString>,
     /// The string "wsgi.multithread".
     pub wsgi_multithread: Py<PyString>,
     /// The string "wsgi.multiprocess".
@@ -513,6 +515,7 @@ impl Constants {
             wsgi_version: PyString::new(py, "wsgi.version").unbind(),
             wsgi_url_scheme: PyString::new(py, "wsgi.url_scheme").unbind(),
             wsgi_input: PyString::new(py, "wsgi.input").unbind(),
+            wsgi_errors: PyString::new(py, "wsgi.errors").unbind(),
             wsgi_multithread: PyString::new(py, "wsgi.multithread").unbind(),
             wsgi_multiprocess: PyString::new(py, "wsgi.multiprocess").unbind(),
             wsgi_run_once: PyString::new(py, "wsgi.run_once").unbind(),

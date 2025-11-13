@@ -547,3 +547,27 @@ async def test_wsgi_write_callable(url_wsgi: str, client: httpx.AsyncClient) -> 
     response = await client.get(f"{url_wsgi}/write-callable")
     assert response.status_code == 200, response.text
     assert response.text == "Hello World and Goodbye!"
+
+
+@pytest.mark.asyncio
+async def test_errors_output(
+    url_wsgi: str, client: httpx.AsyncClient, logs_wsgi: asyncio.StreamReader
+) -> None:
+    response = await client.get(f"{url_wsgi}/errors-output")
+    assert response.status_code == 200, response.text
+    await assert_logs_contains(
+        logs_wsgi,
+        [
+            "Hello World",
+            "Goodbye Earth",
+            "Hello again",
+            "Animal: Bear",
+            "Food: Pizza",
+            "Drink: Beer",
+            "Country:",
+            "Japan",
+            "Line 1",
+            "Line 2",
+            "Line 3",
+        ],
+    )

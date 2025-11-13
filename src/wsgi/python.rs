@@ -1,3 +1,4 @@
+use envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error;
 use executors::{Executor as _, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue, header};
 use pyo3::{
@@ -133,8 +134,12 @@ impl Executor {
                         lock: Mutex::new(()),
                     },
                 )?;
-
-                // TODO: Support wsgi.errors
+                environ.set_item(
+                    &constants.wsgi_errors,
+                    ErrorsOutput {
+                        buffer: Mutex::new(String::new()),
+                    },
+                )?;
 
                 environ.set_item(&constants.wsgi_multithread, true)?;
                 environ.set_item(&constants.wsgi_multiprocess, false)?;
@@ -440,6 +445,104 @@ impl WriteCallable {
             .is_ok()
         {
             self.scheduler.commit(EVENT_ID_RESPONSE);
+        }
+        Ok(())
+    }
+}
+
+/// The wsgi.errors output stream.
+///
+/// We simply write lines to the Envoy log as messages at error level.
+/// It is expected that write is almost always called with full lines, but we
+/// keep a buffer as well in case. We go ahead and flush the buffer when flush
+/// is called even if it's not a full line in the end because it seems better
+/// to have the output broken up over log lines than to be buffered.
+///
+/// Envoy seems to automatically trim trailing whitespace, but we'll assume
+/// no one will notice that.
+#[pyclass(module = "_pyvoy.wsgi")]
+struct ErrorsOutput {
+    /// A buffer to hold partial lines.
+    buffer: Mutex<String>,
+}
+
+#[pymethods]
+impl ErrorsOutput {
+    fn write<'py>(&self, data: Bound<'py, PyString>) -> PyResult<usize> {
+        let str = data.to_str()?;
+
+        if str.is_empty() {
+            return Ok(0);
+        }
+
+        let mut buffer = self.buffer.lock().unwrap();
+
+        // Easiest case, we can output all the lines as is without touching the buffer.
+        if str.ends_with('\n') && buffer.is_empty() {
+            for line in str.split('\n') {
+                if !line.is_empty() {
+                    envoy_log_error!("{}", line);
+                }
+            }
+            return Ok(str.len());
+        }
+
+        buffer.extend(str.chars());
+
+        let to_write = if buffer.ends_with('\n') {
+            std::mem::take(&mut *buffer)
+        } else {
+            match buffer.rfind('\n') {
+                Some(idx) => {
+                    let full_buffer = std::mem::take(&mut *buffer);
+                    let (to_write, remaining) = full_buffer.split_at(idx + 1);
+                    *buffer = remaining.to_string();
+                    to_write.to_string()
+                }
+                None => {
+                    // No full lines yet.
+                    return Ok(str.len());
+                }
+            }
+        };
+
+        for line in to_write.split('\n') {
+            if !line.is_empty() {
+                envoy_log_error!("{}", line);
+            }
+        }
+
+        Ok(str.len())
+    }
+
+    fn writelines<'py>(&self, lines: Bound<'py, PyAny>) -> PyResult<()> {
+        self.flush()?;
+
+        for item in lines.try_iter()? {
+            let item = item?;
+            let mut str = item.cast::<PyString>()?.to_str()?;
+
+            if str.is_empty() {
+                continue;
+            }
+
+            if str.ends_with('\n') {
+                str = &str[..str.len() - 1];
+            }
+
+            envoy_log_error!("{}", str);
+        }
+        Ok(())
+    }
+
+    fn flush(&self) -> PyResult<()> {
+        let buffer = &mut *self.buffer.lock().unwrap();
+        if !buffer.is_empty() {
+            for line in std::mem::take(&mut *buffer).split('\n') {
+                if !line.is_empty() {
+                    envoy_log_error!("{}", line);
+                }
+            }
         }
         Ok(())
     }
