@@ -42,6 +42,9 @@ impl Lifespan {
             ))),
             // TODO: Add option to force lifespan and log this error if it's enabled.
             LifespanEvent::LifespanFailed(_) => Ok(false),
+            // The ASGI spec does not document how to handle a coroutine that completes without exception
+            // but it's reasonable to treat it the same as LifespanFailed.
+            LifespanEvent::LifespanComplete => Ok(false),
             // The send callabale validates event types so we know we won't have other events here.
             _ => unreachable!(),
         }
@@ -79,11 +82,14 @@ impl Lifespan {
             Ok(LifespanEvent::ShutdownFailed(message)) => {
                 envoy_log_error!("Application shutdown failed: {}", message);
             }
-            // The send callable validates event order so we shouldn't get anything else here.
-            Ok(_) => unreachable!(),
-            Err(_) => {
+            Ok(LifespanEvent::LifespanComplete) | Err(_) => {
                 envoy_log_error!("Lifespan coroutine terminated without sending shutdown event",);
             }
+            Ok(LifespanEvent::LifespanFailed(message)) => {
+                envoy_log_error!("Lifespan exception during shutdown: {}", message);
+            }
+            // The send callable validates event order so we shouldn't get anything else here.
+            Ok(_) => unreachable!(),
         }
     }
 }
@@ -100,6 +106,10 @@ pub(crate) enum LifespanEvent {
     ShutdownFailed(String),
     /// The lifespan call failed completely, meaning the app doesn't support it.
     LifespanFailed(String),
+    /// The lifespan coroutine completed without an exception. This is only valid
+    /// after sending either ShutdownComplete or ShutdownFailed, and any other time
+    /// indicates a bad application.
+    LifespanComplete,
 }
 
 /// Executes the ASGI app with a lifespan scope.
@@ -141,6 +151,8 @@ pub(crate) fn execute_lifespan<'py>(
             // we treat it as a failure to support lifespan.
             let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
             let _ = lifespan_tx.send(LifespanEvent::LifespanFailed(msg));
+            // This case is so rare, rather than complicating caller code by handling an Option,
+            // we just return a Lifespan that we know won't be used because we sent LifespanFailed.
             return Ok(Lifespan {
                 state: Some(state.unbind()),
                 shutdown_future: shutdown_future.unbind(),
@@ -250,7 +262,6 @@ impl SendCallable {
 
         match &self.next_event {
             NextLifespanEvent::Startup => {
-                self.next_event = NextLifespanEvent::Shutdown;
                 match event_type {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html#startup-complete-send-event
                     "lifespan.startup.complete" => {
@@ -276,9 +287,9 @@ impl SendCallable {
                         );
                     }
                 }
+                self.next_event = NextLifespanEvent::Shutdown;
             }
             NextLifespanEvent::Shutdown => {
-                self.next_event = NextLifespanEvent::Completed;
                 match event_type {
                     // https://asgi.readthedocs.io/en/latest/specs/lifespan.html#shutdown-complete-send-event
                     "lifespan.shutdown.complete" => {
@@ -306,6 +317,7 @@ impl SendCallable {
                         );
                     }
                 }
+                self.next_event = NextLifespanEvent::Completed;
             }
             NextLifespanEvent::Completed => {
                 return ErrorAwaitable::new_py(
@@ -334,10 +346,15 @@ unsafe impl Sync for FutureHandler {}
 #[pymethods]
 impl FutureHandler {
     fn __call__<'py>(&self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        if let Err(e) = future.call_method1(&self.constants.result, (0,)) {
-            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
-            let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
-            let _ = self.lifespan_tx.send(LifespanEvent::LifespanFailed(msg));
+        match future.call_method1(&self.constants.result, (0,)) {
+            Ok(_) => {
+                let _ = self.lifespan_tx.send(LifespanEvent::LifespanComplete);
+            }
+            Err(e) => {
+                let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
+                let _ = self.lifespan_tx.send(LifespanEvent::LifespanFailed(msg));
+            }
         }
     }
 }
