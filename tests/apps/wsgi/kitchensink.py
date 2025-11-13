@@ -8,9 +8,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     if sys.version_info >= (3, 11):
+        from wsgiref.types import ErrorStream as WSGIErrorStream
         from wsgiref.types import InputStream as WSGIInputStream
         from wsgiref.types import StartResponse, WSGIEnvironment
     else:
+        from _typeshed.wsgi import ErrorStream as WSGIErrorStream
         from _typeshed.wsgi import InputStream as WSGIInputStream
         from _typeshed.wsgi import StartResponse, WSGIEnvironment
 
@@ -545,6 +547,28 @@ def _write_callable(
     return [b" and Goodbye!"]
 
 
+def _errors_output(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    errors = cast("WSGIErrorStream", environ["wsgi.errors"])
+
+    n = errors.write("Hello World\n")
+    if n != len("Hello World\n"):
+        return _failure("n != len('Hello World\\n')", start_response)
+    n = errors.write("")
+    if n != 0:
+        return _failure("n != 0", start_response)
+    errors.write("Goodbye Earth\n\n\nHello again\n")
+
+    errors.write("Animal: ")
+    errors.write("Bear\n")
+    errors.write("Food: ")
+    errors.write("Pizza\nDrink: ")
+    errors.write("Beer\n\n\n")
+
+    return _success(start_response)
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -583,5 +607,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _readlines(environ, start_response)
         case "/write-callable":
             return _write_callable(environ, start_response)
+        case "/errors-output":
+            return _errors_output(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

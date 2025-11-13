@@ -13,8 +13,9 @@ async def find_logs_lines(
         async for line in logs:
             read_lines.append(line.decode())
             decoded_line = line.decode().rstrip()
-            if decoded_line in expected_lines:
-                found_lines.add(decoded_line)
+            for expected_line in expected_lines:
+                if expected_line in decoded_line:
+                    found_lines.add(expected_line)
             if len(found_lines) == len(expected_lines):
                 break
     except asyncio.CancelledError:
