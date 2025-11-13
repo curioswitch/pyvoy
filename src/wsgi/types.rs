@@ -16,8 +16,29 @@ pub(crate) enum ResponseEvent {
     Exception,
 }
 
+/// An event to read request the body, called from the WSGI input stream.
+///
+/// size 0 is handled in the WSGI input stream itself so is never set here.
+///
+/// https://peps.python.org/pep-3333/#input-and-error-streams
+pub(crate) enum RequestReadEvent {
+    /// Wait until a request to read.
+    Wait,
+
+    /// A raw read of up to the given number of bytes. If the bytes is negative, read until EOF.
+    /// https://docs.python.org/3.14/library/io.html#io.RawIOBase.read
+    Raw(isize),
+    /// A read of a line of up to the given number of bytes. If the bytes is negative, read until
+    /// the first line or EOF.
+    /// https://docs.python.org/3.14/library/io.html#io.IOBase.readline
+    Line(isize),
+}
+
+/// A chunk read from the request body. If `closed` is true, this is the final chunk.
 pub(crate) struct RequestBody {
+    /// The body bytes read.
     pub body: Box<[u8]>,
+    /// Whether the request body is closed, meaning this is the last chunk.
     pub closed: bool,
 }
 

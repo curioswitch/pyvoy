@@ -82,6 +82,9 @@ def _request_body(
         return _failure('environ["REQUEST_METHOD"] != "POST"', start_response)
 
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
+    if request_body.read(0) != b"":
+        return _failure("request_body.read(0) != b''", start_response)
+
     body = b""
 
     for _ in range(10):
@@ -116,7 +119,9 @@ def _request_and_response_body(
         return _failure('environ["REQUEST_METHOD"] != "POST"', start_response)
 
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
-    body = request_body.read()
+    # While wsgi typing doesn't allow None for size, servers conventionally accept it
+    # and we should to.
+    body = request_body.read(cast("int", None))
     if request_body.read() != b"":
         return _failure("request_body.read(1) != b''", start_response)
 
@@ -150,17 +155,6 @@ def _large_bodies(
         yield b"B" * 1000
 
 
-def _read_to_newline(body_stream: WSGIInputStream) -> bytes:
-    body = b""
-    while True:
-        chunk = body_stream.read(1024)
-        if not chunk:
-            return body
-        body += chunk
-        if body and body[-1] == b"\n"[0]:
-            return body[:-1]
-
-
 def _bidi_stream(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -170,7 +164,7 @@ def _bidi_stream(
 
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
     yield b"Who are you?"
-    body = _read_to_newline(request_body)
+    body = request_body.readline()[:-1]
     yield b"Hi " + body + b". What do you want to do?"
     body = request_body.read()
     yield b"Let's " + body + b"!"
@@ -488,6 +482,60 @@ def _echo_scope(
     return [b"Ok"]
 
 
+def _readline(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+    line = request_body.readline()
+    if line != b"Hello\n":
+        return _failure("line != b'Hello\\n'", start_response)
+    line = request_body.readline(0)
+    if line != b"":
+        return _failure("line != b''", start_response)
+    line = request_body.readline(2)
+    if line != b"Wo":
+        return _failure("line != b'Wo'", start_response)
+    line = request_body.readline(0)
+    if line != b"":
+        return _failure("line != b''", start_response)
+    line = request_body.readline(-1)
+    if line != b"rld\n":
+        return _failure("line != b'rld\\n'", start_response)
+    # While wsgi typing doesn't allow None for size, servers conventionally accept it
+    # and we should to.
+    line = request_body.readline(cast("int", None))
+    if line != b"Goodbye":
+        return _failure("line != b'Goodbye'", start_response)
+
+    return _success(start_response)
+
+
+def _iterlines(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+    lines = list(iter(request_body))
+    if lines != [b"Animal\n", b"Bear\n", b"Cat"]:
+        return _failure(
+            "lines != [b'Hello\\n', b'World\\n', b'Goodbye']", start_response
+        )
+
+    return _success(start_response)
+
+
+def _readlines(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+    lines = request_body.readlines()
+    if lines != [b"Food\n", b"Pizza\n", b"Burrito"]:
+        return _failure(
+            "lines != [b'Hello\\n', b'World\\n', b'Goodbye']", start_response
+        )
+
+    return _success(start_response)
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -518,5 +566,11 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _nihongo(environ, start_response)
         case "/echo-scope":
             return _echo_scope(environ, start_response)
+        case "/readline":
+            return _readline(environ, start_response)
+        case "/iterlines":
+            return _iterlines(environ, start_response)
+        case "/readlines":
+            return _readlines(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)
