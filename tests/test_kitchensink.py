@@ -564,5 +564,10 @@ async def test_errors_output(
             "Animal: Bear",
             "Food: Pizza",
             "Drink: Beer",
+            "Country:",
+            "Japan",
+            "Line 1",
+            "Line 2",
+            "Line 3",
         ],
     )

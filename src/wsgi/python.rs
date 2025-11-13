@@ -457,6 +457,9 @@ impl WriteCallable {
 /// keep a buffer as well in case. We go ahead and flush the buffer when flush
 /// is called even if it's not a full line in the end because it seems better
 /// to have the output broken up over log lines than to be buffered.
+///
+/// Envoy seems to automatically trim trailing whitespace, but we'll assume
+/// no one will notice that.
 #[pyclass(module = "_pyvoy.wsgi")]
 struct ErrorsOutput {
     /// A buffer to hold partial lines.
@@ -517,8 +520,17 @@ impl ErrorsOutput {
 
         for item in lines.try_iter()? {
             let item = item?;
-            let str = item.cast::<PyString>()?;
-            envoy_log_error!("{}", str.to_str()?);
+            let mut str = item.cast::<PyString>()?.to_str()?;
+
+            if str.is_empty() {
+                continue;
+            }
+
+            if str.ends_with('\n') {
+                str = &str[..str.len() - 1];
+            }
+
+            envoy_log_error!("{}", str);
         }
         Ok(())
     }

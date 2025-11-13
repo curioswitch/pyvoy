@@ -566,6 +566,12 @@ def _errors_output(
     errors.write("Pizza\nDrink: ")
     errors.write("Beer\n\n\n")
 
+    errors.write("Country: ")
+    errors.flush()
+    errors.write("Japan")
+
+    errors.writelines(["Line 1\n", "", "Line 2", "Line 3\n"])
+
     return _success(start_response)
 
 
