@@ -23,7 +23,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 mod awaitable;
-mod lifespan;
+pub(crate) mod lifespan;
 
 create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
@@ -46,16 +46,12 @@ struct ExecutorInner {
 
 /// Holds [`JoinHandle`] for threads created by [`Executor`].
 pub(crate) struct ExecutorHandles {
-    lifespan: Option<Lifespan>,
     loop_handle: JoinHandle<()>,
     gil_handle: JoinHandle<()>,
 }
 
 impl ExecutorHandles {
-    pub(crate) fn close(self) {
-        if let Some(lifespan) = self.lifespan {
-            lifespan.shutdown();
-        }
+    pub(crate) fn join(self) {
         let _ = self.loop_handle.join();
         let _ = self.gil_handle.join();
     }
@@ -85,7 +81,7 @@ impl Executor {
         app_module: &str,
         app_attr: &str,
         constants: Arc<Constants>,
-    ) -> PyResult<(Self, ExecutorHandles)> {
+    ) -> PyResult<(Self, ExecutorHandles, Option<Lifespan>)> {
         // Import threading on this thread because Python records the first thread
         // that imports threading as the main thread. When running the Python interpreter, this
         // happens to work, but not when embedding. For our purposes, we just need the asyncio
@@ -188,13 +184,13 @@ impl Executor {
         Ok((
             executor,
             ExecutorHandles {
-                lifespan: if lifespan_supported {
-                    Some(lifespan)
-                } else {
-                    None
-                },
                 loop_handle,
                 gil_handle,
+            },
+            if lifespan_supported {
+                Some(lifespan)
+            } else {
+                None
             },
         ))
     }
