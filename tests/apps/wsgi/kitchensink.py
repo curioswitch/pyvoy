@@ -639,7 +639,8 @@ def _multiple_start_response(
 
 
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
-    match environ["PATH_INFO"]:
+    path = cast("str", environ["PATH_INFO"]).encode("latin-1").decode("utf-8")
+    match path:
         case "/headers-only":
             return _headers_only(environ, start_response)
         case "/request-body":
