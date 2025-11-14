@@ -75,6 +75,9 @@ impl Executor {
 
                 let raw_path: &[u8] =
                     if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
+                        // In practice, Envoy rejects requests with non-ASCII query strings so decode_latin1
+                        // is redundant, but still keep it for consistency, it won't allocate and has little
+                        // overhead.
                         environ.set_item(
                             &constants.wsgi_query_string,
                             PyString::new(py, &decode_latin1(&scope.raw_path[query_idx + 1..])),
