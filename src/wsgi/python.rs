@@ -81,6 +81,7 @@ impl Executor {
                         )?;
                         &scope.raw_path[..query_idx]
                     } else {
+                        environ.set_item(&constants.wsgi_query_string, &constants.empty_string)?;
                         &scope.raw_path
                     };
 
