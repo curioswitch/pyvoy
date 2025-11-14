@@ -445,10 +445,13 @@ pub(crate) struct Constants {
     pub empty_bytes: Py<PyBytes>,
     /// An empty string object.
     pub empty_string: Py<PyString>,
+
+    /// The root path value passed from configuration.
+    pub root_path_value: Py<PyString>,
 }
 
 impl Constants {
-    pub fn new(py: Python<'_>) -> Self {
+    pub fn new(py: Python<'_>, root_path: &str) -> Self {
         Self {
             asgi: PyString::new(py, "asgi").unbind(),
             extensions: PyString::new(py, "extensions").unbind(),
@@ -532,6 +535,8 @@ impl Constants {
             with_traceback: PyString::new(py, "with_traceback").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
             empty_string: PyString::new(py, "").unbind(),
+
+            root_path_value: PyString::new(py, root_path).unbind(),
         }
     }
 }

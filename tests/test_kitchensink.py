@@ -83,12 +83,6 @@ def url(interface: Interface, url_asgi: str, url_wsgi: str) -> str:
             return url_wsgi
 
 
-@pytest_asyncio.fixture
-async def client() -> AsyncIterator[httpx.AsyncClient]:
-    async with httpx.AsyncClient() as client:
-        yield client
-
-
 @pytest.mark.asyncio
 async def test_headers_only(url: str, client: httpx.AsyncClient) -> None:
     response = await client.get(

@@ -337,7 +337,7 @@ impl ExecutorInner {
             PyString::from_bytes(py, &decoded_path)?,
         )?;
         scope_dict.set_item(&self.constants.raw_path, PyBytes::new(py, raw_path))?;
-        scope_dict.set_item(&self.constants.root_path, &self.constants.empty_string)?;
+        scope_dict.set_item(&self.constants.root_path, &self.constants.root_path_value)?;
         let headers = PyList::new(
             py,
             scope.headers.iter().map(|(k, v)| {

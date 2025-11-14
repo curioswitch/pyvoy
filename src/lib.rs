@@ -57,8 +57,9 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
         return None;
     };
     let interface = filter_config["interface"].as_str().unwrap_or("asgi");
+    let root_path = filter_config["root_path"].as_str().unwrap_or("");
 
-    let constants = Arc::new(Python::attach(types::Constants::new));
+    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
 
     match interface {
         "asgi" => asgi::filter::Config::new(app, constants)

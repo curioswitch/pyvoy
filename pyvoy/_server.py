@@ -47,6 +47,7 @@ class PyvoyServer:
     _print_startup_logs: bool
     _print_envoy_config: bool
     _interface: Interface
+    _root_path: str
 
     _stopped: bool
 
@@ -62,6 +63,7 @@ class PyvoyServer:
         tls_ca_cert: bytes | os.PathLike | None = None,
         tls_enable_http3: bool = True,
         interface: Interface = "asgi",
+        root_path: str = "",
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
         print_envoy_config: bool = False,
@@ -75,6 +77,7 @@ class PyvoyServer:
         self._tls_ca_cert = tls_ca_cert
         self._tls_enable_http3 = tls_enable_http3
         self._interface = interface
+        self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
         self._print_envoy_config = print_envoy_config
@@ -193,7 +196,11 @@ class PyvoyServer:
                     "filter_config": {
                         "@type": "type.googleapis.com/google.protobuf.StringValue",
                         "value": json.dumps(
-                            {"app": self._app, "interface": self._interface}
+                            {
+                                "app": self._app,
+                                "interface": self._interface,
+                                "root_path": self._root_path,
+                            }
                         ),
                     },
                 },

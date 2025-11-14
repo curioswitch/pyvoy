@@ -481,6 +481,8 @@ def _echo_scope(
             ("x-scope-content-length", environ.get("CONTENT_LENGTH", "")),
             ("x-scope-content-type", environ.get("CONTENT_TYPE", "")),
             ("x-scope-http-version", environ.get("SERVER_PROTOCOL", "")),
+            ("x-scope-path", environ.get("PATH_INFO", "")),
+            ("x-scope-root-path", environ.get("SCRIPT_NAME", "")),
         ],
     )
     return [b"Ok"]
