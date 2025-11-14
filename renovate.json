@@ -19,6 +19,12 @@
     {
       "matchManagers": ["rust"],
       "groupName": "Rust dependencies"
+    },
+    {
+      // We need to use an older version for compatibility
+      "matchCurrentVersion": "11",
+      "matchPackageNames": ["debian"],
+      "enabled": false
     }
   ]
 }
