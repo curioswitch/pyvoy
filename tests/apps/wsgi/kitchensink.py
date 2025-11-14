@@ -575,6 +575,60 @@ def _errors_output(
     return _success(start_response)
 
 
+def _multiple_start_response(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    write = start_response("200 OK", [("content-type", "text/plain")])
+    try:
+        start_response("200 OK", [("content-type", "text/plain")])
+    except RuntimeError as e:
+        if str(e) != "start_response called twice without exc_info":
+            start_response(
+                "500 Internal Server Error",
+                [("content-type", "text/plain")],
+                sys.exc_info(),
+            )
+            return [b"str(e) != 'start_response called twice without exc_info'"]
+    else:
+        start_response(
+            "500 Internal Server Error",
+            [("content-type", "text/plain")],
+            # WSGI only defines how to handle the presence or absence of exc_info, not
+            # if it is filled with None as it is here. We take advantage of it to
+            # allow changing the headers here.
+            sys.exc_info(),
+        )
+        return [b"Expected RuntimeError for double start_response not raised"]
+
+    try:
+        msg = "ignored"
+        raise ValueError(msg)  # noqa: TRY301
+    except ValueError:
+        start_response(
+            "200 OK",
+            [("content-type", "text/plain"), ("x-animal", "bear")],
+            sys.exc_info(),
+        )
+
+    write(b"Ok?")
+
+    try:
+        msg = "ignored"
+        raise ValueError(msg)  # noqa: TRY301
+    except ValueError:
+        try:
+            start_response(
+                "200 OK",
+                [("content-type", "text/plain"), ("x-animal", "cat")],
+                sys.exc_info(),
+            )
+        except ValueError as e:
+            if str(e) != msg:
+                return [f" No, expected same ValueError thrown but got {e!s}".encode()]
+
+    return [b" Yes"]
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     match environ["PATH_INFO"]:
         case "/headers-only":
@@ -615,5 +669,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _write_callable(environ, start_response)
         case "/errors-output":
             return _errors_output(environ, start_response)
+        case "/multiple-start-response":
+            return _multiple_start_response(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

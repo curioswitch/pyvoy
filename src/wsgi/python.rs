@@ -54,10 +54,18 @@ impl Executor {
         let response_written_rx = SyncReceiver(response_written_rx);
         let constants = self.constants.clone();
         let app = self.app.clone();
+
         self.pool.execute(move || {
             let scheduler = Arc::new(scheduler);
             let result: PyResult<()> = Python::attach(|py| {
                 let app = app.bind(py);
+                let response_sender = Arc::new(Mutex::new(ResponseSender {
+                    response_bridge: response_bridge.clone(),
+                    scheduler: scheduler.clone(),
+                    start_event: None,
+                    headers_sent: false,
+                    constants: constants.clone(),
+                }));
 
                 let environ = PyDict::new(py);
                 environ.set_http_method(&constants, &constants.request_method, &scope.method)?;
@@ -148,9 +156,7 @@ impl Executor {
                 let response = app.call1((
                     environ,
                     StartResponseCallable {
-                        called: false,
-                        response_bridge: response_bridge.clone(),
-                        scheduler: scheduler.clone(),
+                        response_sender: response_sender.clone(),
                     },
                 ))?;
 
@@ -160,15 +166,13 @@ impl Executor {
 
                 match response.len() {
                     Ok(0) => {
-                        if response_bridge
-                            .send(ResponseEvent::Body(ResponseBodyEvent {
+                        response_sender.lock().unwrap().send(
+                            ResponseEvent::Body(ResponseBodyEvent {
                                 body: Box::default(),
                                 more_body: false,
-                            }))
-                            .is_ok()
-                        {
-                            scheduler.commit(EVENT_ID_RESPONSE);
-                        }
+                            }),
+                            None,
+                        )?;
                     }
                     Ok(1) => {
                         let item =
@@ -176,46 +180,40 @@ impl Executor {
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
                         let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
-                        if response_bridge
-                            .send(ResponseEvent::Body(ResponseBodyEvent {
+                        response_sender.lock().unwrap().send(
+                            ResponseEvent::Body(ResponseBodyEvent {
                                 body,
                                 more_body: false,
-                            }))
-                            .is_ok()
-                        {
-                            scheduler.commit(EVENT_ID_RESPONSE);
-                        }
+                            }),
+                            None,
+                        )?;
                     }
                     _ => {
                         for item in response.try_iter()? {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
-                            if response_bridge
-                                .send(ResponseEvent::Body(ResponseBodyEvent {
+                            response_sender.lock().unwrap().send(
+                                ResponseEvent::Body(ResponseBodyEvent {
                                     body,
                                     more_body: true,
-                                }))
-                                .is_ok()
-                            {
-                                scheduler.commit(EVENT_ID_RESPONSE);
-                                py.detach(|| {
-                                    let _ = response_written_rx.recv();
-                                });
-                            }
-                        }
-                        if response_bridge
-                            .send(ResponseEvent::Body(ResponseBodyEvent {
-                                body: Box::from([]),
-                                more_body: false,
-                            }))
-                            .is_ok()
-                        {
-                            scheduler.commit(EVENT_ID_RESPONSE);
+                                }),
+                                None,
+                            )?;
                             py.detach(|| {
-                                // RecvError only is request filter was dropped, but since this
-                                // is the end always safe to ignore.
                                 let _ = response_written_rx.recv();
                             });
                         }
+                        response_sender.lock().unwrap().send(
+                            ResponseEvent::Body(ResponseBodyEvent {
+                                body: Box::from([]),
+                                more_body: false,
+                            }),
+                            None,
+                        )?;
+                        py.detach(|| {
+                            // RecvError only is request filter was dropped, but since this
+                            // is the end always safe to ignore.
+                            let _ = response_written_rx.recv();
+                        });
                     }
                 }
 
@@ -246,29 +244,19 @@ impl Executor {
 /// https://peps.python.org/pep-3333/#the-start-response-callable
 #[pyclass]
 struct StartResponseCallable {
-    response_bridge: EventBridge<ResponseEvent>,
-    scheduler: Arc<SyncScheduler>,
-    called: bool,
+    response_sender: Arc<Mutex<ResponseSender>>,
 }
 
 #[pymethods]
 impl StartResponseCallable {
-    #[pyo3(signature = (status, response_headers, _exc_info=None))]
+    #[pyo3(signature = (status, response_headers, exc_info=None))]
     fn __call__<'py>(
         &mut self,
         py: Python<'py>,
         status: &str,
         response_headers: Bound<'py, PyList>,
-        _exc_info: Option<Bound<'py, PyTuple>>,
+        exc_info: Option<Bound<'py, PyTuple>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        if self.called {
-            // TODO: Allow when exc_info is provided.
-            return Err(PyRuntimeError::new_err(
-                "start_response called multiple times",
-            ));
-        }
-
-        self.called = true;
         let mut headers = Vec::with_capacity(response_headers.len());
         for item in response_headers.iter() {
             let key_item = item.get_item(0)?;
@@ -291,19 +279,71 @@ impl StartResponseCallable {
             .parse::<u16>()
             .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
 
-        if self
-            .response_bridge
-            .send(ResponseEvent::Start(ResponseStartEvent { status, headers }))
-            .is_ok()
-        {
-            self.scheduler.commit(EVENT_ID_RESPONSE);
-        }
+        self.response_sender.lock().unwrap().send(
+            ResponseEvent::Start(ResponseStartEvent { status, headers }),
+            exc_info,
+        )?;
 
         WriteCallable {
-            response_bridge: self.response_bridge.clone(),
-            scheduler: self.scheduler.clone(),
+            response_sender: self.response_sender.clone(),
         }
         .into_bound_py_any(py)
+    }
+}
+
+/// A wrapper around the response event bridge to allow tracking events. This helps
+/// implement certain quirky features such as exc_info.
+struct ResponseSender {
+    /// The event bridge to send response events.
+    response_bridge: EventBridge<ResponseEvent>,
+    /// The scheduler to wake up the filter to process response events.
+    scheduler: Arc<SyncScheduler>,
+
+    /// The start event created in start_response if not sent yet.
+    start_event: Option<ResponseStartEvent>,
+
+    /// Whether headers have been sent yet.
+    headers_sent: bool,
+    /// Memoized constants.
+    constants: Arc<Constants>,
+}
+
+impl ResponseSender {
+    fn send<'py>(
+        &mut self,
+        event: ResponseEvent,
+        exc_info: Option<Bound<'py, PyTuple>>,
+    ) -> PyResult<()> {
+        match event {
+            ResponseEvent::Start(start) => {
+                if let Some(exc_info) = exc_info {
+                    if self.headers_sent {
+                        let e = exc_info.get_item(1)?;
+                        e.call_method1(&self.constants.with_traceback, (exc_info.get_item(2)?,))?;
+                        return Err(PyErr::from_value(e));
+                    }
+                } else if self.start_event.is_some() {
+                    return Err(PyRuntimeError::new_err(
+                        "start_response called twice without exc_info",
+                    ));
+                }
+                self.start_event = Some(start);
+                return Ok(());
+            }
+            ResponseEvent::Body(_) => {
+                if let Some(start) = self.start_event.take() {
+                    // First body event, need to send start first.
+                    let _ = self.response_bridge.send(ResponseEvent::Start(start));
+                    self.headers_sent = true;
+                }
+            }
+            ResponseEvent::Exception => {}
+        }
+
+        if self.response_bridge.send(event).is_ok() {
+            self.scheduler.commit(EVENT_ID_RESPONSE);
+        }
+        Ok(())
     }
 }
 
@@ -428,25 +468,20 @@ impl RequestInput {
 /// https://peps.python.org/pep-3333/#the-write-callable
 #[pyclass(module = "_pyvoy.wsgi")]
 struct WriteCallable {
-    response_bridge: EventBridge<ResponseEvent>,
-    scheduler: Arc<SyncScheduler>,
+    response_sender: Arc<Mutex<ResponseSender>>,
 }
 
 #[pymethods]
 impl WriteCallable {
     fn __call__<'py>(&mut self, data: Bound<'py, PyBytes>) -> PyResult<()> {
         let body: Box<[u8]> = Box::from(data.as_bytes());
-        if self
-            .response_bridge
-            .send(ResponseEvent::Body(ResponseBodyEvent {
+        self.response_sender.lock().unwrap().send(
+            ResponseEvent::Body(ResponseBodyEvent {
                 body,
                 more_body: true,
-            }))
-            .is_ok()
-        {
-            self.scheduler.commit(EVENT_ID_RESPONSE);
-        }
-        Ok(())
+            }),
+            None,
+        )
     }
 }
 
