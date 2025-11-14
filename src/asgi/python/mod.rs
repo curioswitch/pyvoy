@@ -310,7 +310,24 @@ impl ExecutorInner {
         let scope_dict = PyDict::new(py);
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
         scope_dict.set_item(&self.constants.asgi, &self.asgi)?;
-        scope_dict.set_item(&self.constants.extensions, &self.extensions)?;
+
+        let mut extensions = self.extensions.bind(py).clone();
+        if let Some(tls_info) = scope.tls_info {
+            extensions = extensions.copy()?;
+            let tls_dict = PyDict::new(py);
+            tls_dict.set_item(&self.constants.tls_version, tls_info.tls_version)?;
+            if let Some(client_cert_name) = tls_info.client_cert_name {
+                tls_dict.set_item(
+                    &self.constants.client_cert_name,
+                    PyString::new(py, &client_cert_name),
+                )?;
+            } else {
+                tls_dict.set_item(&self.constants.client_cert_name, py.None())?;
+            }
+            extensions.set_item(&self.constants.tls, tls_dict)?;
+        }
+        scope_dict.set_item(&self.constants.extensions, extensions)?;
+
         if let Some(state) = &self.state {
             scope_dict.set_item(&self.constants.state, state)?;
         }
