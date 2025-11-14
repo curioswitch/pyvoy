@@ -11,8 +11,8 @@ from tempfile import NamedTemporaryFile
 from types import TracebackType
 from typing import IO, Literal
 
+import find_libpython
 import yaml
-from find_libpython import find_libpython
 
 from ._bin import get_envoy_path, get_pyvoy_dir_path
 
@@ -27,13 +27,19 @@ def get_envoy_environ() -> dict[str, str]:
     }
 
     if os.name == "posix":
-        libpython_path = find_libpython()
-        if libpython_path:
+        # We use candidate_paths() instead of find_python because the latter
+        # returns the real path, not a symlink. In macOS framework packages,
+        # the real path is called Python, not libpython.
+        candidates = [Path(p) for p in find_libpython.candidate_paths()]
+        candidates = [
+            p for p in candidates if p.exists() and p.name.startswith("libpython")
+        ]
+        if candidates:
             if sys.platform == "darwin":
-                libpython_dir = str(Path(libpython_path).parent)
+                libpython_dir = str(candidates[0].parent)
                 env["DYLD_LIBRARY_PATH"] = libpython_dir
             else:
-                env["LD_PRELOAD"] = libpython_path
+                env["LD_PRELOAD"] = str(candidates[0])
 
     return env
 
