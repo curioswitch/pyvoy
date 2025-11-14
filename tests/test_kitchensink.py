@@ -463,7 +463,7 @@ async def test_all_the_headers(url: str, client: httpx.AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_nihongo(url: str, client: httpx.AsyncClient) -> None:
-    response = await client.get(f"{url}/日本語")
+    response = await client.get(f"{url}/日本語?q=英語")
     assert response.status_code == 200, response.text
 
 

@@ -1,3 +1,4 @@
+use encoding_rs::mem::decode_latin1;
 use envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error;
 use executors::{Executor as _, crossbeam_channel_pool::ThreadPool};
 use http::{HeaderName, HeaderValue, header};
@@ -76,7 +77,7 @@ impl Executor {
                     if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
                         environ.set_item(
                             &constants.wsgi_query_string,
-                            PyString::from_bytes(py, &scope.raw_path[query_idx + 1..])?,
+                            PyString::new(py, &decode_latin1(&scope.raw_path[query_idx + 1..])),
                         )?;
                         &scope.raw_path[..query_idx]
                     } else {
@@ -100,7 +101,7 @@ impl Executor {
                 };
                 environ.set_item(
                     &constants.path_info,
-                    PyString::from_bytes(py, decoded_path_slice)?,
+                    PyString::new(py, &decode_latin1(decoded_path_slice)),
                 )?;
 
                 for (key, value) in scope.headers.iter() {

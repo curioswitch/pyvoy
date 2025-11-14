@@ -957,11 +957,11 @@ async def _all_the_headers(
 
 
 async def _nihongo(
-    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+    scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
     try:
         await _assert_dict_value(
-            _scope, "raw_path", b"/%E6%97%A5%E6%9C%AC%E8%AA%9E", send
+            scope, "raw_path", b"/%E6%97%A5%E6%9C%AC%E8%AA%9E", send
         )
     except AssertionFailed:
         return
