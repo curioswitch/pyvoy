@@ -5,22 +5,50 @@
 [![codecov](https://codecov.io/github/curioswitch/pyvoy/graph/badge.svg)](https://codecov.io/github/curioswitch/pyvoy)
 [![PyPI version](https://img.shields.io/pypi/v/pyvoy)](https://pypi.org/project/pyvoy)
 
-pyvoy is a Python application server, based on [envoy][]. It is based on [envoy dynamic modules][], embedding a
-Python interpreter into a module that can be loaded by a stock envoy binary.
+pyvoy is a Python application server implemented in [Envoy][]. It is based on [Envoy dynamic modules][], embedding a
+Python interpreter into a module that can be loaded by a stock Envoy binary.
 
 ## Features
 
 - ASGI applications
 - WSGI applications with worker threads
-- Full HTTP protocol support, including HTTP/2 trailers and HTTP/3
-- Any envoy configuration features such as authentication can be integrated as normal
+- A complete, battle-tested HTTP stack - it's just Envoy
+  - Includes full HTTP protocol support, with HTTP/2 trailers and HTTP/3
+- Any Envoy configuration features such as load shedding can be integrated as normal
 
 ## Limitations
 
-- Platforms limited to those supported by envoy, which generally means glibc-based Linux on amd64/arm64 or MacOS on arm64
-- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead
+- Platforms limited to those supported by Envoy, which generally means glibc-based Linux on amd64/arm64 or MacOS on arm64
+- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead and use a health
+  endpoint wired to RSS for automatic restarts if needed
 - Certain non-compliant requests are prevented by Envoy itself
   - The full URL path, including query string, must be ASCII percent-encoded
+
+## Installation
+
+pyvoy is published as a wheel that includes both the dynamic module and Envoy itself. You can use it in the same way
+as any other app server.
+
+```bash
+uv add pyvoy # or pip install
+```
+
+## Running
+
+pyvoy includes a CLI which supports standard options for HTTP servers. If just passing a `module:attr` name to point
+to an application, it will be served on plaintext on port 8000.
+
+```bash
+uv run pyvoy my.module:app
+```
+
+(if the application is named exactly `app`, `:app` can be omitted)
+
+To see a full list of options:
+
+```bash
+uv run pyvoy -h
+```
 
 ## Benchmarks
 
@@ -100,5 +128,5 @@ Error Set:
 
 We again see very similar performance likely within the range of noise.
 
-[envoy]: https://www.envoyproxy.io/
-[envoy dynamic modules]: https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules
+[Envoy]: https://www.Envoyproxy.io/
+[Envoy dynamic modules]: https://www.Envoyproxy.io/docs/Envoy/latest/intro/arch_overview/advanced/dynamic_modules
