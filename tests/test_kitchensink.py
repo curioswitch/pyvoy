@@ -550,7 +550,7 @@ async def test_wsgi_write_callable(url_wsgi: str, client: httpx.AsyncClient) -> 
 
 
 @pytest.mark.asyncio
-async def test_errors_output(
+async def test_wsgi_errors_output(
     url_wsgi: str, client: httpx.AsyncClient, logs_wsgi: asyncio.StreamReader
 ) -> None:
     response = await client.get(f"{url_wsgi}/errors-output")
@@ -571,3 +571,11 @@ async def test_errors_output(
             "Line 3",
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_wsgi_multiple_start_response(
+    url_wsgi: str, client: httpx.AsyncClient
+) -> None:
+    response = await client.get(f"{url_wsgi}/multiple-start-response")
+    assert response.status_code == 200, response.text

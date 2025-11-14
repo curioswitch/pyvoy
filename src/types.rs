@@ -439,7 +439,11 @@ pub(crate) struct Constants {
     // Misc
     /// The string "close".
     pub close: Py<PyString>,
+    /// The string "with_traceback".
+    pub with_traceback: Py<PyString>,
+    /// An empty bytes object.
     pub empty_bytes: Py<PyBytes>,
+    /// An empty string object.
     pub empty_string: Py<PyString>,
 }
 
@@ -525,6 +529,7 @@ impl Constants {
             wsgi_http_3: PyString::new(py, "HTTP/3").unbind(),
 
             close: PyString::new(py, "close").unbind(),
+            with_traceback: PyString::new(py, "with_traceback").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
             empty_string: PyString::new(py, "").unbind(),
         }
