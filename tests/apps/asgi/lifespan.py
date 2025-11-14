@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
+    from typing import Any
 
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
 
@@ -107,6 +108,29 @@ async def startup_failed(
     await _send_success(send)
 
 
+async def startup_failed_no_msg(
+    scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    if scope["type"] == "websocket":
+        msg = "Websockets not supported"
+        raise RuntimeError(msg)
+
+    if scope["type"] == "lifespan":
+        while True:
+            msg = await recv()
+            if msg["type"] == "lifespan.startup":
+                await send(cast("Any", {"type": "lifespan.startup.failed"}))
+            elif msg["type"] == "lifespan.shutdown":
+                print(  # noqa: T201
+                    f"Got counter: {scope.get('state', {}).get('counter')}", flush=True
+                )
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    scope.get("state", {})["counter"] += 1
+    await _send_success(send)
+
+
 async def shutdown_failed(
     scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -127,6 +151,27 @@ async def shutdown_failed(
                         "message": "I failed to shutdown",
                     }
                 )
+                return
+
+    scope.get("state", {})["counter"] += 1
+    await _send_success(send)
+
+
+async def shutdown_failed_no_msg(
+    scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    if scope["type"] == "websocket":
+        msg = "Websockets not supported"
+        raise RuntimeError(msg)
+
+    if scope["type"] == "lifespan":
+        while True:
+            msg = await recv()
+            if msg["type"] == "lifespan.startup":
+                scope.get("state", {})["counter"] = 0
+                await send({"type": "lifespan.startup.complete"})
+            elif msg["type"] == "lifespan.shutdown":
+                await send(cast("Any", {"type": "lifespan.shutdown.failed"}))
                 return
 
     scope.get("state", {})["counter"] += 1
