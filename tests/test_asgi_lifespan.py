@@ -57,6 +57,23 @@ async def test_startup_failed():
 
 
 @pytest.mark.asyncio
+async def test_startup_failed_no_msg():
+    logs: list[str] = []
+    async with PyvoyServer(
+        "tests.apps.asgi.lifespan:startup_failed_no_msg",
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        assert server.stdout is not None
+        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+
+    await logs_task
+    assert any("Application startup failed" in log_line for log_line in logs), (
+        f"Logs: {''.join(logs)}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_shutdown_failed():
     logs: list[str] = []
     async with (
@@ -79,6 +96,33 @@ async def test_shutdown_failed():
 
     await logs_task
     assert any("I failed to shutdown" in log_line for log_line in logs), (
+        f"Logs: {''.join(logs)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_failed_no_msg():
+    logs: list[str] = []
+    async with (
+        PyvoyServer(
+            "tests.apps.asgi.lifespan:shutdown_failed_no_msg",
+            stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+        ) as server,
+        httpx.AsyncClient() as client,
+    ):
+        assert server.stdout is not None
+        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+
+        url = f"http://{server.listener_address}:{server.listener_port}"
+
+        for _ in range(5):
+            response = await client.get(url)
+            assert response.status_code == 200
+            assert response.text == "Ok"
+
+    await logs_task
+    assert any("Application shutdown failed" in log_line for log_line in logs), (
         f"Logs: {''.join(logs)}"
     )
 
