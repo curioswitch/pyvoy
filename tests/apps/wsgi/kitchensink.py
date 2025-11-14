@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 from typing import TYPE_CHECKING, TypeVar, cast
+from wsgiref.validate import validator
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -473,6 +474,7 @@ def _echo_scope(
     start_response(
         "200 OK",
         [
+            ("content-type", "text/plain"),
             ("x-scope-method", environ["REQUEST_METHOD"]),
             ("x-scope-scheme", environ.get("wsgi.url_scheme", "")),
             ("x-scope-query", environ.get("QUERY_STRING", "")),
@@ -658,7 +660,12 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
         case "/日本語":
             return _nihongo(environ, start_response)
         case "/echo-scope":
-            return _echo_scope(environ, start_response)
+            # Most checks by the wsgiref validator are about the application, not server.
+            # Some are quite strict such as not allowing .read() calls even though it is
+            # supported by WSGI including within its type definitions. We're mostly interested
+            # in environ and type checks and it is enough to apply it only to this handler to
+            # have more flexibility in others.
+            return validator(_echo_scope)(environ, start_response)
         case "/readline":
             return _readline(environ, start_response)
         case "/iterlines":
