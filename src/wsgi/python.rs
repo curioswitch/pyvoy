@@ -70,8 +70,7 @@ impl Executor {
                 let environ = PyDict::new(py);
                 environ.set_http_method(&constants, &constants.request_method, &scope.method)?;
 
-                // TODO: support root_path etc
-                environ.set_item(&constants.script_name, &constants.empty_string)?;
+                environ.set_item(&constants.script_name, &constants.root_path_value)?;
 
                 let raw_path: &[u8] =
                     if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
@@ -86,9 +85,22 @@ impl Executor {
                     };
 
                 let decoded_path = urlencoding::decode_binary(raw_path);
+                let root_path = constants.root_path_value.bind(py).to_str()?;
+                let decoded_path_slice = if root_path.is_empty() {
+                    &decoded_path
+                } else if decoded_path.starts_with(root_path.as_bytes()) {
+                    &decoded_path[root_path.len()..]
+                } else {
+                    // Not specified in PEP3333 but follow gunicorn's behavior.
+                    return Err(PyValueError::new_err(format!(
+                        "Request path '{}' does not start with root path '{}'",
+                        String::from_utf8_lossy(&decoded_path),
+                        root_path
+                    )));
+                };
                 environ.set_item(
                     &constants.path_info,
-                    PyString::from_bytes(py, &decoded_path)?,
+                    PyString::from_bytes(py, decoded_path_slice)?,
                 )?;
 
                 for (key, value) in scope.headers.iter() {
@@ -226,7 +238,10 @@ impl Executor {
             });
             if let Err(e) = result {
                 Python::attach(|py| {
-                    let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                    let tb = e
+                        .traceback(py)
+                        .and_then(|tb| tb.format().ok())
+                        .unwrap_or_default();
                     eprintln!("Exception in WSGI application\n{}{}", tb, e);
                 });
                 let _ = response_bridge.send(ResponseEvent::Exception);

@@ -20,6 +20,7 @@ class CLIArgs:
     tls_ca_cert: str | None
     tls_disable_http3: bool
     interface: Interface
+    root_path: str
 
 
 async def amain() -> None:
@@ -77,6 +78,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--root-path",
+        help="the root path the application is mounted at, for example when using a reverse proxy",
+        type=str,
+        default="",
+    )
+
+    parser.add_argument(
         "--print-envoy-config",
         help="print the generated Envoy config to stdout and exit",
         action="store_true",
@@ -97,6 +105,7 @@ async def amain() -> None:
         tls_ca_cert=Path(args.tls_ca_cert) if args.tls_ca_cert else None,
         tls_enable_http3=not args.tls_disable_http3,
         interface=args.interface,
+        root_path=args.root_path,
     )
 
     if args.print_envoy_config:

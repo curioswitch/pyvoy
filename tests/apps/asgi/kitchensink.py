@@ -984,6 +984,8 @@ async def _echo_scope(
                 (b"x-scope-content-length", headers.get(b"content-length", b"")),
                 (b"x-scope-content-type", headers.get(b"content-type", b"")),
                 (b"x-scope-http-version", scope["http_version"].encode()),
+                (b"x-scope-path", scope["path"].encode()),
+                (b"x-scope-root-path", scope["root_path"].encode()),
             ],
             "trailers": False,
         }
@@ -994,7 +996,10 @@ async def _echo_scope(
 async def app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
-    match scope["path"]:
+    path = scope["path"]
+    if root_path := scope.get("root_path"):
+        path = path.removeprefix(root_path)
+    match path:
         case "/headers-only":
             await _headers_only(scope, recv, send)
         case "/request-body":
