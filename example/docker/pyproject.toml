@@ -1,0 +1,6 @@
+[project]
+name = "pyvoy-example"
+requires-python = ">=3.14"
+version = "0.0.0"
+
+dependencies = ["pyvoy", "starlette"]
