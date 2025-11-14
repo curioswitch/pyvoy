@@ -483,6 +483,11 @@ def _echo_scope(
             ("x-scope-http-version", environ.get("SERVER_PROTOCOL", "")),
             ("x-scope-path", environ.get("PATH_INFO", "")),
             ("x-scope-root-path", environ.get("SCRIPT_NAME", "")),
+            ("x-scope-tls-version", environ.get("wsgi.ext.tls.tls_version", "")),
+            (
+                "x-scope-tls-client-cert-name",
+                environ.get("wsgi.ext.tls.client_cert_name", ""),
+            ),
         ],
     )
     return [b"Ok"]

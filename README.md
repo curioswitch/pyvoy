@@ -11,7 +11,7 @@ Python interpreter into a module that can be loaded by a stock envoy binary.
 ## Features
 
 - ASGI applications
-- WSGI applications with worker threads (WIP, basic applications should work)
+- WSGI applications with worker threads
 - Full HTTP protocol support, including HTTP/2 trailers and HTTP/3
 - Any envoy configuration features such as authentication can be integrated as normal
 

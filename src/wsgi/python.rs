@@ -166,6 +166,19 @@ impl Executor {
                 environ.set_item(&constants.wsgi_multiprocess, false)?;
                 environ.set_item(&constants.wsgi_run_once, false)?;
 
+                if let Some(tls_info) = scope.tls_info {
+                    environ.set_item(
+                        &constants.wsgi_ext_tls_version,
+                        tls_info.tls_version.to_string(),
+                    )?;
+                    if let Some(client_cert) = tls_info.client_cert_name {
+                        environ.set_item(
+                            &constants.wsgi_ext_tls_client_cert_name,
+                            PyString::new(py, &client_cert),
+                        )?;
+                    }
+                }
+
                 let response = app.call1((
                     environ,
                     StartResponseCallable {

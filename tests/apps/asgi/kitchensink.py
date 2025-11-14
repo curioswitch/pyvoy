@@ -973,6 +973,9 @@ async def _echo_scope(
     scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
     headers = dict(scope["headers"])
+    extensions = scope["extensions"]
+    assert extensions is not None  # noqa: S101
+
     await send(
         {
             "type": "http.response.start",
@@ -986,6 +989,14 @@ async def _echo_scope(
                 (b"x-scope-http-version", scope["http_version"].encode()),
                 (b"x-scope-path", scope["path"].encode()),
                 (b"x-scope-root-path", scope["root_path"].encode()),
+                (
+                    b"x-scope-tls-version",
+                    str(extensions.get("tls", {}).get("tls_version", "")).encode(),
+                ),
+                (
+                    b"x-scope-tls-client-cert-name",
+                    str(extensions.get("tls", {}).get("client_cert_name", "")).encode(),
+                ),
             ],
             "trailers": False,
         }

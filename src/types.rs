@@ -357,6 +357,12 @@ pub(crate) struct Constants {
     pub server: Py<PyString>,
     /// The string "state".
     pub state: Py<PyString>,
+    /// The string "tls".
+    pub tls: Py<PyString>,
+    /// The string "tls_version".
+    pub tls_version: Py<PyString>,
+    /// The string "client_cert_name".
+    pub client_cert_name: Py<PyString>,
 
     // ASGI event fields
     /// The string "body".
@@ -435,6 +441,10 @@ pub(crate) struct Constants {
     pub wsgi_http_2: Py<PyString>,
     /// The string "HTTP/3".
     pub wsgi_http_3: Py<PyString>,
+    /// The string "wsgi.ext.tls.tls_version".
+    pub wsgi_ext_tls_version: Py<PyString>,
+    /// The string "wsgi.ext.tls.client_cert_name".
+    pub wsgi_ext_tls_client_cert_name: Py<PyString>,
 
     // Misc
     /// The string "close".
@@ -466,6 +476,9 @@ impl Constants {
             scheme: PyString::new(py, "scheme").unbind(),
             state: PyString::new(py, "state").unbind(),
             typ: PyString::new(py, "type").unbind(),
+            tls: PyString::new(py, "tls").unbind(),
+            tls_version: PyString::new(py, "tls_version").unbind(),
+            client_cert_name: PyString::new(py, "client_cert_name").unbind(),
 
             http_version: PyString::new(py, "http_version").unbind(),
             http_10: PyString::new(py, "1.0").unbind(),
@@ -530,6 +543,9 @@ impl Constants {
             wsgi_http_11: PyString::new(py, "HTTP/1.1").unbind(),
             wsgi_http_2: PyString::new(py, "HTTP/2").unbind(),
             wsgi_http_3: PyString::new(py, "HTTP/3").unbind(),
+            wsgi_ext_tls_version: PyString::new(py, "wsgi.ext.tls.tls_version").unbind(),
+            wsgi_ext_tls_client_cert_name: PyString::new(py, "wsgi.ext.tls.client_cert_name")
+                .unbind(),
 
             close: PyString::new(py, "close").unbind(),
             with_traceback: PyString::new(py, "with_traceback").unbind(),
@@ -845,6 +861,11 @@ impl HeaderNameExt for HeaderName {
     }
 }
 
+pub(crate) struct TlsInfo {
+    pub tls_version: usize,
+    pub client_cert_name: Option<Box<str>>,
+}
+
 pub(crate) struct Scope {
     pub http_version: http::Version,
     pub method: Method,
@@ -854,6 +875,7 @@ pub(crate) struct Scope {
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub client: Option<(Box<str>, i64)>,
     pub server: Option<(Box<str>, i64)>,
+    pub tls_info: Option<TlsInfo>,
 }
 
 pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
@@ -888,6 +910,30 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         envoy_dynamic_module_type_attribute_id::DestinationPort,
     );
 
+    let tls_info = match envoy_filter
+        .get_attribute_string(envoy_dynamic_module_type_attribute_id::ConnectionTlsVersion)
+    {
+        Some(tls_version) => {
+            let tls_version = match tls_version.as_slice() {
+                b"TLSv1.0" => 0x0301,
+                b"TLSv1.1" => 0x0302,
+                b"TLSv1.2" => 0x0303,
+                b"TLSv1.3" => 0x0304,
+                _ => 0,
+            };
+            let client_cert_name = envoy_filter
+                .get_attribute_string(
+                    envoy_dynamic_module_type_attribute_id::ConnectionSubjectPeerCertificate,
+                )
+                .map(|s| Box::from(str::from_utf8(s.as_slice()).unwrap_or("")));
+            Some(TlsInfo {
+                tls_version,
+                client_cert_name,
+            })
+        }
+        None => None,
+    };
+
     Scope {
         http_version,
         method,
@@ -896,6 +942,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         headers,
         client,
         server,
+        tls_info,
     }
 }
 
