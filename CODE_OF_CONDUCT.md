@@ -18,10 +18,10 @@ Fair:
 
 Unfair:
 
-- Keep issues open for a long time or suggest the contributor can raise a PR.
-  - Contributors are not maintainers and it is not fair to ask them to become one to fix a bug
-    (it is always welcome when they have the time and will to though).
-- Prioritize issues and discussions with friends and acquaintances over others.
+- Keep issues about bugs or significant pain points open for a long time or suggest the contributor can raise a PR.
+  - Users are not maintainers and it is not fair to expect them to become one to fix a bug
+    (it is always welcome when they have the time and will to contribute though).
+- Prioritize issues and discussions with friends, acquaintances, or those in the same timezone over others.
   - This is OSS and it is not fair to create boundaries or factions within it.
 
 We are not perfect and may act in a way that isn't fair. This is fine and generally will not
