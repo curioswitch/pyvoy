@@ -1,7 +1,7 @@
 [tasks.bench]
 help = "Run benchmarks"
-script = "bench.run_benchmark:main"
 deps = ["build"]
+script = "bench.run_benchmark:main"
 
 [tasks.build]
 help = "Builds native extensions"
@@ -31,6 +31,16 @@ cmd = "cargo fmt"
 help = "Formats code"
 sequence = ["fix-python", "fix-rust", "format-python", "format-rust"]
 
+[tasks.integration-test-connect]
+help = "Run the connect-python conformance tests"
+deps = ["build"]
+sequence = [
+    { script = "scripts.setup_it:setup('connect', 'connectrpc/connect-python', '0efb7b06693c9f4ce53bb45d0c5f357fb85a4947')" },
+    { cmd = "uv add ../../..", cwd = "out/integration/connect" },
+    # Make sure the pyvoy venv isn't used by specifying uv run.
+    { cmd = "uv run pytest -k [pyvoy]", cwd = "out/integration/connect/conformance" },
+]
+
 [tasks.lint-python]
 help = "Lints python code"
 cmd = "ruff check ."
@@ -45,10 +55,10 @@ sequence = ["lint-python", "lint-rust"]
 
 [tasks.test]
 help = "Run the test suite"
-cmd = "pytest"
 deps = ["build"]
+cmd = "pytest"
 
 [tasks.wheel]
 help = "Builds the wheel"
-script = "scripts.wheel:main"
 deps = ["build"]
+script = "scripts.wheel:main"

@@ -15,3 +15,5 @@ pyvoy/_bin/libpyvoy.so
 *.lcov
 
 profile.json.gz
+
+out
