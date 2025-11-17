@@ -75,7 +75,7 @@ jobs:
         run: uv run poe test
 
       - name: run connect integration tests on push
-        # if: github.event_name == 'push'
+        if: github.event_name == 'push'
         run: uv run poe integration-test-connect
 
       - name: prepare coverage
