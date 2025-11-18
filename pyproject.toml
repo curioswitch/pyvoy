@@ -169,6 +169,7 @@ split-on-trailing-comma = false
 extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 addopts = ["--import-mode=importlib"]
 asyncio_default_fixture_loop_scope = "module"
 asyncio_default_test_loop_scope = "module"

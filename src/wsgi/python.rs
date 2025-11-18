@@ -478,8 +478,9 @@ impl RequestInput {
 
         let _lock = self.lock.lock().unwrap();
 
-        let _ = self.request_read_bridge.send(event);
-        self.scheduler.commit(EVENT_ID_REQUEST);
+        if self.request_read_bridge.send(event).is_ok() {
+            self.scheduler.commit(EVENT_ID_REQUEST);
+        }
 
         let body = py.detach::<PyResult<RequestBody>, _>(|| {
             self.request_body_rx.recv().map_err(|e| {

@@ -9,10 +9,17 @@ from shutil import copyfileobj
 
 import toml
 
+bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 
-def main() -> None:
+
+def _download_envoy() -> None:
     toml_path = Path(__file__).parent.parent / "Cargo.toml"
     cargo_toml = toml.loads(toml_path.read_text())
+
+    if cargo_toml["dependencies"]["envoy-proxy-dynamic-modules-rust-sdk"].get("path"):
+        print("Using local Envoy build, skipping download.")  # noqa: T201
+        return
+
     version = cargo_toml["dependencies"]["envoy-proxy-dynamic-modules-rust-sdk"]["tag"]
     if version is None:
         msg = "Envoy version not found in Cargo.toml"
@@ -26,7 +33,6 @@ def main() -> None:
             machine = "arm64"
     url = f"https://github.com/tetratelabs/archive-envoy/releases/download/{version}/envoy-{version}-{sys.platform}-{machine}.tar.xz"
 
-    bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
     envoy_path = bin_dir / "envoy"
 
     download_envoy = True
@@ -55,6 +61,10 @@ def main() -> None:
             with envoy_path.open("wb") as f:
                 copyfileobj(envoy_file, f)
         envoy_path.chmod(0o755)
+
+
+def main() -> None:
+    _download_envoy()
 
     print("Building libpyvoy...")  # noqa: T201
     pyvoy_path = bin_dir / "libpyvoy.so"

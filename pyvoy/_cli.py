@@ -3,10 +3,11 @@ import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pathlib import Path
+from typing import get_args
 
 import yaml
 
-from ._server import Interface, PyvoyServer
+from ._server import Interface, LogLevel, PyvoyServer
 
 
 class CLIArgs:
@@ -21,6 +22,7 @@ class CLIArgs:
     tls_disable_http3: bool
     interface: Interface
     root_path: str
+    log_level: LogLevel
 
 
 async def amain() -> None:
@@ -72,7 +74,7 @@ async def amain() -> None:
     parser.add_argument(
         "--interface",
         help="the Python application interface to use",
-        choices=["asgi", "wsgi"],
+        choices=get_args(Interface),
         type=str,
         default="asgi",
     )
@@ -82,6 +84,13 @@ async def amain() -> None:
         help="the root path the application is mounted at, for example when using a reverse proxy",
         type=str,
         default="",
+    )
+    parser.add_argument(
+        "--log-level",
+        help="the Envoy log level",
+        choices=get_args(LogLevel),
+        type=str,
+        default="error",
     )
 
     parser.add_argument(
@@ -106,6 +115,7 @@ async def amain() -> None:
         tls_enable_http3=not args.tls_disable_http3,
         interface=args.interface,
         root_path=args.root_path,
+        log_level=args.log_level,
     )
 
     if args.print_envoy_config:
