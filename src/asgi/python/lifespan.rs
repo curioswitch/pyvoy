@@ -5,7 +5,7 @@ use std::sync::{
 
 use crate::{
     asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
-    types::Constants,
+    types::{Constants, SyncReceiver},
 };
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
@@ -16,8 +16,6 @@ use pyo3::{
 
 /// Result of executing the ASGI lifespan protocol.
 pub(crate) struct Lifespan {
-    /// The state dict for the lifespan scope.
-    pub state: Option<Py<PyDict>>,
     /// The receiver of lifespan events from the app.
     pub lifespan_rx: Receiver<LifespanEvent>,
     /// An asyncio.Future that will be completed with the lifespan.shutdown message.
@@ -29,27 +27,6 @@ pub(crate) struct Lifespan {
 }
 
 impl Lifespan {
-    /// Initializes the startup process for the lifespan.
-    pub(crate) fn startup(&self) -> PyResult<bool> {
-        match self.lifespan_rx.recv().unwrap() {
-            LifespanEvent::StartupComplete => {
-                envoy_log_info!("Application startup complete.");
-                Ok(true)
-            }
-            LifespanEvent::StartupFailed(err) => Err(PyRuntimeError::new_err(format!(
-                "Application startup failed: {}",
-                err
-            ))),
-            // TODO: Add option to force lifespan and log this error if it's enabled.
-            LifespanEvent::LifespanFailed(_) => Ok(false),
-            // The ASGI spec does not document how to handle a coroutine that completes without exception
-            // but it's reasonable to treat it the same as LifespanFailed.
-            LifespanEvent::LifespanComplete => Ok(false),
-            // The send callabale validates event types so we know we won't have other events here.
-            _ => unreachable!(),
-        }
-    }
-
     /// Initiates the shutdown process for the lifespan.
     ///
     /// Because the server is going to shutdown regardless, we handle all errors with logging here
@@ -113,12 +90,18 @@ pub(crate) enum LifespanEvent {
 }
 
 /// Executes the ASGI app with a lifespan scope.
+///
+/// This function runs the coroutine and sends a startup event.
+///
+/// - If it raises an exception, lifespan is considered unsupported and we return no lifespan.
+/// - If it completes successfully, we return a Lifespan object to manage shutdown later.
+/// - If the startup event receives a failure message, we return an error to prevent Envoy startup.
 pub(crate) fn execute_lifespan<'py>(
     app: &Bound<'py, PyAny>,
     asgi: &Bound<'py, PyDict>,
     loop_: &Bound<'py, PyAny>,
     constants: &Arc<Constants>,
-) -> PyResult<Lifespan> {
+) -> PyResult<(Option<Lifespan>, Option<Py<PyDict>>)> {
     let py = app.py();
 
     let scope = PyDict::new(py);
@@ -129,6 +112,7 @@ pub(crate) fn execute_lifespan<'py>(
     scope.set_item(&constants.state, &state)?;
 
     let (lifespan_tx, lifespan_rx) = mpsc::channel::<LifespanEvent>();
+    let lifespan_rx = SyncReceiver::new(lifespan_rx);
     let shutdown_future = loop_.call_method0(&constants.create_future)?;
 
     let recv_callable = RecvCallable {
@@ -151,15 +135,7 @@ pub(crate) fn execute_lifespan<'py>(
             // we treat it as a failure to support lifespan.
             let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
             let _ = lifespan_tx.send(LifespanEvent::LifespanFailed(msg));
-            // This case is so rare, rather than complicating caller code by handling an Option,
-            // we just return a Lifespan that we know won't be used because we sent LifespanFailed.
-            return Ok(Lifespan {
-                state: Some(state.unbind()),
-                shutdown_future: shutdown_future.unbind(),
-                loop_: loop_.clone().unbind(),
-                constants: constants.clone(),
-                lifespan_rx,
-            });
+            return Ok((None, None));
         }
     };
 
@@ -173,13 +149,39 @@ pub(crate) fn execute_lifespan<'py>(
         },),
     )?;
 
-    Ok(Lifespan {
-        state: Some(state.unbind()),
-        shutdown_future: shutdown_future.unbind(),
-        loop_: loop_.clone().unbind(),
-        constants: constants.clone(),
-        lifespan_rx,
-    })
+    let lifespan_supported = py.detach(|| {
+        match lifespan_rx.recv().unwrap() {
+            LifespanEvent::StartupComplete => {
+                envoy_log_info!("Application startup complete.");
+                Ok(true)
+            }
+            LifespanEvent::StartupFailed(err) => Err(PyRuntimeError::new_err(format!(
+                "Application startup failed: {}",
+                err
+            ))),
+            // TODO: Add option to force lifespan and log this error if it's enabled.
+            LifespanEvent::LifespanFailed(_) => Ok(false),
+            // The ASGI spec does not document how to handle a coroutine that completes without exception
+            // but it's reasonable to treat it the same as LifespanFailed.
+            LifespanEvent::LifespanComplete => Ok(false),
+            // The send callabale validates event types so we know we won't have other events here.
+            _ => unreachable!(),
+        }
+    })?;
+
+    if lifespan_supported {
+        Ok((
+            Some(Lifespan {
+                shutdown_future: shutdown_future.unbind(),
+                loop_: loop_.clone().unbind(),
+                constants: constants.clone(),
+                lifespan_rx: lifespan_rx.take(),
+            }),
+            Some(state.unbind()),
+        ))
+    } else {
+        Ok((None, None))
+    }
 }
 
 /// The state machine for the lifespan.

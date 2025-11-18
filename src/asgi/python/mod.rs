@@ -113,7 +113,7 @@ impl Executor {
             ))
         })?;
 
-        let (app, asgi, extensions, mut lifespan) = Python::attach(|py| {
+        let (app, asgi, extensions, lifespan, state) = Python::attach(|py| {
             let module = py.import(app_module)?;
             let app = module.getattr(app_attr)?;
             let asgi = PyDict::new(py);
@@ -122,21 +122,19 @@ impl Executor {
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
 
-            let lifespan = execute_lifespan(&app, &asgi, loop_.bind(py), &constants)?;
+            let (lifespan, state) = execute_lifespan(&app, &asgi, loop_.bind(py), &constants)?;
 
-            Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind(), lifespan))
+            Ok::<_, PyErr>((
+                app.unbind(),
+                asgi.unbind(),
+                extensions.unbind(),
+                lifespan,
+                state,
+            ))
         })?;
-
-        let lifespan_supported = lifespan.startup()?;
 
         let (tx, rx) = mpsc::channel::<Event>();
         let executor = Self { tx };
-
-        let state = if lifespan_supported {
-            Some(lifespan.state.take().unwrap())
-        } else {
-            None
-        };
 
         let inner = ExecutorInner {
             app,
@@ -187,11 +185,7 @@ impl Executor {
                 loop_handle,
                 gil_handle,
             },
-            if lifespan_supported {
-                Some(lifespan)
-            } else {
-                None
-            },
+            lifespan,
         ))
     }
 
