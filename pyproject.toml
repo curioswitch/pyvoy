@@ -176,14 +176,14 @@ asyncio_default_test_loop_scope = "module"
 
 [tool.bumpversion]
 current_version = "0.1.1"
-filenam = ["pyproject.toml", "Cargo.toml"]
+files = [{ filename = "pyproject.toml" }, { filename = "Cargo.toml" }]
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
-search = "{current_version}"
-replace = "{new_version}"
+search = "version = \"{current_version}\""
+replace = "version = \"{new_version}\""
 regex = false
 tag = false
-allow_dirty = false
+allow_dirty = true
 ignore_missing_version = false
-commit = true
+commit = false
 message = "Bump version: {current_version} → {new_version}"
