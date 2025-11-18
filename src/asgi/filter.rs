@@ -114,15 +114,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        self.recv_bridge.process(|future| {
-            self.executor.handle_recv_future(
-                read_request_body(envoy_filter),
-                !self.request_closed,
-                future,
-            );
-        });
+        // Read from the buffered request body in the scheduled event since the body
+        // may be split between two buffers here.
+        envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
 
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
+    }
+
+    fn on_request_trailers(
+        &mut self,
+        _envoy_filter: &mut EHF,
+    ) -> abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status {
+        self.request_closed = true;
+        abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::Continue
     }
 
     fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {

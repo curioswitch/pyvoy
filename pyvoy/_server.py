@@ -18,6 +18,10 @@ from ._bin import get_envoy_path, get_pyvoy_dir_path
 
 Interface = Literal["asgi", "wsgi"]
 
+LogLevel = Literal[
+    "trace", "debug", "info", "warning", "warn", "error", "critical", "off"
+]
+
 
 def get_envoy_environ() -> dict[str, str]:
     env = {
@@ -54,6 +58,7 @@ class PyvoyServer:
     _print_envoy_config: bool
     _interface: Interface
     _root_path: str
+    _log_level: LogLevel
 
     _stopped: bool
 
@@ -70,6 +75,7 @@ class PyvoyServer:
         tls_enable_http3: bool = True,
         interface: Interface = "asgi",
         root_path: str = "",
+        log_level: LogLevel = "error",
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
         print_envoy_config: bool = False,
@@ -87,6 +93,7 @@ class PyvoyServer:
         self._stdout = stdout
         self._stderr = stderr
         self._print_envoy_config = print_envoy_config
+        self._log_level = log_level
 
         self._listener_port_tls = None
         self._stopped = False
@@ -120,6 +127,8 @@ class PyvoyServer:
                 "--admin-address-path",
                 admin_address_file.name,
                 "--use-dynamic-base-id",
+                "--log-level",
+                self._log_level,
                 stdout=self._stdout,
                 stderr=self._stderr,
                 env=env,
