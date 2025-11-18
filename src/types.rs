@@ -1,3 +1,5 @@
+use std::sync::mpsc::Receiver;
+
 use crate::envoy::*;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilter;
 use envoy_proxy_dynamic_modules_rust_sdk::abi::envoy_dynamic_module_type_attribute_id;
@@ -965,3 +967,28 @@ fn get_address<EHF: EnvoyHttpFilter>(
         _ => None,
     }
 }
+
+/// Wrapper to mark Receiver as Sync. PyO3 hackily uses Sync as a signal for whether
+/// a type is safe to be used with the GIL detached, even though the thread doesn't change.
+/// We know it is fine for our usage.
+pub(crate) struct SyncReceiver<T>(Receiver<T>);
+
+impl<T> SyncReceiver<T> {
+    pub fn new(receiver: Receiver<T>) -> Self {
+        Self(receiver)
+    }
+
+    pub fn take(self) -> Receiver<T> {
+        self.0
+    }
+}
+
+impl<T> std::ops::Deref for SyncReceiver<T> {
+    type Target = Receiver<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+unsafe impl<T> Sync for SyncReceiver<T> {}
