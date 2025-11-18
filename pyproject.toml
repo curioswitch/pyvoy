@@ -181,6 +181,7 @@ serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
 replace = "{new_version}"
 regex = false
+tag = false
 allow_dirty = false
 commit = true
 message = "Bump version: {current_version} → {new_version}"
