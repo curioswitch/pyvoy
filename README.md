@@ -66,6 +66,23 @@ convenient for simple cases and should run well for normal deployments. But for 
 configure other aspects of Envoy, we also recommend managing the Envoy config in your codebase and adding it to the
 container - you can then tweak any and all Envoy parameters to meet your needs.
 
+## Development
+
+We use [poe](https://poethepoet.natn.io/) for running development tasks. For a list of tasks, you can run
+
+```bash
+uv run poe -h
+```
+
+During development, the most common commands will be
+
+```bash
+uv run poe test # Run unit tests
+uv run poe format # Apply possible formatting
+uv run poe check # Run all checks. If this passes, CI should pass
+uv run poe build # Only build pyvoy. Needed if running tests from IDE
+```
+
 ## Benchmarks
 
 We have some [preliminary benchmarks](bench/run_benchmark.py) just to understand how the approach works specifically for
