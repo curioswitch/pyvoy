@@ -16,6 +16,7 @@ dev = [
     "httpx",
     "hypercorn",
     "poethepoet",
+    "psutil",
     "pyright[nodejs]",
     "pytest",
     "pytest-asyncio",
