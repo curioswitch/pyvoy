@@ -52,7 +52,7 @@ impl Executor {
         response_written_rx: Receiver<()>,
         scheduler: SyncScheduler,
     ) {
-        let response_written_rx = SyncReceiver(response_written_rx);
+        let response_written_rx = SyncReceiver::new(response_written_rx);
         let constants = self.constants.clone();
         let app = self.app.clone();
 
@@ -152,7 +152,7 @@ impl Executor {
                     &constants.wsgi_input,
                     RequestInput {
                         request_read_bridge,
-                        request_body_rx: SyncReceiver(request_body_rx),
+                        request_body_rx: SyncReceiver::new(request_body_rx),
                         scheduler: scheduler.clone(),
                         closed: false,
                         constants: constants.clone(),
@@ -616,18 +616,3 @@ impl ErrorsOutput {
         Ok(())
     }
 }
-
-/// Wrapper to mark Receiver as Sync. PyO3 hackily uses Sync as a signal for whether
-/// a type is safe to be used with the GIL detached, even though the thread doesn't change.
-/// We know it is fine for our usage.
-struct SyncReceiver<T>(Receiver<T>);
-
-impl<T> std::ops::Deref for SyncReceiver<T> {
-    type Target = Receiver<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-unsafe impl<T> Sync for SyncReceiver<T> {}
