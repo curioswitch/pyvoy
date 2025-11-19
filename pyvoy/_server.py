@@ -135,7 +135,6 @@ class PyvoyServer:
             )
             for _ in range(100):
                 if self._process.returncode is not None:
-                    self._started = True
                     return
                 with contextlib.suppress(Exception):
                     admin_address = Path(admin_address_file.name).read_text()
