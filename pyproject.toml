@@ -25,6 +25,7 @@ dev = [
     "toml",
     "trustme",
     "uvicorn[standard]",
+    "watchfiles",
     "wheel",
 ]
 

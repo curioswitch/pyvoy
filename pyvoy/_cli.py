@@ -8,6 +8,7 @@ from typing import get_args
 import yaml
 
 from ._server import Interface, LogLevel, PyvoyServer
+from ._watcher import watch
 
 
 class CLIArgs:
@@ -23,6 +24,10 @@ class CLIArgs:
     interface: Interface
     root_path: str
     log_level: LogLevel
+    reload: bool
+    reload_dirs: list[str]
+    reload_includes: list[str]
+    reload_excludes: list[str]
 
 
 async def amain() -> None:
@@ -85,12 +90,44 @@ async def amain() -> None:
         type=str,
         default="",
     )
+
     parser.add_argument(
         "--log-level",
         help="the Envoy log level",
         choices=get_args(LogLevel),
         type=str,
         default="error",
+    )
+
+    parser.add_argument(
+        "--reload",
+        help="enable auto-reloading on code changes",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--reload-dirs",
+        help="directories to watch for reload",
+        type=str,
+        nargs="+",
+        default=["."],
+    )
+
+    parser.add_argument(
+        "--reload-includes",
+        help="file patterns to include for reload",
+        type=str,
+        nargs="+",
+        default=["*.py"],
+    )
+
+    parser.add_argument(
+        "--reload-excludes",
+        help="file patterns to exclude from reload",
+        type=str,
+        nargs="+",
+        default=[".*", "*.py[cod]", "*.sw.*", "~*"],
     )
 
     parser.add_argument(
@@ -122,6 +159,30 @@ async def amain() -> None:
         print(yaml.dump(server.get_envoy_config()))  # noqa: T201
         return
 
+    if args.reload:
+        while True:
+            server_task = asyncio.create_task(_run_server(server))
+            try:
+                async for changed_files in watch(
+                    [Path(d) for d in args.reload_dirs],
+                    args.reload_includes,
+                    args.reload_excludes,
+                ):
+                    print(  # noqa: T201
+                        f"Changes detected in {', '.join(changed_files)}, reloading pyvoy..."
+                    )
+                    server_task.cancel()
+                    await server_task
+                    server_task = asyncio.create_task(_run_server(server))
+            except asyncio.CancelledError:
+                server_task.cancel()
+                await server_task
+                return
+    else:
+        await _run_server(server)
+
+
+async def _run_server(server: PyvoyServer) -> None:
     async with server:
         if server.stopped:
             print(  # noqa: T201
@@ -143,6 +204,7 @@ async def amain() -> None:
         try:
             await server.wait()
         except asyncio.CancelledError:
+            asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
             await shutdown()
 
 
