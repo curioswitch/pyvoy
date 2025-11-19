@@ -799,6 +799,7 @@ dev = [
     { name = "toml" },
     { name = "trustme" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "watchfiles" },
     { name = "wheel" },
 ]
 
@@ -825,6 +826,7 @@ dev = [
     { name = "toml" },
     { name = "trustme" },
     { name = "uvicorn", extras = ["standard"] },
+    { name = "watchfiles" },
     { name = "wheel" },
 ]
 
