@@ -3,9 +3,13 @@
 # Copyright © 2017-present, [Encode OSS Ltd](https://www.encode.io/).
 # All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
+from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 try:
     import watchfiles

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import contextlib
@@ -8,13 +10,15 @@ import sys
 import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from types import TracebackType
-from typing import IO, Literal
+from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
 import yaml
 
 from ._bin import get_envoy_path, get_pyvoy_dir_path
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 Interface = Literal["asgi", "wsgi"]
 
@@ -98,7 +102,7 @@ class PyvoyServer:
         self._listener_port_tls = None
         self._started = False
 
-    async def __aenter__(self) -> "PyvoyServer":
+    async def __aenter__(self) -> PyvoyServer:
         await self.start()
         return self
 

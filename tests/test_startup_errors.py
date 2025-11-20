@@ -1,6 +1,7 @@
 # Many error cases like invalid YAML are not possible when using the pyvoy
 # CLI or PyvoyServer, but we also support running Envoy directly. We check
 # issues that can happen with it here.
+from __future__ import annotations
 
 import os
 import subprocess
