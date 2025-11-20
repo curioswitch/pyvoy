@@ -1,4 +1,9 @@
-from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
 
 
 async def app(
