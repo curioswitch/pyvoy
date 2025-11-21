@@ -1,6 +1,6 @@
 [project]
 name = "pyvoy"
-version = "0.1.2"
+version = "0.1.3"
 description = "A Python app server based on envoy"
 authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
@@ -180,7 +180,7 @@ asyncio_default_fixture_loop_scope = "module"
 asyncio_default_test_loop_scope = "module"
 
 [tool.bumpversion]
-current_version = "0.1.2"
+current_version = "0.1.3"
 files = [{ filename = "pyproject.toml" }, { filename = "Cargo.toml" }]
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
@@ -190,5 +190,5 @@ regex = false
 tag = false
 allow_dirty = true
 ignore_missing_version = false
-commit = false
+commit = true
 message = "Bump version: {current_version} → {new_version}"
