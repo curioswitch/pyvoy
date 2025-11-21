@@ -6,12 +6,13 @@ use pyo3::{
     IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
     prelude::*,
+    sync::MutexExt,
     types::{PyBytes, PyDict, PyList, PyString, PyTuple},
 };
 
 use super::types::*;
-use crate::types::*;
-use crate::{envoy::SyncScheduler, eventbridge::EventBridge};
+use crate::{envoy::SyncScheduler, eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
+use crate::{types::*, wsgi::response::ResponseSender};
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 
 #[derive(Clone)]
@@ -60,13 +61,11 @@ impl Executor {
             let scheduler = Arc::new(scheduler);
             let result: PyResult<()> = Python::attach(|py| {
                 let app = app.bind(py);
-                let response_sender = Arc::new(Mutex::new(ResponseSender {
-                    response_bridge: response_bridge.clone(),
-                    scheduler: scheduler.clone(),
-                    start_event: None,
-                    headers_sent: false,
-                    constants: constants.clone(),
-                }));
+                let mut response_sender = ResponseSender::new(
+                    response_bridge.clone(),
+                    scheduler.clone(),
+                    constants.clone(),
+                );
 
                 let environ = PyDict::new(py);
                 environ.set_http_method(&constants, &constants.request_method, &scope.method)?;
@@ -196,8 +195,8 @@ impl Executor {
 
                 match response.len() {
                     Ok(0) => {
-                        response_sender.lock().unwrap().send(
-                            ResponseEvent::Body(ResponseBodyEvent {
+                        response_sender.send(
+                            ResponseSenderEvent::Body(ResponseBodyEvent {
                                 body: Box::default(),
                                 more_body: false,
                             }),
@@ -210,8 +209,8 @@ impl Executor {
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
                         let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
-                        response_sender.lock().unwrap().send(
-                            ResponseEvent::Body(ResponseBodyEvent {
+                        response_sender.send(
+                            ResponseSenderEvent::Body(ResponseBodyEvent {
                                 body,
                                 more_body: false,
                             }),
@@ -221,8 +220,8 @@ impl Executor {
                     _ => {
                         for item in response.try_iter()? {
                             let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
-                            response_sender.lock().unwrap().send(
-                                ResponseEvent::Body(ResponseBodyEvent {
+                            response_sender.send(
+                                ResponseSenderEvent::Body(ResponseBodyEvent {
                                     body,
                                     more_body: true,
                                 }),
@@ -232,8 +231,8 @@ impl Executor {
                                 let _ = response_written_rx.recv();
                             });
                         }
-                        response_sender.lock().unwrap().send(
-                            ResponseEvent::Body(ResponseBodyEvent {
+                        response_sender.send(
+                            ResponseSenderEvent::Body(ResponseBodyEvent {
                                 body: Box::from([]),
                                 more_body: false,
                             }),
@@ -277,7 +276,7 @@ impl Executor {
 /// https://peps.python.org/pep-3333/#the-start-response-callable
 #[pyclass]
 struct StartResponseCallable {
-    response_sender: Arc<Mutex<ResponseSender>>,
+    response_sender: ResponseSender,
 }
 
 #[pymethods]
@@ -312,8 +311,8 @@ impl StartResponseCallable {
             .parse::<u16>()
             .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
 
-        self.response_sender.lock().unwrap().send(
-            ResponseEvent::Start(ResponseStartEvent { status, headers }),
+        self.response_sender.send(
+            ResponseSenderEvent::Start(ResponseStartEvent { status, headers }),
             exc_info,
         )?;
 
@@ -321,62 +320,6 @@ impl StartResponseCallable {
             response_sender: self.response_sender.clone(),
         }
         .into_bound_py_any(py)
-    }
-}
-
-/// A wrapper around the response event bridge to allow tracking events. This helps
-/// implement certain quirky features such as exc_info.
-struct ResponseSender {
-    /// The event bridge to send response events.
-    response_bridge: EventBridge<ResponseEvent>,
-    /// The scheduler to wake up the filter to process response events.
-    scheduler: Arc<SyncScheduler>,
-
-    /// The start event created in start_response if not sent yet.
-    start_event: Option<ResponseStartEvent>,
-
-    /// Whether headers have been sent yet.
-    headers_sent: bool,
-    /// Memoized constants.
-    constants: Arc<Constants>,
-}
-
-impl ResponseSender {
-    fn send<'py>(
-        &mut self,
-        event: ResponseEvent,
-        exc_info: Option<Bound<'py, PyTuple>>,
-    ) -> PyResult<()> {
-        match event {
-            ResponseEvent::Start(start) => {
-                if let Some(exc_info) = exc_info {
-                    if self.headers_sent {
-                        let e = exc_info.get_item(1)?;
-                        e.call_method1(&self.constants.with_traceback, (exc_info.get_item(2)?,))?;
-                        return Err(PyErr::from_value(e));
-                    }
-                } else if self.start_event.is_some() {
-                    return Err(PyRuntimeError::new_err(
-                        "start_response called twice without exc_info",
-                    ));
-                }
-                self.start_event = Some(start);
-                return Ok(());
-            }
-            ResponseEvent::Body(_) => {
-                if let Some(start) = self.start_event.take() {
-                    // First body event, need to send start first.
-                    let _ = self.response_bridge.send(ResponseEvent::Start(start));
-                    self.headers_sent = true;
-                }
-            }
-            ResponseEvent::Exception => {}
-        }
-
-        if self.response_bridge.send(event).is_ok() {
-            self.scheduler.commit(EVENT_ID_RESPONSE);
-        }
-        Ok(())
     }
 }
 
@@ -476,7 +419,7 @@ impl RequestInput {
             return Ok(self.constants.empty_bytes.bind(py).clone());
         }
 
-        let _lock = self.lock.lock().unwrap();
+        let _lock = self.lock.lock_py_attached(py).unwrap();
 
         if self.request_read_bridge.send(event).is_ok() {
             self.scheduler.commit(EVENT_ID_REQUEST);
@@ -502,15 +445,15 @@ impl RequestInput {
 /// https://peps.python.org/pep-3333/#the-write-callable
 #[pyclass(module = "_pyvoy.wsgi")]
 struct WriteCallable {
-    response_sender: Arc<Mutex<ResponseSender>>,
+    response_sender: ResponseSender,
 }
 
 #[pymethods]
 impl WriteCallable {
     fn __call__<'py>(&mut self, data: Bound<'py, PyBytes>) -> PyResult<()> {
         let body: Box<[u8]> = Box::from(data.as_bytes());
-        self.response_sender.lock().unwrap().send(
-            ResponseEvent::Body(ResponseBodyEvent {
+        self.response_sender.send(
+            ResponseSenderEvent::Body(ResponseBodyEvent {
                 body,
                 more_body: true,
             }),
@@ -537,14 +480,14 @@ struct ErrorsOutput {
 
 #[pymethods]
 impl ErrorsOutput {
-    fn write<'py>(&self, data: Bound<'py, PyString>) -> PyResult<usize> {
+    fn write<'py>(&self, py: Python<'py>, data: Bound<'py, PyString>) -> PyResult<usize> {
         let str = data.to_str()?;
 
         if str.is_empty() {
             return Ok(0);
         }
 
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut buffer = self.buffer.lock_py_attached(py).unwrap();
 
         // Easiest case, we can output all the lines as is without touching the buffer.
         if str.ends_with('\n') && buffer.is_empty() {
@@ -584,8 +527,8 @@ impl ErrorsOutput {
         Ok(str.len())
     }
 
-    fn writelines<'py>(&self, lines: Bound<'py, PyAny>) -> PyResult<()> {
-        self.flush()?;
+    fn writelines<'py>(&self, py: Python<'py>, lines: Bound<'py, PyAny>) -> PyResult<()> {
+        self.flush(py)?;
 
         for item in lines.try_iter()? {
             let item = item?;
@@ -604,8 +547,8 @@ impl ErrorsOutput {
         Ok(())
     }
 
-    fn flush(&self) -> PyResult<()> {
-        let buffer = &mut *self.buffer.lock().unwrap();
+    fn flush<'py>(&self, py: Python<'py>) -> PyResult<()> {
+        let buffer = &mut *self.buffer.lock_py_attached(py).unwrap();
         if !buffer.is_empty() {
             for line in std::mem::take(&mut *buffer).split('\n') {
                 if !line.is_empty() {
