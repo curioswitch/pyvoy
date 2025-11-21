@@ -573,3 +573,14 @@ async def test_wsgi_multiple_start_response(
 ) -> None:
     response = await client.get(f"{url_wsgi}/multiple-start-response")
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_wsgi_no_start_response(
+    url_wsgi: str, client: httpx.AsyncClient, logs_wsgi: asyncio.StreamReader
+) -> None:
+    response = await client.get(f"{url_wsgi}/no-start-response")
+    assert response.status_code == 500, response.text
+    await assert_logs_contains(
+        logs_wsgi, ["RuntimeError: start_response not called from WSGI application"]
+    )

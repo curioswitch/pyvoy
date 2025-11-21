@@ -638,6 +638,12 @@ def _multiple_start_response(
     return [b" Yes"]
 
 
+def _no_start_response(
+    _environ: WSGIEnvironment, _start_response: StartResponse
+) -> Iterable[bytes]:
+    return [b"OK"]
+
+
 def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     path = cast("str", environ["PATH_INFO"]).encode("latin-1").decode("utf-8")
     match path:
@@ -686,5 +692,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _errors_output(environ, start_response)
         case "/multiple-start-response":
             return _multiple_start_response(environ, start_response)
+        case "/no-start-response":
+            return _no_start_response(environ, start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

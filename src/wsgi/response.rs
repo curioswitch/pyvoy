@@ -34,8 +34,6 @@ pub(crate) enum ResponseSenderEvent {
     Start(ResponseStartEvent),
     /// A body chunk. If the first one, this will cause the start to be sent.
     Body(ResponseBodyEvent),
-    /// An exception.
-    Exception,
 }
 
 impl ResponseSender {
@@ -102,11 +100,6 @@ impl ResponseSender {
                     {
                         inner.scheduler.commit(EVENT_ID_RESPONSE);
                     }
-                }
-            }
-            ResponseSenderEvent::Exception => {
-                if inner.response_bridge.send(ResponseEvent::Exception).is_ok() {
-                    inner.scheduler.commit(EVENT_ID_EXCEPTION);
                 }
             }
         }
