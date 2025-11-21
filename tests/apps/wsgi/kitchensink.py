@@ -232,6 +232,14 @@ def _all_the_headers(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
     try:
+        host = cast("str", environ.get("HTTP_HOST", ""))
+        if not host:
+            return _failure("HTTP_HOST not found in environ", start_response)
+        if not host.startswith("127.0.0.1:"):
+            return _failure(
+                f"HTTP_HOST does not start with '127.0.0.1:', was: {host!r}",
+                start_response,
+            )
         _assert_dict_value(environ, "HTTP_ACCEPT", "accept", start_response)
         _assert_dict_value(
             environ, "HTTP_ACCEPT_CHARSET", "accept-charset", start_response
