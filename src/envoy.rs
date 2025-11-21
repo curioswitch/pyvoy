@@ -18,6 +18,16 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
     let mut raw_path: Box<[u8]> = Box::default();
     let mut scheme = uri::Scheme::HTTP;
 
+    // ASGI says host must be the start of the vector so handle it first.
+    if let Some(authority) = envoy_filter.get_request_header_value(":authority") {
+        headers.push((
+            http::header::HOST,
+            HeaderValue::from_bytes(authority.as_slice())
+                // Should't happen in practice.
+                .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+        ));
+    }
+
     for (name_bytes, value_bytes) in envoy_headers.iter() {
         let name_slice = name_bytes.as_slice();
         let value_slice = value_bytes.as_slice();
@@ -39,7 +49,11 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
                 raw_path = Box::from(value_slice);
                 continue;
             }
-            b":authority" | b"x-forwarded-proto" => {
+            b":authority" => {
+                // Already handled above.
+                continue;
+            }
+            b"x-forwarded-proto" => {
                 // There seems to be no way of disabling Envoy's addition of this. We don't need it
                 // since we're not propagating to an upstream - we keep the scheme in the scope
                 // instead.

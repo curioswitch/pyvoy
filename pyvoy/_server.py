@@ -63,6 +63,7 @@ class PyvoyServer:
     _interface: Interface
     _root_path: str
     _log_level: LogLevel
+    _require_client_certificate: bool
 
     _started: bool
 
@@ -77,6 +78,7 @@ class PyvoyServer:
         tls_cert: bytes | os.PathLike | None = None,
         tls_ca_cert: bytes | os.PathLike | None = None,
         tls_enable_http3: bool = True,
+        require_client_certificate: bool = True,
         interface: Interface = "asgi",
         root_path: str = "",
         log_level: LogLevel = "error",
@@ -92,6 +94,7 @@ class PyvoyServer:
         self._tls_cert = tls_cert
         self._tls_ca_cert = tls_ca_cert
         self._tls_enable_http3 = tls_enable_http3
+        self._require_client_certificate = require_client_certificate
         self._interface = interface
         self._root_path = root_path
         self._stdout = stdout
@@ -267,7 +270,8 @@ class PyvoyServer:
                         **common_tls_context,
                         "alpn_protocols": ["h2", "http/1.1"],
                     },
-                    "require_client_certificate": bool(self._tls_ca_cert),
+                    "require_client_certificate": bool(self._tls_ca_cert)
+                    and self._require_client_certificate,
                 },
             }
             if self._tls_port is not None:

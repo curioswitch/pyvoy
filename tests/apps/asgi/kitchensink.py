@@ -775,6 +775,20 @@ async def _all_the_headers(
     scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
     headers: dict[str, list[str]] = defaultdict(list)
+
+    first_header = next(iter(scope["headers"]))
+    if first_header[0] != b"host":
+        await _send_failure(
+            f"first header should be 'host', was: {first_header[0]!r}", send
+        )
+        return
+    if not first_header[1].startswith(b"127.0.0.1:"):
+        await _send_failure(
+            f"host header does not start with '127.0.0.1:', was: {first_header[1]!r}",
+            send,
+        )
+        return
+
     for name, value in scope["headers"]:
         headers[name.decode()].append(value.decode())
 
