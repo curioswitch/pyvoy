@@ -14,8 +14,9 @@ from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
 import yaml
+from envoy import get_envoy_path
 
-from ._bin import get_envoy_path, get_pyvoy_dir_path
+from ._bin import get_pyvoy_dir_path
 
 if TYPE_CHECKING:
     from types import TracebackType
