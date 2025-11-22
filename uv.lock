@@ -320,6 +320,16 @@ wheels = [
 ]
 
 [[package]]
+name = "envoy-server"
+version = "1.36.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/7a/2a997f81c34192d4cdadef019b95129e0ef45dbaec6110fadd2774afed1d/envoy_server-1.36.2-py3-none-macosx_15_0_arm64.whl", hash = "sha256:9ad57f6efc11867de45ba677ab6e2940f672222cefb675ebdb0c2d3d48919f2b", size = 31977208, upload-time = "2025-11-22T06:24:51.348Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/9b/fb2200abcec972c33e261deb91c562e897eebfc9c4fab92aa896750bba9b/envoy_server-1.36.2-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:9e5048686ebee6999b021eefe313444e4c2280ac48c4ae23c61a13612e407225", size = 27885459, upload-time = "2025-11-22T06:24:54.233Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/d1/854ad496c2032d65d90e2fc08fc6a3b711c70324e2339cb0cde13d97a301/envoy_server-1.36.2-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:c75488ad0be907f077883691aa3832a79b509c1f6c993b420683e90793e13efc", size = 29507558, upload-time = "2025-11-22T06:24:56.844Z" },
+]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -778,6 +788,7 @@ name = "pyvoy"
 version = "0.1.3"
 source = { editable = "." }
 dependencies = [
+    { name = "envoy-server" },
     { name = "find-libpython" },
     { name = "pyyaml" },
     { name = "uvloop" },
@@ -805,6 +816,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "envoy-server", specifier = "==1.36.2" },
     { name = "find-libpython" },
     { name = "pyyaml" },
     { name = "uvloop" },
