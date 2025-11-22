@@ -6,7 +6,8 @@ from __future__ import annotations
 import os
 import subprocess
 
-from pyvoy._bin import get_envoy_path
+from envoy import get_envoy_path
+
 from pyvoy._server import get_envoy_environ
 
 envoy_path = get_envoy_path()
