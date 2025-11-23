@@ -6,6 +6,25 @@ authors = [{ name = "CurioSwitch" }]
 requires-python = ">= 3.10"
 readme = "README.md"
 license-files = ["LICENSE"]
+keywords = ["asgi", "envoy", "wsgi"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
+]
 
 dependencies = ["envoy-server==1.36.2", "find-libpython", "pyyaml", "uvloop"]
 
@@ -28,6 +47,12 @@ dev = [
     "watchfiles",
     "wheel",
 ]
+
+[project.urls]
+Homepage = "https://github.com/curioswitch/pyvoy"
+Repository = "https://github.com/curioswitch/pyvoy.git"
+Issues = "https://github.com/curioswitch/pyvoy/issues"
+Changelog = "https://github.com/curioswitch/pyvoy/releases"
 
 [project.scripts]
 pyvoy = "pyvoy._cli:main"
@@ -121,13 +146,13 @@ extend-ignore = [
     "CPY",
     # Not Applicable
     "DJ",
-    # It's fine to have TODOs
+    # It"s fine to have TODOs
     "FIX",
     # Not Applicable
     "INT",
     # Even prevents pytest.raises around an iteration which is too strict
     "PT012",
-    # Triggers for protocol implementations that don't need the arg too
+    # Triggers for protocol implementations that don"t need the arg too
     "ARG002",
     # Complexity checks usually reduce readability
     "C90",
@@ -170,7 +195,7 @@ required-imports = ["from __future__ import annotations"]
 split-on-trailing-comma = false
 
 [tool.ruff]
-# Don't run ruff on generated code from external plugins.
+# Don"t run ruff on generated code from external plugins.
 extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
 
 [tool.pytest.ini_options]
