@@ -140,7 +140,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             if self.request_closed || has_request_body(envoy_filter) {
                 self.recv_bridge.process(|future| {
                     self.executor.handle_recv_future(
-                        read_request_body(envoy_filter),
+                        ByteSlice::from_envoy(envoy_filter),
                         !self.request_closed,
                         future,
                     );
@@ -171,11 +171,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             envoy_filter.send_response_headers(headers, true);
                         } else {
                             envoy_filter.send_response_headers(headers, false);
-                            envoy_filter.send_response_data(&body_event.body, true);
+                            body_event.body.send_response_data(envoy_filter, true);
                         }
                     } else {
                         envoy_filter.send_response_headers(headers, false);
-                        envoy_filter.send_response_data(&body_event.body, false);
+                        body_event.body.send_response_data(envoy_filter, false);
                     }
                 }
                 SendEvent::Body(mut event) => {
@@ -183,8 +183,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     if let Some(future) = event.future.take() {
                         self.executor.handle_send_future(future);
                     }
-                    envoy_filter.send_response_data(&event.body, end_stream);
-                    if end_stream {}
+                    event.body.send_response_data(envoy_filter, end_stream);
                 }
                 SendEvent::Trailers(mut event) => {
                     if let Some(trailers) = &mut self.response_trailers {
