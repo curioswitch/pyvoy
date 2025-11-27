@@ -1,14 +1,12 @@
 use http::{HeaderName, HeaderValue};
 
-use crate::envoy::ByteSlice;
-
 pub(crate) struct ResponseStartEvent {
     pub status: u16,
     pub headers: Vec<(HeaderName, HeaderValue)>,
 }
 
 pub(crate) struct ResponseBodyEvent {
-    pub body: ByteSlice,
+    pub body: Box<[u8]>,
     pub more_body: bool,
 }
 

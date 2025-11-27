@@ -11,11 +11,7 @@ use pyo3::{
 };
 
 use super::types::*;
-use crate::{
-    envoy::{ByteSlice, SyncScheduler},
-    eventbridge::EventBridge,
-    wsgi::response::ResponseSenderEvent,
-};
+use crate::{envoy::SyncScheduler, eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
 use crate::{types::*, wsgi::response::ResponseSender};
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 
@@ -201,7 +197,7 @@ impl Executor {
                     Ok(0) => {
                         response_sender.send(
                             ResponseSenderEvent::Body(ResponseBodyEvent {
-                                body: ByteSlice::Gil(Box::default()),
+                                body: Box::default(),
                                 more_body: false,
                             }),
                             None,
@@ -212,7 +208,7 @@ impl Executor {
                             response.try_iter()?.next().ok_or(PyRuntimeError::new_err(
                                 "WSGI app returned empty iterator despite len() == 1",
                             ))??;
-                        let body = ByteSlice::from_py(item.cast::<PyBytes>()?);
+                        let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
                         response_sender.send(
                             ResponseSenderEvent::Body(ResponseBodyEvent {
                                 body,
@@ -223,7 +219,7 @@ impl Executor {
                     }
                     _ => {
                         for item in response.try_iter()? {
-                            let body = ByteSlice::from_py(item?.cast::<PyBytes>()?);
+                            let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
                             response_sender.send(
                                 ResponseSenderEvent::Body(ResponseBodyEvent {
                                     body,
@@ -237,7 +233,7 @@ impl Executor {
                         }
                         response_sender.send(
                             ResponseSenderEvent::Body(ResponseBodyEvent {
-                                body: ByteSlice::Gil(Box::default()),
+                                body: Box::from([]),
                                 more_body: false,
                             }),
                             None,
@@ -455,7 +451,7 @@ struct WriteCallable {
 #[pymethods]
 impl WriteCallable {
     fn __call__<'py>(&mut self, data: Bound<'py, PyBytes>) -> PyResult<()> {
-        let body = ByteSlice::from_py(&data);
+        let body: Box<[u8]> = Box::from(data.as_bytes());
         self.response_sender.send(
             ResponseSenderEvent::Body(ResponseBodyEvent {
                 body,
