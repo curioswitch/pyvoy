@@ -186,7 +186,7 @@ impl ByteSlice {
     }
 
     /// Converts this [`ByteSlice`] to a [`PyBytes`].
-    pub(crate) fn to_py<'py>(self, py: Python<'py>) -> Bound<'py, PyBytes> {
+    pub(crate) fn into_py<'py>(self, py: Python<'py>) -> Bound<'py, PyBytes> {
         match self {
             ByteSlice::Gil(bytes) => PyBytes::new(py, &bytes),
             #[cfg(Py_GIL_DISABLED)]
