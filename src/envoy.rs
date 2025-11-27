@@ -181,9 +181,9 @@ impl ByteSlice {
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             ByteSlice::Gil(bytes) => bytes.is_empty(),
+            // In practice, won't be hit since we always use Gil for empty bytes.
             #[cfg(Py_GIL_DISABLED)]
-            // We always use Gil for empty bytes.
-            ByteSlice::NoGil(_) => false,
+            ByteSlice::NoGil(bytes) => Python::attach(|py| bytes.as_bytes(py).is_empty()),
         }
     }
 
