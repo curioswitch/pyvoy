@@ -124,6 +124,9 @@ def main() -> None:
         stderr=subprocess.DEVNULL,
     )
     for app_server in (PYVOY, HYPERCORN, GRANIAN, UVICORN):
+        if not sys._is_gil_enabled() and app_server == GRANIAN:  # noqa: SLF001
+            # Granian hangs on free-threaded for some reason
+            continue
         with subprocess.Popen(  # noqa: S603
             app_server.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         ) as server:
