@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from shutil import copyfileobj
+from shutil import copyfileobj, rmtree
 
 bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 
@@ -12,9 +12,19 @@ def main() -> None:
     print("Building libpyvoy...")  # noqa: T201
     pyvoy_path = bin_dir / "libpyvoy.so"
     pyvoy_path.unlink(missing_ok=True)
+
+    target_dir = Path(__file__).parent.parent / "target"
+    pyversion_file = target_dir / "python-version.txt"
+    if not pyversion_file.exists() or pyversion_file.read_text() != sys.version:
+        # PyO3 does not seem to incremently compile correctly when changing Python
+        # versions so we track it ourselves.
+        rmtree(target_dir, ignore_errors=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        pyversion_file.write_text(sys.version)
+
     subprocess.run(["cargo", "build", "--release"], check=True)
 
-    release_dir = Path(__file__).parent.parent / "target" / "release"
+    release_dir = target_dir / "release"
     if sys.platform == "darwin":
         libpyvoy_path = release_dir / "libpyvoy.dylib"
         proc = subprocess.run(
