@@ -77,7 +77,9 @@ jobs:
         run: uv run poe test
 
       - name: run connect integration tests on push
-        # TODO: Enable on free-threaded Python after publishing a wheel for it
+        # TODO: Enable on free-threaded Python after publishing a wheel for it.
+        # The integration test first installs pyvoy from PyPi before we reinstall from local
+        # and it's tricky to avoid that.
         if: github.event_name == 'push' && matrix.python != '3.14t'
         run: uv run poe integration-test-connect
 
