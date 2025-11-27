@@ -33,6 +33,7 @@
       "editor.defaultFormatter": "esbenp.prettier-vscode"
     },
     "debugpy.debugJustMyCode": false,
+    "rust-analyzer.cargo.cfgs": ["debug_assertions", "miri", "Py_GIL_DISABLED"],
     "[python]": {
       "editor.formatOnSave": true,
       "editor.codeActionsOnSave": {
