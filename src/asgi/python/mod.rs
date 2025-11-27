@@ -8,7 +8,7 @@ use crate::{
         awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
         lifespan::{Lifespan, execute_lifespan},
     },
-    envoy::SyncScheduler,
+    envoy::{ByteSlice, SyncScheduler},
     eventbridge::EventBridge,
     types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope},
 };
@@ -212,7 +212,7 @@ impl Executor {
             .unwrap();
     }
 
-    pub(crate) fn handle_recv_future(&self, body: Box<[u8]>, more_body: bool, future: RecvFuture) {
+    pub(crate) fn handle_recv_future(&self, body: ByteSlice, more_body: bool, future: RecvFuture) {
         self.tx
             .send(Event::HandleRecvFuture {
                 body,
@@ -422,14 +422,14 @@ impl ExecutorInner {
     fn handle_recv_future<'py>(
         &self,
         py: Python<'py>,
-        body: Box<[u8]>,
+        body: ByteSlice,
         more_body: bool,
         future: Py<PyAny>,
     ) -> PyResult<()> {
         let set_result = future.getattr(py, &self.constants.set_result)?;
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, PyBytes::new(py, &body))?;
+        event.set_item(&self.constants.body, body.to_py(py))?;
         event.set_item(&self.constants.more_body, more_body)?;
         self.loop_.call_method1(
             py,
@@ -490,7 +490,7 @@ enum Event {
         scheduler: SyncScheduler,
     },
     HandleRecvFuture {
-        body: Box<[u8]>,
+        body: ByteSlice,
         more_body: bool,
         future: RecvFuture,
     },
@@ -662,9 +662,9 @@ impl SendCallable {
                     Some(v) => v.extract()?,
                     None => false,
                 };
-                let body: Box<[u8]> = match event.get_item(&self.constants.body)? {
-                    Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
-                    _ => Box::default(),
+                let body: ByteSlice = match event.get_item(&self.constants.body)? {
+                    Some(body) => ByteSlice::from_py(body.cast::<PyBytes>()?),
+                    _ => ByteSlice::Gil(Box::default()),
                 };
                 if !more_body {
                     self.next_event = if *trailers {
@@ -792,7 +792,7 @@ pub(crate) struct ResponseStartEvent {
 }
 
 pub(crate) struct ResponseBodyEvent {
-    pub body: Box<[u8]>,
+    pub body: ByteSlice,
     // Future to notify when the body is completed writing.
     // Not sent for the final piece of body, so None indicates
     // more_body = False.

@@ -143,11 +143,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                         envoy_filter.send_response_headers(headers, true);
                     } else {
                         envoy_filter.send_response_headers(headers, false);
-                        envoy_filter.send_response_data(&body_event.body, true);
+                        body_event.body.send_response_data(envoy_filter, true);
                     }
                 } else {
                     envoy_filter.send_response_headers(headers, false);
-                    envoy_filter.send_response_data(&body_event.body, false);
+                    body_event.body.send_response_data(envoy_filter, false);
                 }
             }
             ResponseEvent::Body(body_event) => {
@@ -155,7 +155,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 if !end_stream {
                     send_or_log(&self.response_written_tx, ());
                 }
-                envoy_filter.send_response_data(&body_event.body, end_stream);
+                body_event.body.send_response_data(envoy_filter, end_stream);
             }
             ResponseEvent::Exception => {
                 if !self.response_closed {
