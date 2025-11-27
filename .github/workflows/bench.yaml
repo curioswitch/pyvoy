@@ -21,10 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # It's overkill to run benchmarks on multiple Pythons like we do tests,
-        # but we will need it eventually to compare with free-threaded Python.
+        # Overkill to benchmark with every Python version, we just use the latest.
         python:
           - "3.14"
+          - "3.14t"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
