@@ -147,8 +147,26 @@ impl Executor {
         };
 
         let gil_handle = thread::spawn(move || {
+            #[cfg(Py_GIL_DISABLED)]
+            if let Err(e) = Python::attach(|py| {
+                for event in rx.iter() {
+                    if !inner.handle_event(py, event)? {
+                        break;
+                    }
+                }
+                Ok::<_, PyErr>(())
+            }) {
+                eprintln!(
+                    "Unexpected Python exception in ASGI executor thread. This likely a bug in pyvoy: {}",
+                    e
+                );
+            }
+
+            #[cfg(not(Py_GIL_DISABLED))]
             let gil_batch_size = get_gil_batch_size();
+            #[cfg(not(Py_GIL_DISABLED))]
             let mut shutdown = false;
+            #[cfg(not(Py_GIL_DISABLED))]
             while let Ok(event) = rx.recv() {
                 if let Err(e) = Python::attach(|py| {
                     if !inner.handle_event(py, event)? {
@@ -179,6 +197,7 @@ impl Executor {
                 }
             }
         });
+
         Ok((
             executor,
             ExecutorHandles {
