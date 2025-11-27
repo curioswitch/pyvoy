@@ -1,13 +1,5 @@
 use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler};
 use http::{HeaderName, HeaderValue, uri};
-#[cfg(Py_GIL_DISABLED)]
-use pyo3::Py;
-use pyo3::{
-    Bound, Python,
-    types::{PyBytes, PyBytesMethods as _},
-};
-
-use crate::types::Constants;
 
 pub(crate) struct HeadersInfo {
     pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
@@ -94,6 +86,28 @@ pub(crate) fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> 
         .unwrap_or(false)
 }
 
+/// Reads the entire readable request body from Envoy.
+pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> Box<[u8]> {
+    let buffers = envoy_filter.get_request_body().unwrap_or_default();
+    match buffers.len() {
+        0 => Box::default(),
+        1 => {
+            let body: Box<[u8]> = Box::from(buffers[0].as_slice());
+            envoy_filter.drain_request_body(body.len());
+            body
+        }
+        _ => {
+            let body_len = buffers.iter().map(|b| b.as_slice().len()).sum();
+            let mut body = Vec::with_capacity(body_len);
+            for buffer in buffers {
+                body.extend_from_slice(buffer.as_slice());
+            }
+            envoy_filter.drain_request_body(body.len());
+            body.into_boxed_slice()
+        }
+    }
+}
+
 /// A Sync wrapper around EnvoyHttpFilterScheduler.
 ///
 /// TODO: Remove after https://github.com/envoyproxy/envoy/commit/c561059a04f496eda1e664a8d45bf9b64deef100 is released.
@@ -114,112 +128,3 @@ impl std::ops::Deref for SyncScheduler {
 }
 
 unsafe impl Sync for SyncScheduler {}
-
-/// A slice of bytes. On free-threaded Python, we can use PyBytes directly
-/// within the filter too because there is no need to take the GIL to read
-/// the bytes.
-pub(crate) enum ByteSlice {
-    /// Bytes safe to read from Envoy request threads on any Python.
-    Gil(Box<[u8]>),
-
-    #[cfg(Py_GIL_DISABLED)]
-    /// Bytes only safe to read from Envoy request threads in free-threaded Python.
-    NoGil(Py<PyBytes>),
-}
-
-impl ByteSlice {
-    /// Reads available Envoy request data into a [`Byteslice`].
-    pub(crate) fn from_envoy<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> ByteSlice {
-        let buffers = envoy_filter.get_request_body().unwrap_or_default();
-        match buffers.len() {
-            0 => ByteSlice::Gil(Box::default()),
-            1 => {
-                let buffer = buffers[0].as_slice();
-                let len = buffer.len();
-
-                #[cfg(Py_GIL_DISABLED)]
-                let body = if len == 0 {
-                    ByteSlice::Gil(Box::default())
-                } else {
-                    ByteSlice::NoGil(Python::attach(|py| PyBytes::new(py, buffer).unbind()))
-                };
-
-                #[cfg(not(Py_GIL_DISABLED))]
-                let body = ByteSlice::Gil(Box::from(buffer));
-
-                envoy_filter.drain_request_body(len);
-                body
-            }
-            _ => {
-                // We can't avoid a copy if we need to concatenate buffers since Python bytes is immutable.
-                // So we just stick to the Box version for this branch.
-                let body_len = buffers.iter().map(|b| b.as_slice().len()).sum();
-                let mut body = Vec::with_capacity(body_len);
-                for buffer in buffers {
-                    body.extend_from_slice(buffer.as_slice());
-                }
-                envoy_filter.drain_request_body(body.len());
-                ByteSlice::Gil(body.into_boxed_slice())
-            }
-        }
-    }
-
-    /// Creates a new [`ByteSlice`] from a Python bytes object.
-    pub(crate) fn from_py<'py>(bytes: &Bound<'py, PyBytes>) -> ByteSlice {
-        if bytes.as_bytes().is_empty() {
-            return ByteSlice::Gil(Box::default());
-        }
-
-        #[cfg(not(Py_GIL_DISABLED))]
-        return ByteSlice::Gil(Box::from(bytes.as_bytes()));
-
-        #[cfg(Py_GIL_DISABLED)]
-        return ByteSlice::NoGil(bytes.clone().unbind());
-    }
-
-    /// Returns whether this [`ByteSlice`] is empty.
-    pub(crate) fn is_empty(&self) -> bool {
-        match self {
-            ByteSlice::Gil(bytes) => bytes.is_empty(),
-            // In practice, won't be hit since we always use Gil for empty bytes.
-            #[cfg(Py_GIL_DISABLED)]
-            ByteSlice::NoGil(bytes) => Python::attach(|py| bytes.as_bytes(py).is_empty()),
-        }
-    }
-
-    /// Converts this [`ByteSlice`] to a [`PyBytes`].
-    pub(crate) fn into_py<'py>(
-        self,
-        py: Python<'py>,
-        constants: &Constants,
-    ) -> Bound<'py, PyBytes> {
-        match self {
-            ByteSlice::Gil(bytes) => {
-                if bytes.is_empty() {
-                    constants.empty_bytes.bind(py).clone()
-                } else {
-                    PyBytes::new(py, &bytes)
-                }
-            }
-            #[cfg(Py_GIL_DISABLED)]
-            ByteSlice::NoGil(bytes) => bytes.into_bound(py),
-        }
-    }
-
-    /// Sends the bytes in this [`ByteSlice`] in the Envoy response.
-    pub(crate) fn send_response_data<EHF: EnvoyHttpFilter>(
-        self,
-        envoy_filter: &mut EHF,
-        end_stream: bool,
-    ) {
-        match self {
-            ByteSlice::Gil(bytes) => {
-                envoy_filter.send_response_data(&bytes, end_stream);
-            }
-            #[cfg(Py_GIL_DISABLED)]
-            ByteSlice::NoGil(bytes) => Python::attach(|py| {
-                envoy_filter.send_response_data(bytes.as_bytes(py), end_stream);
-            }),
-        }
-    }
-}
