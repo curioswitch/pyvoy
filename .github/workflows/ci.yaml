@@ -77,7 +77,8 @@ jobs:
         run: uv run poe test
 
       - name: run connect integration tests on push
-        if: github.event_name == 'push'
+        # TODO: Enable on free-threaded Python after publishing a wheel for it
+        if: github.event_name == 'push' && matrix.python != '3.14t'
         run: uv run poe integration-test-connect
 
       - name: prepare coverage
