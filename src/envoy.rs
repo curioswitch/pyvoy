@@ -182,7 +182,7 @@ impl ByteSlice {
         match self {
             ByteSlice::Gil(bytes) => bytes.is_empty(),
             #[cfg(Py_GIL_DISABLED)]
-            // We always use Gil for empty bytes in new().
+            // We always use Gil for empty bytes.
             ByteSlice::NoGil(_) => false,
         }
     }
