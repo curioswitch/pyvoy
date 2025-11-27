@@ -7,6 +7,8 @@ use pyo3::{
     types::{PyBytes, PyBytesMethods as _},
 };
 
+use crate::types::Constants;
+
 pub(crate) struct HeadersInfo {
     pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) method: http::Method,
@@ -186,9 +188,19 @@ impl ByteSlice {
     }
 
     /// Converts this [`ByteSlice`] to a [`PyBytes`].
-    pub(crate) fn into_py<'py>(self, py: Python<'py>) -> Bound<'py, PyBytes> {
+    pub(crate) fn into_py<'py>(
+        self,
+        py: Python<'py>,
+        constants: &Constants,
+    ) -> Bound<'py, PyBytes> {
         match self {
-            ByteSlice::Gil(bytes) => PyBytes::new(py, &bytes),
+            ByteSlice::Gil(bytes) => {
+                if bytes.is_empty() {
+                    constants.empty_bytes.bind(py).clone()
+                } else {
+                    PyBytes::new(py, &bytes)
+                }
+            }
             #[cfg(Py_GIL_DISABLED)]
             ByteSlice::NoGil(bytes) => bytes.into_bound(py),
         }

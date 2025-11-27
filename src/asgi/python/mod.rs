@@ -429,7 +429,7 @@ impl ExecutorInner {
         let set_result = future.getattr(py, &self.constants.set_result)?;
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, body.into_py(py))?;
+        event.set_item(&self.constants.body, body.into_py(py, &self.constants))?;
         event.set_item(&self.constants.more_body, more_body)?;
         self.loop_.call_method1(
             py,
