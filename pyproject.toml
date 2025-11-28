@@ -42,6 +42,7 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "ruff",
+    "seaborn",
     "toml",
     "trustme",
     "uvicorn[standard]",

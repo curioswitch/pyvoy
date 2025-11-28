@@ -12,6 +12,8 @@ from enum import Enum
 
 import psutil
 
+from ._charts import BenchmarkResults
+
 
 @dataclass
 class AppServer:
@@ -43,7 +45,7 @@ UVICORN = AppServer(
 
 
 class Protocol(Enum):
-    HTTP1 = "http/1.1"
+    HTTP1 = "h1"
     HTTP2 = "h2"
 
 
@@ -120,6 +122,14 @@ class ResourceMonitor:
             time.sleep(0.5)
 
 
+def response_sizes(sleep: int) -> tuple[int, ...]:
+    if sleep <= 10:
+        return (0, 100, 10000, 100000)
+    # Past 10ms latency, response size has no perceivable effect on throughput so
+    # we reduce bench time by checking just one.
+    return (10000,)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Conformance server")
     parser.add_argument(
@@ -128,6 +138,8 @@ def main() -> None:
         help="Run a short version of the tests",
     )
     args = parser.parse_args(namespace=Args())
+
+    benchmark_results = BenchmarkResults()
 
     # Run vegeta once at start to avoid go downloading messages during benchmarks
     subprocess.run(
@@ -189,7 +201,7 @@ def main() -> None:
                     if protocol != Protocol.HTTP1 and app_server in (GUNICORN, UVICORN):
                         continue
                     for sleep in (0, 10, 200, 500, 1000):
-                        for response_size in (0, 100, 10000, 100000):
+                        for response_size in response_sizes(sleep):
                             if args.short and (sleep > 0 or response_size > 0):
                                 continue
                             print(  # noqa: T201
@@ -231,6 +243,7 @@ def main() -> None:
 
                             resource = monitor.aggregate()
 
+                            # Print text report to console
                             subprocess.run(
                                 [  # noqa: S607
                                     "go",
@@ -240,6 +253,32 @@ def main() -> None:
                                 ],
                                 check=True,
                                 input=vegeta_result,
+                            )
+
+                            # Get JSON report for parsing
+                            json_report = subprocess.run(
+                                [  # noqa: S607
+                                    "go",
+                                    "run",
+                                    "github.com/tsenart/vegeta/v12@v12.12.0",
+                                    "report",
+                                    "-type=json",
+                                ],
+                                check=True,
+                                input=vegeta_result,
+                                capture_output=True,
+                            )
+                            vegeta_json = json.loads(json_report.stdout)
+
+                            benchmark_results.store_result(
+                                protocol.value,
+                                interface,
+                                app_server.name,
+                                sleep,
+                                response_size,
+                                vegeta_json,
+                                resource.avg.cpu_percent,
+                                resource.avg.rss,
                             )
 
                             print(  # noqa: T201
@@ -253,6 +292,8 @@ def main() -> None:
                 monitor.stop()
                 server.terminate()
                 server.communicate()
+
+    benchmark_results.generate_charts()
 
 
 if __name__ == "__main__":
