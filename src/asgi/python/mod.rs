@@ -10,7 +10,7 @@ use crate::{
     },
     envoy::SyncScheduler,
     eventbridge::EventBridge,
-    types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope},
+    types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope, SyncReceiver},
 };
 use http::{HeaderName, HeaderValue};
 use pyo3::{
@@ -147,36 +147,42 @@ impl Executor {
         };
 
         let gil_handle = thread::spawn(move || {
+            let rx = SyncReceiver::new(rx);
             let gil_batch_size = get_gil_batch_size();
             let mut shutdown = false;
-            while let Ok(event) = rx.recv() {
-                if let Err(e) = Python::attach(|py| {
-                    if !inner.handle_event(py, event)? {
-                        shutdown = true;
-                    } else {
-                        // We don't want to be too agressive and starve the event loop but do
-                        // suffer significantly reduced throughput when acquiring the GIL each
-                        // event since the operations are very fast (we just schedule on the
-                        // event loop without actually executing logic). We go ahead and
-                        // process any more events that may be present up to a cap to improve
-                        // throughput while still having a relatively low upper bound on time.
-                        for event in rx.try_iter().take(gil_batch_size) {
-                            if !inner.handle_event(py, event)? {
-                                shutdown = true;
-                                break;
+            if let Err(e) = Python::attach(|py| {
+                loop {
+                    if let Ok(event) = py.detach(|| rx.recv()) {
+                        if !inner.handle_event(py, event)? {
+                            shutdown = true;
+                        } else {
+                            // We don't want to be too agressive and starve the event loop but do
+                            // suffer significantly reduced throughput when acquiring the GIL each
+                            // event since the operations are very fast (we just schedule on the
+                            // event loop without actually executing logic). We go ahead and
+                            // process any more events that may be present up to a cap to improve
+                            // throughput while still having a relatively low upper bound on time.
+                            for event in rx.try_iter().take(gil_batch_size) {
+                                if !inner.handle_event(py, event)? {
+                                    shutdown = true;
+                                    break;
+                                }
                             }
                         }
+                    } else {
+                        shutdown = true;
                     }
-                    Ok::<_, PyErr>(())
-                }) {
-                    eprintln!(
-                        "Unexpected Python exception in ASGI executor thread. This likely a bug in pyvoy: {}",
-                        e
-                    );
+                    if shutdown {
+                        break;
+                    }
                 }
-                if shutdown {
-                    return;
-                }
+
+                Ok::<_, PyErr>(())
+            }) {
+                eprintln!(
+                    "Unexpected Python exception in ASGI executor thread. This likely a bug in pyvoy: {}",
+                    e
+                );
             }
         });
         Ok((
