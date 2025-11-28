@@ -67,10 +67,6 @@ impl ExecutorHandles {
 /// on it. The task scheduler does some marshaling of Python dictionaries while
 /// holding the GIL and then schedules execution of the actual tasks on the
 /// asyncio event loop thread.
-///
-/// In the future when supporting free-threaded Python, we will be able to
-/// execute Python code directly from the request threads due to the lack of a GIL,
-/// and can allow both modes with the same interface in this executor.
 #[derive(Clone)]
 pub(crate) struct Executor {
     tx: Sender<Event>,
@@ -151,26 +147,22 @@ impl Executor {
             let gil_batch_size = get_gil_batch_size();
             let mut shutdown = false;
             if let Err(e) = Python::attach(|py| {
-                loop {
-                    if let Ok(event) = py.detach(|| rx.recv()) {
-                        if !inner.handle_event(py, event)? {
-                            shutdown = true;
-                        } else {
-                            // We don't want to be too agressive and starve the event loop but do
-                            // suffer significantly reduced throughput when acquiring the GIL each
-                            // event since the operations are very fast (we just schedule on the
-                            // event loop without actually executing logic). We go ahead and
-                            // process any more events that may be present up to a cap to improve
-                            // throughput while still having a relatively low upper bound on time.
-                            for event in rx.try_iter().take(gil_batch_size) {
-                                if !inner.handle_event(py, event)? {
-                                    shutdown = true;
-                                    break;
-                                }
+                while let Ok(event) = py.detach(|| rx.recv()) {
+                    if !inner.handle_event(py, event)? {
+                        shutdown = true;
+                    } else {
+                        // We don't want to be too agressive and starve the event loop but do
+                        // suffer significantly reduced throughput when acquiring the GIL each
+                        // event since the operations are very fast (we just schedule on the
+                        // event loop without actually executing logic). We go ahead and
+                        // process any more events that may be present up to a cap to improve
+                        // throughput while still having a relatively low upper bound on time.
+                        for event in rx.try_iter().take(gil_batch_size) {
+                            if !inner.handle_event(py, event)? {
+                                shutdown = true;
+                                break;
                             }
                         }
-                    } else {
-                        shutdown = true;
                     }
                     if shutdown {
                         break;
