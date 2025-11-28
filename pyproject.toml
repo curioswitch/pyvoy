@@ -32,6 +32,7 @@ dependencies = ["envoy-server==1.36.2", "find-libpython", "pyyaml", "uvloop"]
 dev = [
     "asgiref",
     "granian",
+    "gunicorn",
     "httpx",
     "hypercorn",
     "poethepoet",
