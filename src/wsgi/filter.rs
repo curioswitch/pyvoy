@@ -25,6 +25,12 @@ impl Config {
     }
 }
 
+impl Drop for Config {
+    fn drop(&mut self) {
+        self.executor.shutdown();
+    }
+}
+
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         let (request_body_tx, request_body_rx) = mpsc::channel::<RequestBody>();

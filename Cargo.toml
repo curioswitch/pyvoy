@@ -8,8 +8,8 @@ repository = "https://github.com/curioswitch/pyvoy"
 [dependencies]
 envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/envoyproxy/envoy", tag = "v1.36.2" }
 
+crossbeam-channel = "0.5.15"
 encoding_rs = "0.8.35"
-executors = "0.10.0"
 http = "1.3.1"
 itoa = "1.0.15"
 pyo3 = "0.27.1"
