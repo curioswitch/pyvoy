@@ -32,9 +32,11 @@ GRANIAN = AppServer(
     "granian",
     ["granian", "--loop", "uvloop"],
     ["--interface", "asgi", ASGI_APP],
-    ["--interface", "wsgi", WSGI_APP],
+    ["--interface", "wsgi", "--blocking-threads", "200", WSGI_APP],
 )
-GUNICORN = AppServer("gunicorn", ["gunicorn"], None, [WSGI_APP])
+GUNICORN = AppServer(
+    "gunicorn", ["gunicorn", "--reuse-port", "--threads", "200"], None, [WSGI_APP]
+)
 UVICORN = AppServer(
     "uvicorn", ["uvicorn", "--no-access-log", "--loop", "uvloop"], [ASGI_APP], None
 )
@@ -184,7 +186,7 @@ def main() -> None:
                 monitor.start()
 
                 for protocol in (Protocol.HTTP2, Protocol.HTTP1):
-                    if protocol != Protocol.HTTP1 and app_server == UVICORN:
+                    if protocol != Protocol.HTTP1 and app_server in (GUNICORN, UVICORN):
                         continue
                     for sleep in (0, 10, 200, 500, 1000):
                         for response_size in (0, 100, 10000, 100000):
