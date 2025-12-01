@@ -66,7 +66,25 @@ impl Executor {
                 thread::spawn(move || {
                     let _ = Python::attach(|py| {
                         while let Ok(event) = py.detach(|| inner.rx.recv()) {
-                            inner.execute_app(event);
+                            let scheduler = Arc::new(event.scheduler);
+                            let response_bridge = event.response_bridge;
+                            if let Err(e) = inner.execute_app(
+                                py,
+                                event.scope,
+                                event.request_read_bridge,
+                                event.request_body_rx,
+                                response_bridge.clone(),
+                                event.response_written_rx,
+                                scheduler.clone(),
+                            ) {
+                                let tb = e
+                                    .traceback(py)
+                                    .and_then(|tb| tb.format().ok())
+                                    .unwrap_or_default();
+                                eprintln!("Exception in WSGI application\n{}{}", tb, e);
+                                let _ = response_bridge.send(ResponseEvent::Exception);
+                                scheduler.commit(EVENT_ID_EXCEPTION);
+                            }
                         }
 
                         Ok::<_, PyErr>(())
@@ -115,232 +133,217 @@ impl Executor {
 }
 
 impl ExecutorInner {
-    fn execute_app(&self, event: ExecuteAppEvent) {
-        let ExecuteAppEvent {
-            scope,
-            request_read_bridge,
-            request_body_rx,
-            response_bridge,
-            response_written_rx,
-            scheduler,
-        } = event;
+    fn execute_app<'py>(
+        &self,
+        py: Python<'py>,
+        scope: Scope,
+        request_read_bridge: EventBridge<RequestReadEvent>,
+        request_body_rx: Receiver<RequestBody>,
+        response_bridge: EventBridge<ResponseEvent>,
+        response_written_rx: Receiver<()>,
+        scheduler: Arc<SyncScheduler>,
+    ) -> PyResult<()> {
         let response_written_rx = SyncReceiver::new(response_written_rx);
 
-        let scheduler = Arc::new(scheduler);
-        let result: PyResult<()> = Python::attach(|py| {
-            let app = self.app.bind(py);
-            let mut response_sender = ResponseSender::new(
-                response_bridge.clone(),
-                scheduler.clone(),
-                self.constants.clone(),
-            );
+        let app = self.app.bind(py);
+        let mut response_sender = ResponseSender::new(
+            response_bridge.clone(),
+            scheduler.clone(),
+            self.constants.clone(),
+        );
 
-            let environ = PyDict::new(py);
-            environ.set_http_method(
-                &self.constants,
-                &self.constants.request_method,
-                &scope.method,
-            )?;
+        let environ = PyDict::new(py);
+        environ.set_http_method(
+            &self.constants,
+            &self.constants.request_method,
+            &scope.method,
+        )?;
 
-            environ.set_item(&self.constants.script_name, &self.constants.root_path_value)?;
+        environ.set_item(&self.constants.script_name, &self.constants.root_path_value)?;
 
-            let raw_path: &[u8] =
-                if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
-                    // In practice, Envoy rejects requests with non-ASCII query strings so decode_latin1
-                    // is redundant, but still keep it for consistency, it won't allocate and has little
-                    // overhead.
-                    environ.set_item(
-                        &self.constants.wsgi_query_string,
-                        PyString::new(py, &decode_latin1(&scope.raw_path[query_idx + 1..])),
-                    )?;
-                    &scope.raw_path[..query_idx]
-                } else {
-                    environ.set_item(
-                        &self.constants.wsgi_query_string,
-                        &self.constants.empty_string,
-                    )?;
-                    &scope.raw_path
-                };
-
-            let decoded_path = urlencoding::decode_binary(raw_path);
-            let root_path = self.constants.root_path_value.bind(py).to_str()?;
-            let decoded_path_slice = if root_path.is_empty() {
-                &decoded_path
-            } else if decoded_path.starts_with(root_path.as_bytes()) {
-                &decoded_path[root_path.len()..]
+        let raw_path: &[u8] =
+            if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
+                // In practice, Envoy rejects requests with non-ASCII query strings so decode_latin1
+                // is redundant, but still keep it for consistency, it won't allocate and has little
+                // overhead.
+                environ.set_item(
+                    &self.constants.wsgi_query_string,
+                    PyString::new(py, &decode_latin1(&scope.raw_path[query_idx + 1..])),
+                )?;
+                &scope.raw_path[..query_idx]
             } else {
-                // Not specified in PEP3333 but follow gunicorn's behavior.
-                return Err(PyValueError::new_err(format!(
-                    "Request path '{}' does not start with root path '{}'",
-                    String::from_utf8_lossy(&decoded_path),
-                    root_path
-                )));
+                environ.set_item(
+                    &self.constants.wsgi_query_string,
+                    &self.constants.empty_string,
+                )?;
+                &scope.raw_path
             };
-            environ.set_item(
-                &self.constants.path_info,
-                PyString::new(py, &decode_latin1(decoded_path_slice)),
-            )?;
 
-            for (key, value) in scope.headers.iter() {
-                match *key {
-                    header::CONTENT_TYPE => environ.set_item(
-                        &self.constants.content_type,
-                        PyString::from_bytes(py, value.as_bytes())?,
-                    )?,
-                    header::CONTENT_LENGTH => environ.set_item(
-                        &self.constants.content_length,
-                        PyString::from_bytes(py, value.as_bytes())?,
-                    )?,
-                    _ => {
-                        let key_str = key.as_str().to_uppercase().replace("-", "_");
-                        let header_name = format!("HTTP_{}", key_str);
-                        if let Some(existing) = environ.get_item(&header_name)? {
-                            let value_str = String::from_utf8_lossy(value.as_bytes());
-                            let existing = existing.cast::<PyString>()?;
-                            let new_value = format!("{},{}", existing.to_str()?, value_str);
-                            environ.set_item(header_name, new_value)?;
-                        } else {
-                            environ.set_item(
-                                header_name,
-                                PyString::from_bytes(py, value.as_bytes())?,
-                            )?;
-                        }
+        let decoded_path = urlencoding::decode_binary(raw_path);
+        let root_path = self.constants.root_path_value.bind(py).to_str()?;
+        let decoded_path_slice = if root_path.is_empty() {
+            &decoded_path
+        } else if decoded_path.starts_with(root_path.as_bytes()) {
+            &decoded_path[root_path.len()..]
+        } else {
+            // Not specified in PEP3333 but follow gunicorn's behavior.
+            return Err(PyValueError::new_err(format!(
+                "Request path '{}' does not start with root path '{}'",
+                String::from_utf8_lossy(&decoded_path),
+                root_path
+            )));
+        };
+        environ.set_item(
+            &self.constants.path_info,
+            PyString::new(py, &decode_latin1(decoded_path_slice)),
+        )?;
+
+        for (key, value) in scope.headers.iter() {
+            match *key {
+                header::CONTENT_TYPE => environ.set_item(
+                    &self.constants.content_type,
+                    PyString::from_bytes(py, value.as_bytes())?,
+                )?,
+                header::CONTENT_LENGTH => environ.set_item(
+                    &self.constants.content_length,
+                    PyString::from_bytes(py, value.as_bytes())?,
+                )?,
+                _ => {
+                    let key_str = key.as_str().to_uppercase().replace("-", "_");
+                    let header_name = format!("HTTP_{}", key_str);
+                    if let Some(existing) = environ.get_item(&header_name)? {
+                        let value_str = String::from_utf8_lossy(value.as_bytes());
+                        let existing = existing.cast::<PyString>()?;
+                        let new_value = format!("{},{}", existing.to_str()?, value_str);
+                        environ.set_item(header_name, new_value)?;
+                    } else {
+                        environ
+                            .set_item(header_name, PyString::from_bytes(py, value.as_bytes())?)?;
                     }
                 }
             }
+        }
 
-            if let Some((server, port)) = scope.server {
-                environ.set_item(&self.constants.server_name, &server[..])?;
-                environ.set_item(&self.constants.server_port, port.to_string())?;
-            } else {
-                // In practice, should never be exercised.
-                environ.set_item(&self.constants.server_name, "localhost")?;
-                environ.set_item(&self.constants.server_port, "0")?;
-            }
+        if let Some((server, port)) = scope.server {
+            environ.set_item(&self.constants.server_name, &server[..])?;
+            environ.set_item(&self.constants.server_port, port.to_string())?;
+        } else {
+            // In practice, should never be exercised.
+            environ.set_item(&self.constants.server_name, "localhost")?;
+            environ.set_item(&self.constants.server_port, "0")?;
+        }
 
-            environ.set_http_version_wsgi(&self.constants, &scope.http_version)?;
+        environ.set_http_version_wsgi(&self.constants, &scope.http_version)?;
 
-            environ.set_item(&self.constants.wsgi_version, (1, 0))?;
-            environ.set_http_scheme(
-                &self.constants,
-                &self.constants.wsgi_url_scheme,
-                &scope.scheme,
-            )?;
+        environ.set_item(&self.constants.wsgi_version, (1, 0))?;
+        environ.set_http_scheme(
+            &self.constants,
+            &self.constants.wsgi_url_scheme,
+            &scope.scheme,
+        )?;
+        environ.set_item(
+            &self.constants.wsgi_input,
+            RequestInput {
+                request_read_bridge,
+                request_body_rx: SyncReceiver::new(request_body_rx),
+                scheduler: scheduler.clone(),
+                closed: false,
+                constants: self.constants.clone(),
+                lock: Mutex::new(()),
+            },
+        )?;
+        environ.set_item(
+            &self.constants.wsgi_errors,
+            ErrorsOutput {
+                buffer: Mutex::new(String::new()),
+            },
+        )?;
+
+        environ.set_item(&self.constants.wsgi_multithread, true)?;
+        environ.set_item(&self.constants.wsgi_multiprocess, false)?;
+        environ.set_item(&self.constants.wsgi_run_once, false)?;
+
+        if let Some(tls_info) = scope.tls_info {
             environ.set_item(
-                &self.constants.wsgi_input,
-                RequestInput {
-                    request_read_bridge,
-                    request_body_rx: SyncReceiver::new(request_body_rx),
-                    scheduler: scheduler.clone(),
-                    closed: false,
-                    constants: self.constants.clone(),
-                    lock: Mutex::new(()),
-                },
+                &self.constants.wsgi_ext_tls_version,
+                tls_info.tls_version.to_string(),
             )?;
-            environ.set_item(
-                &self.constants.wsgi_errors,
-                ErrorsOutput {
-                    buffer: Mutex::new(String::new()),
-                },
-            )?;
-
-            environ.set_item(&self.constants.wsgi_multithread, true)?;
-            environ.set_item(&self.constants.wsgi_multiprocess, false)?;
-            environ.set_item(&self.constants.wsgi_run_once, false)?;
-
-            if let Some(tls_info) = scope.tls_info {
+            if let Some(client_cert) = tls_info.client_cert_name {
                 environ.set_item(
-                    &self.constants.wsgi_ext_tls_version,
-                    tls_info.tls_version.to_string(),
+                    &self.constants.wsgi_ext_tls_client_cert_name,
+                    PyString::new(py, &client_cert),
                 )?;
-                if let Some(client_cert) = tls_info.client_cert_name {
-                    environ.set_item(
-                        &self.constants.wsgi_ext_tls_client_cert_name,
-                        PyString::new(py, &client_cert),
-                    )?;
-                }
             }
+        }
 
-            let response = app.call1((
-                environ,
-                StartResponseCallable {
-                    response_sender: response_sender.clone(),
-                },
-            ))?;
+        let response = app.call1((
+            environ,
+            StartResponseCallable {
+                response_sender: response_sender.clone(),
+            },
+        ))?;
 
-            // We ignore all send errors here since they only happen if the filter was dropped meaning
-            // the request was closed, usually by the client. This is not an application error, and we just need
-            // to make sure a close() method for a generator is called before returning.
+        // We ignore all send errors here since they only happen if the filter was dropped meaning
+        // the request was closed, usually by the client. This is not an application error, and we just need
+        // to make sure a close() method for a generator is called before returning.
 
-            match response.len() {
-                Ok(0) => {
-                    response_sender.send(
-                        ResponseSenderEvent::Body(ResponseBodyEvent {
-                            body: Box::default(),
-                            more_body: false,
-                        }),
-                        None,
-                    )?;
-                }
-                Ok(1) => {
-                    let item = response.try_iter()?.next().ok_or(PyRuntimeError::new_err(
-                        "WSGI app returned empty iterator despite len() == 1",
-                    ))??;
-                    let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
+        match response.len() {
+            Ok(0) => {
+                response_sender.send(
+                    ResponseSenderEvent::Body(ResponseBodyEvent {
+                        body: Box::default(),
+                        more_body: false,
+                    }),
+                    None,
+                )?;
+            }
+            Ok(1) => {
+                let item = response.try_iter()?.next().ok_or(PyRuntimeError::new_err(
+                    "WSGI app returned empty iterator despite len() == 1",
+                ))??;
+                let body: Box<[u8]> = Box::from(item.cast::<PyBytes>()?.as_bytes());
+                response_sender.send(
+                    ResponseSenderEvent::Body(ResponseBodyEvent {
+                        body,
+                        more_body: false,
+                    }),
+                    None,
+                )?;
+            }
+            _ => {
+                for item in response.try_iter()? {
+                    let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
                     response_sender.send(
                         ResponseSenderEvent::Body(ResponseBodyEvent {
                             body,
-                            more_body: false,
-                        }),
-                        None,
-                    )?;
-                }
-                _ => {
-                    for item in response.try_iter()? {
-                        let body: Box<[u8]> = Box::from(item?.cast::<PyBytes>()?.as_bytes());
-                        response_sender.send(
-                            ResponseSenderEvent::Body(ResponseBodyEvent {
-                                body,
-                                more_body: true,
-                            }),
-                            None,
-                        )?;
-                        py.detach(|| {
-                            let _ = response_written_rx.recv();
-                        });
-                    }
-                    response_sender.send(
-                        ResponseSenderEvent::Body(ResponseBodyEvent {
-                            body: Box::from([]),
-                            more_body: false,
+                            more_body: true,
                         }),
                         None,
                     )?;
                     py.detach(|| {
-                        // RecvError only is request filter was dropped, but since this
-                        // is the end always safe to ignore.
                         let _ = response_written_rx.recv();
                     });
                 }
+                response_sender.send(
+                    ResponseSenderEvent::Body(ResponseBodyEvent {
+                        body: Box::from([]),
+                        more_body: false,
+                    }),
+                    None,
+                )?;
+                py.detach(|| {
+                    // RecvError only is request filter was dropped, but since this
+                    // is the end always safe to ignore.
+                    let _ = response_written_rx.recv();
+                });
             }
-
-            if let Ok(close) = response.getattr(&self.constants.close) {
-                close.call0()?;
-            }
-
-            Ok(())
-        });
-        if let Err(e) = result {
-            Python::attach(|py| {
-                let tb = e
-                    .traceback(py)
-                    .and_then(|tb| tb.format().ok())
-                    .unwrap_or_default();
-                eprintln!("Exception in WSGI application\n{}{}", tb, e);
-            });
-            let _ = response_bridge.send(ResponseEvent::Exception);
-            scheduler.commit(EVENT_ID_EXCEPTION);
         }
+
+        if let Ok(close) = response.getattr(&self.constants.close) {
+            close.call0()?;
+        }
+
+        Ok(())
     }
 }
 
