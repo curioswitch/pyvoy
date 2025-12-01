@@ -30,6 +30,21 @@ fn init() -> bool {
         return false;
     }
 
+    if let Some(value) = std::env::var_os("PYVOY_PYDEVD_ARGS") {
+        let args = value
+            .to_string_lossy()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+        if let Err(e) = Python::attach(|py| {
+            let pyvoy_debug = py.import("pyvoy._debug")?;
+            pyvoy_debug.call_method1("enable_pydev", (args,))?;
+            Ok::<_, PyErr>(())
+        }) {
+            envoy_log_warn!("Failed to enable pydevd, proceeding without debug: {}", e);
+        }
+    }
+
     true
 }
 

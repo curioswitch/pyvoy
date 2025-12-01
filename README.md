@@ -15,6 +15,7 @@ Python interpreter into a module that can be loaded by a stock Envoy binary.
 - A complete, battle-tested HTTP stack - it's just Envoy
   - Includes full HTTP protocol support, with HTTP/2 trailers and HTTP/3
 - Any Envoy configuration features such as load shedding can be integrated as normal
+- Auto-restart on file change and IDE debugging for development
 
 ## Limitations
 

@@ -5,6 +5,7 @@ __pycache__
 .venv
 
 .envrc
+.idea
 .vscode
 
 pyvoy/_bin/envoy

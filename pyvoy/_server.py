@@ -34,6 +34,8 @@ def get_envoy_environ() -> dict[str, str]:
         "PYTHONHOME": f"{sys.prefix}:{sys.exec_prefix}",
         "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": str(get_pyvoy_dir_path()),
     }
+    if len(args := _maybe_patch_args_with_debug([sys.executable, __file__])) > 2:
+        env["PYVOY_PYDEVD_ARGS"] = " ".join(args)
 
     if os.name == "posix":
         # We use candidate_paths() instead of find_python because the latter
@@ -372,3 +374,17 @@ def _to_datasource(value: bytes | os.PathLike) -> dict:
     if isinstance(value, os.PathLike):
         return {"filename": os.fspath(value)}
     return {"inline_bytes": base64.b64encode(value).decode()}
+
+
+def _maybe_patch_args_with_debug(args: list[str]) -> list[str]:
+    """Makes an attempt to patch a Python command with pydevd.
+
+    This will add debugger arguments if we are currently running under a debugger, which
+    we use to reconstruct it within pyvoy.
+    """
+    try:
+        import _pydev_bundle  # pyright: ignore[reportMissingImports]  # noqa: PLC0415
+
+        return _pydev_bundle.pydev_monkey.patch_args(args)
+    except Exception:
+        return args
