@@ -293,6 +293,8 @@ def main() -> None:
                 server.terminate()
                 server.communicate()
 
+    # Lazy import since some dependencies disable the GIL, and it seems to get
+    # propagated to subprocesses through environment if it happens above.
     from . import _charts  # noqa: PLC0415
 
     _charts.generate_charts(benchmark_results)
