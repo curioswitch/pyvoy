@@ -151,8 +151,12 @@ def main() -> None:
 
     for app_server in (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN):
         for interface in ("asgi", "wsgi"):
-            if not sys._is_gil_enabled() and app_server in (GUNICORN, GRANIAN):  # noqa: SLF001
-                # granian and gunicorn hang on free-threaded for some reason
+            if not sys._is_gil_enabled() and app_server in (  # noqa: SLF001
+                GUNICORN,
+                GRANIAN,
+                HYPERCORN,
+            ):
+                # granian, gunicorn, hypercorn can hang on free-threaded for some reason
                 continue
             match interface:
                 case "asgi":
