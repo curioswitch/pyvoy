@@ -12,7 +12,7 @@ from enum import Enum
 
 import psutil
 
-from ._charts import BenchmarkResults
+from ._results import BenchmarkResults
 
 
 @dataclass
@@ -152,7 +152,7 @@ def main() -> None:
     for app_server in (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN):
         for interface in ("asgi", "wsgi"):
             if not sys._is_gil_enabled() and app_server == GRANIAN:  # noqa: SLF001
-                # Granian hangs on free-threaded for some reason
+                # granian hangs on free-threaded for some reason
                 continue
             match interface:
                 case "asgi":
@@ -293,7 +293,11 @@ def main() -> None:
                 server.terminate()
                 server.communicate()
 
-    benchmark_results.generate_charts()
+    # Lazy import since some dependencies disable the GIL, and it seems to get
+    # propagated to subprocesses through environment if it happens above.
+    from . import _charts  # noqa: PLC0415
+
+    _charts.generate_charts(benchmark_results)
 
 
 if __name__ == "__main__":
