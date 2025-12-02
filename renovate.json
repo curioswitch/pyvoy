@@ -18,7 +18,8 @@
     },
     {
       "matchManagers": ["rust"],
-      "groupName": "Rust dependencies"
+      "groupName": "Rust dependencies",
+      "rangeStrategy": "bump"
     },
     {
       // We need to use an older version for compatibility
