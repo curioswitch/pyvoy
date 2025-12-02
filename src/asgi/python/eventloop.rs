@@ -54,12 +54,14 @@ impl EventLoops {
         )
     }
 
+    /// Stops the event loops, executing shutdown lifespan if needed before doing so.
     pub(crate) fn stop<'py>(&self, py: Python<'py>) -> PyResult<()> {
         match self.inner.as_ref() {
             EventLoopsInner::Single(event_loop) => event_loop.stop(py),
         }
     }
 
+    /// Joins the event loop threads.
     pub(crate) fn join(self) {
         match self.inner.as_ref() {
             EventLoopsInner::Single(event_loop) => {
