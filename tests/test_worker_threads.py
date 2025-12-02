@@ -4,7 +4,6 @@ import asyncio
 import subprocess
 from typing import TYPE_CHECKING
 
-import httpx
 import pytest
 import pytest_asyncio
 
@@ -12,6 +11,8 @@ from pyvoy import Interface, PyvoyServer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    import httpx
 
 
 @pytest_asyncio.fixture(scope="module")
