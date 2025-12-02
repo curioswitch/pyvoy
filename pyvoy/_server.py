@@ -67,6 +67,7 @@ class PyvoyServer:
     _root_path: str
     _log_level: LogLevel
     _require_client_certificate: bool
+    _worker_threads: int | None
 
     _started: bool
 
@@ -85,6 +86,7 @@ class PyvoyServer:
         interface: Interface = "asgi",
         root_path: str = "",
         log_level: LogLevel = "error",
+        worker_threads: int | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
         print_envoy_config: bool = False,
@@ -104,6 +106,7 @@ class PyvoyServer:
         self._stderr = stderr
         self._print_envoy_config = print_envoy_config
         self._log_level = log_level
+        self._worker_threads = worker_threads
 
         self._listener_port_tls = None
         self._started = False
@@ -208,6 +211,14 @@ class PyvoyServer:
         return not self._started
 
     def get_envoy_config(self) -> dict:
+        pyvoy_config: dict[str, str | int] = {
+            "app": self._app,
+            "interface": self._interface,
+            "root_path": self._root_path,
+        }
+        if self._worker_threads is not None:
+            pyvoy_config["worker_threads"] = self._worker_threads
+
         enable_http3 = self._tls_enable_http3 and (
             self._tls_key or self._tls_cert or self._tls_ca_cert
         )
@@ -221,13 +232,7 @@ class PyvoyServer:
                     "terminal_filter": True,
                     "filter_config": {
                         "@type": "type.googleapis.com/google.protobuf.StringValue",
-                        "value": json.dumps(
-                            {
-                                "app": self._app,
-                                "interface": self._interface,
-                                "root_path": self._root_path,
-                            }
-                        ),
+                        "value": json.dumps(pyvoy_config),
                     },
                 },
             }
