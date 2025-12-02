@@ -87,7 +87,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
 
     match interface {
-        "asgi" => asgi::filter::Config::new(app, constants)
+        "asgi" => asgi::filter::Config::new(app, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(app, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),

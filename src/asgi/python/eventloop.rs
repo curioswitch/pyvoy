@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex, atomic::AtomicU64, mpsc},
     thread::{self, JoinHandle},
 };
 
@@ -16,6 +16,10 @@ use crate::{
 
 enum EventLoopsInner {
     Single(EventLoop),
+    Multiple {
+        loops: Box<[EventLoop]>,
+        next: AtomicU64,
+    },
 }
 
 /// A pool of event loops.
@@ -30,15 +34,30 @@ impl EventLoops {
     /// Each event loop has lifespan initialized using the provided ASGI parameters.
     pub(crate) fn new<'py>(
         py: Python<'py>,
-        _size: usize,
+        size: usize,
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
-        let event_loop = EventLoop::new(py, app, asgi, constants)?;
-        Ok(EventLoops {
-            inner: Arc::new(EventLoopsInner::Single(event_loop)),
-        })
+        match size {
+            n if n > 1 => {
+                let mut loops = Vec::with_capacity(n);
+                for _ in 0..n {
+                    loops.push(EventLoop::new(py, app, asgi, constants)?);
+                }
+                Ok(EventLoops {
+                    inner: Arc::new(EventLoopsInner::Multiple {
+                        loops: loops.into_boxed_slice(),
+                        next: AtomicU64::new(0),
+                    }),
+                })
+            }
+            _ => Ok(EventLoops {
+                inner: Arc::new(EventLoopsInner::Single(EventLoop::new(
+                    py, app, asgi, constants,
+                )?)),
+            }),
+        }
     }
 
     /// Gets an event loop and possible lifespan state from the pool for executing
@@ -47,17 +66,35 @@ impl EventLoops {
         &self,
         py: Python<'py>,
     ) -> (Bound<'py, PyAny>, Option<Bound<'py, PyDict>>) {
-        let EventLoopsInner::Single(event_loop) = self.inner.as_ref();
-        (
-            event_loop.loop_.bind(py).clone(),
-            event_loop.state.as_ref().map(|s| s.bind(py).clone()),
-        )
+        match self.inner.as_ref() {
+            EventLoopsInner::Single(event_loop) => (
+                event_loop.loop_.bind(py).clone(),
+                event_loop.state.as_ref().map(|s| s.bind(py).clone()),
+            ),
+            // For now do simple round-robin balancing across event loops. While keeping track
+            // of current requests could make sense, it's also hard to know when requests take a
+            // while due to I/O, where it's not so bad to have unbalanced but fair load.
+            EventLoopsInner::Multiple { loops, next } => {
+                let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let event_loop = &loops[(idx as usize) % loops.len()];
+                (
+                    event_loop.loop_.bind(py).clone(),
+                    event_loop.state.as_ref().map(|s| s.bind(py).clone()),
+                )
+            }
+        }
     }
 
     /// Stops the event loops, executing shutdown lifespan if needed before doing so.
     pub(crate) fn stop<'py>(&self, py: Python<'py>) -> PyResult<()> {
         match self.inner.as_ref() {
             EventLoopsInner::Single(event_loop) => event_loop.stop(py),
+            EventLoopsInner::Multiple { loops, .. } => {
+                for event_loop in loops.iter() {
+                    event_loop.stop(py)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -66,6 +103,11 @@ impl EventLoops {
         match self.inner.as_ref() {
             EventLoopsInner::Single(event_loop) => {
                 let _ = event_loop.handle.lock().unwrap().take().unwrap().join();
+            }
+            EventLoopsInner::Multiple { loops, .. } => {
+                for event_loop in loops.iter() {
+                    let _ = event_loop.handle.lock().unwrap().take().unwrap().join();
+                }
             }
         }
     }
