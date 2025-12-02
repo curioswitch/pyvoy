@@ -68,6 +68,7 @@ class PyvoyServer:
     _log_level: LogLevel
     _require_client_certificate: bool
     _worker_threads: int | None
+    _additional_envoy_args: list[str] | None
 
     _started: bool
 
@@ -87,6 +88,7 @@ class PyvoyServer:
         root_path: str = "",
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
+        additional_envoy_args: list[str] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
         print_envoy_config: bool = False,
@@ -107,6 +109,7 @@ class PyvoyServer:
         self._print_envoy_config = print_envoy_config
         self._log_level = log_level
         self._worker_threads = worker_threads
+        self._additional_envoy_args = additional_envoy_args
 
         self._listener_port_tls = None
         self._started = False
@@ -133,8 +136,7 @@ class PyvoyServer:
         env = {**os.environ, **get_envoy_environ()}
 
         with NamedTemporaryFile("r") as admin_address_file:
-            self._process = await asyncio.create_subprocess_exec(
-                get_envoy_path(),
+            args = [
                 "--config-yaml",
                 json.dumps(config),
                 "--admin-address-path",
@@ -142,6 +144,12 @@ class PyvoyServer:
                 "--use-dynamic-base-id",
                 "--log-level",
                 self._log_level,
+            ]
+            if self._additional_envoy_args:
+                args.extend(self._additional_envoy_args)
+            self._process = await asyncio.create_subprocess_exec(
+                get_envoy_path(),
+                *args,
                 stdout=self._stdout,
                 stderr=self._stderr,
                 env=env,

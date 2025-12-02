@@ -156,7 +156,16 @@ async def amain() -> None:
         default=False,
     )
 
-    args = parser.parse_args(namespace=CLIArgs())
+    argv = sys.argv[1:]
+    additional_envoy_args = []
+    try:
+        separator_idx = argv.index("--")
+        additional_envoy_args = argv[separator_idx + 1 :]
+        argv = argv[:separator_idx]
+    except ValueError:
+        pass
+
+    args = parser.parse_args(argv, namespace=CLIArgs())
 
     server = PyvoyServer(
         args.app,
@@ -174,6 +183,7 @@ async def amain() -> None:
         root_path=args.root_path,
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
+        additional_envoy_args=additional_envoy_args,
     )
 
     if args.print_envoy_config:
