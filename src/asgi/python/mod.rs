@@ -10,12 +10,14 @@ use crate::{
     },
     envoy::SyncScheduler,
     eventbridge::EventBridge,
-    types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope, SyncReceiver},
+    types::{
+        ClientDisconnectedError, Constants, HeaderNameExt as _, PyDictExt as _, Scope, SyncReceiver,
+    },
 };
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
-    IntoPyObjectExt, create_exception,
-    exceptions::{PyOSError, PyRuntimeError, PyValueError},
+    IntoPyObjectExt,
+    exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyList, PyNone, PyString},
 };
@@ -25,8 +27,6 @@ use std::sync::mpsc::Sender;
 mod awaitable;
 mod eventloop;
 pub(crate) mod lifespan;
-
-create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
 fn get_gil_batch_size() -> usize {
     std::env::var("PYVOY_GIL_BATCH_SIZE")
@@ -226,13 +226,35 @@ impl ExecutorInner {
             Event::HandleRecvFuture {
                 body,
                 more_body,
-                future,
+                mut future,
             } => {
-                self.handle_recv_future(py, body, more_body, future)?;
+                if let Some(future) = future.future.take() {
+                    let recv_future_executor = RecvFutureExecutor {
+                        body,
+                        more_body,
+                        future: future.future,
+                        constants: self.constants.clone(),
+                    };
+                    future.loop_.call_method1(
+                        py,
+                        &self.constants.call_soon_threadsafe,
+                        (recv_future_executor,),
+                    )?;
+                }
             }
             Event::HandleDroppedRecvFuture(future) => {
-                self.handle_dropped_recv_future(py, future)?;
+                let dropped_recv_future_executor = DroppedRecvFutureExecutor {
+                    future: future.future,
+                    constants: self.constants.clone(),
+                };
+                future.loop_.call_method1(
+                    py,
+                    &self.constants.call_soon_threadsafe,
+                    (dropped_recv_future_executor,),
+                )?;
             }
+            // No real logic in handling send futures so we don't bother with
+            // running on the event loop.
             Event::HandleSendFuture(future) => {
                 self.handle_send_future(py, future)?;
             }
@@ -245,44 +267,6 @@ impl ExecutorInner {
             }
         }
         Ok(true)
-    }
-
-    fn handle_recv_future<'py>(
-        &self,
-        py: Python<'py>,
-        body: Box<[u8]>,
-        more_body: bool,
-        mut future: RecvFuture,
-    ) -> PyResult<()> {
-        let f = match future.future.take() {
-            Some(f) => f,
-            None => {
-                return Ok(());
-            }
-        };
-        let set_result = f.future.getattr(py, &self.constants.set_result)?;
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, PyBytes::new(py, &body))?;
-        event.set_item(&self.constants.more_body, more_body)?;
-        f.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, event),
-        )?;
-        Ok(())
-    }
-
-    fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let set_result = future.future.getattr(py, &self.constants.set_result)?;
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
-        future.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, event),
-        )?;
-        Ok(())
     }
 
     fn handle_send_future<'py>(&self, py: Python<'py>, mut future: SendFuture) -> PyResult<()> {
@@ -306,7 +290,7 @@ impl ExecutorInner {
         future.loop_.call_method1(
             py,
             &self.constants.call_soon_threadsafe,
-            (set_exception, ClientDisconnectedError::new_err(())),
+            (set_exception, &self.constants.client_disconnected_err),
         )?;
         Ok(())
     }
@@ -455,6 +439,44 @@ impl AppExecutor {
             },),
         )?;
 
+        Ok(())
+    }
+}
+
+#[pyclass]
+struct RecvFutureExecutor {
+    body: Box<[u8]>,
+    more_body: bool,
+    future: Py<PyAny>,
+    constants: Arc<Constants>,
+}
+
+#[pymethods]
+impl RecvFutureExecutor {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.http_request)?;
+        event.set_item(&self.constants.body, PyBytes::new(py, &self.body))?;
+        event.set_item(&self.constants.more_body, self.more_body)?;
+        self.future
+            .call_method1(py, &self.constants.set_result, (event,))?;
+        Ok(())
+    }
+}
+
+#[pyclass]
+struct DroppedRecvFutureExecutor {
+    future: Py<PyAny>,
+    constants: Arc<Constants>,
+}
+
+#[pymethods]
+impl DroppedRecvFutureExecutor {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
+        self.future
+            .call_method1(py, &self.constants.set_result, (event,))?;
         Ok(())
     }
 }

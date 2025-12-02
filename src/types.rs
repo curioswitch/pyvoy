@@ -8,9 +8,13 @@ use http::{
     uri::{self, Scheme},
 };
 use pyo3::{
+    IntoPyObjectExt, create_exception,
+    exceptions::PyOSError,
     prelude::*,
-    types::{PyBytes, PyDict, PyString},
+    types::{PyBytes, PyDict, PyNone, PyString},
 };
+
+create_exception!(pyvoy, ClientDisconnectedError, PyOSError);
 
 /// HTTP header name constants as PyBytes.
 pub(crate) struct HeaderNameConstants {
@@ -462,10 +466,21 @@ pub(crate) struct Constants {
 
     /// The root path value passed from configuration.
     pub root_path_value: Py<PyString>,
+
+    /// A singleton ClientDisconnectedError exception instance.
+    /// The traceback is not important since it is caused by the client,
+    /// so we can share it.
+    pub client_disconnected_err: Py<PyAny>,
 }
 
 impl Constants {
     pub fn new(py: Python<'_>, root_path: &str) -> Self {
+        let client_disconnected_err = ClientDisconnectedError::new_err(())
+            .into_py_any(py)
+            .unwrap();
+        client_disconnected_err
+            .setattr(py, "__traceback__", PyNone::get(py))
+            .unwrap();
         Self {
             asgi: PyString::new(py, "asgi").unbind(),
             extensions: PyString::new(py, "extensions").unbind(),
@@ -558,6 +573,8 @@ impl Constants {
             empty_string: PyString::new(py, "").unbind(),
 
             root_path_value: PyString::new(py, root_path).unbind(),
+
+            client_disconnected_err,
         }
     }
 }
