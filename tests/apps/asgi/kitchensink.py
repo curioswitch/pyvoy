@@ -585,6 +585,30 @@ async def _bad_app_start_missing_status(
         await _send_failure("No exception raised for missing status", send)
 
 
+async def _bad_app_invalid_status(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    try:
+        # We don't await since this error is evaluated eagerly being a parameter error.
+        # In other words, it will always fail even if send call and await are separated.
+        # This differs from errors for wrong order, etc.
+        send(
+            {
+                "type": "http.response.start",
+                "status": 2,
+                "headers": [(b"content-type", b"text/plain")],
+                "trailers": False,
+            }
+        )
+    except ValueError as e:
+        if str(e) != "Invalid HTTP status code '2'":
+            await _send_failure(f"{e!s} != \"Invalid HTTP status code '2'\"", send)
+            return
+        await _send_success(send)
+    else:
+        await _send_failure("No exception raised for invalid status", send)
+
+
 async def _bad_app_body_before_start(
     _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1061,6 +1085,8 @@ async def app(
             await _bad_app_missing_type(scope, recv, send)
         case "/bad-app-start-missing-status":
             await _bad_app_start_missing_status(scope, recv, send)
+        case "/bad-app-invalid-status":
+            await _bad_app_invalid_status(scope, recv, send)
         case "/bad-app-body-before-start":
             await _bad_app_body_before_start(scope, recv, send)
         case "/bad-app-start-after-start":

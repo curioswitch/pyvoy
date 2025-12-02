@@ -1,6 +1,6 @@
 use encoding_rs::mem::decode_latin1;
 use envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error;
-use http::{HeaderName, HeaderValue, header};
+use http::{HeaderName, HeaderValue, StatusCode, header};
 use pyo3::{
     IntoPyObjectExt,
     exceptions::{PyRuntimeError, PyStopIteration, PyValueError},
@@ -387,9 +387,9 @@ impl StartResponseCallable {
             Some((code_str, _)) => code_str,
             None => status,
         };
-        let status = status_code
-            .parse::<u16>()
-            .map_err(|e| PyValueError::new_err(format!("invalid status code: {}", e)))?;
+        let status = StatusCode::from_bytes(status_code.as_bytes()).map_err(|_| {
+            PyValueError::new_err(format!("Invalid HTTP status code '{}'", status_code))
+        })?;
 
         self.response_sender.send(
             ResponseSenderEvent::Start(ResponseStartEvent { status, headers }),

@@ -12,7 +12,7 @@ use crate::{
     eventbridge::EventBridge,
     types::{Constants, HeaderNameExt as _, PyDictExt as _, Scope, SyncReceiver},
 };
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     IntoPyObjectExt, create_exception,
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
@@ -626,14 +626,18 @@ impl SendCallable {
                     );
                 }
                 let headers = extract_headers_from_event(py, &self.constants, &event)?;
-                let status: u16 = match event.get_item(&self.constants.status)? {
-                    Some(v) => v.extract()?,
+                let status_code = match event.get_item(&self.constants.status)? {
+                    Some(v) => v.extract::<u16>()?,
                     None => {
                         return Err(PyRuntimeError::new_err(
                             "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
                         ));
                     }
                 };
+                let status = StatusCode::from_u16(status_code).map_err(|_| {
+                    PyValueError::new_err(format!("Invalid HTTP status code '{}'", status_code))
+                })?;
+
                 let trailers: bool = match event.get_item(&self.constants.trailers)? {
                     Some(v) => v.extract()?,
                     None => false,
@@ -784,7 +788,7 @@ fn extract_headers_from_event<'py>(
 }
 
 pub(crate) struct ResponseStartEvent {
-    pub status: u16,
+    pub status: StatusCode,
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub trailers: bool,
 }
