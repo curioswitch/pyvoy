@@ -387,6 +387,8 @@ pub(crate) struct Constants {
     pub asyncio: Py<PyString>,
     /// The string "run_coroutine_threadsafe".
     pub run_coroutine_threadsafe: Py<PyString>,
+    /// The string "create_task".
+    pub create_task: Py<PyString>,
     /// The string "add_done_callback".
     pub add_done_callback: Py<PyString>,
     /// The string "call_soon_threadsafe".
@@ -513,6 +515,7 @@ impl Constants {
 
             asyncio: PyString::new(py, "asyncio").unbind(),
             run_coroutine_threadsafe: PyString::new(py, "run_coroutine_threadsafe").unbind(),
+            create_task: PyString::new(py, "create_task").unbind(),
             add_done_callback: PyString::new(py, "add_done_callback").unbind(),
             call_soon_threadsafe: PyString::new(py, "call_soon_threadsafe").unbind(),
             set_result: PyString::new(py, "set_result").unbind(),
