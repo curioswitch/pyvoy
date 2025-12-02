@@ -1,6 +1,6 @@
 use std::sync::{
     Arc,
-    mpsc::{self, Receiver, Sender},
+    mpsc::{self, Sender},
 };
 
 use crate::{
@@ -17,11 +17,9 @@ use pyo3::{
 /// Result of executing the ASGI lifespan protocol.
 pub(crate) struct Lifespan {
     /// The receiver of lifespan events from the app.
-    pub lifespan_rx: Receiver<LifespanEvent>,
+    pub lifespan_rx: SyncReceiver<LifespanEvent>,
     /// An asyncio.Future that will be completed with the lifespan.shutdown message.
     shutdown_future: Py<PyAny>,
-    /// The event loop.
-    loop_: Py<PyAny>,
     /// Memoized constants.
     constants: Arc<Constants>,
 }
@@ -31,20 +29,8 @@ impl Lifespan {
     ///
     /// Because the server is going to shutdown regardless, we handle all errors with logging here
     /// instead of returning them.
-    pub(crate) fn shutdown(&self) {
-        if let Err(err) = Python::attach::<_, PyResult<()>>(|py| {
-            let set_result = self
-                .shutdown_future
-                .getattr(py, &self.constants.set_result)?;
-            let event = PyDict::new(py);
-            event.set_item(&self.constants.typ, &self.constants.lifespan_shutdown)?;
-            self.loop_.call_method1(
-                py,
-                &self.constants.call_soon_threadsafe,
-                (set_result, event),
-            )?;
-            Ok(())
-        }) {
+    pub(crate) fn shutdown<'py>(&self, py: Python<'py>, loop_: &Bound<'py, PyAny>) {
+        if let Err(err) = self.set_shutdown_future(py, loop_) {
             // All we do above is schedule set_result, it should not fail in practice.
             envoy_log_error!(
                 "Failed to start lifespan shutdown. This is usually a bug in pyvoy: {}",
@@ -52,7 +38,7 @@ impl Lifespan {
             );
         }
 
-        match self.lifespan_rx.recv() {
+        match py.detach(|| self.lifespan_rx.recv()) {
             Ok(LifespanEvent::ShutdownComplete) => {
                 envoy_log_info!("Application shutdown complete.");
             }
@@ -68,6 +54,16 @@ impl Lifespan {
             // The send callable validates event order so we shouldn't get anything else here.
             Ok(_) => unreachable!(),
         }
+    }
+
+    fn set_shutdown_future<'py>(&self, py: Python<'py>, loop_: &Bound<'py, PyAny>) -> PyResult<()> {
+        let set_result = self
+            .shutdown_future
+            .getattr(py, &self.constants.set_result)?;
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.lifespan_shutdown)?;
+        loop_.call_method1(&self.constants.call_soon_threadsafe, (set_result, event))?;
+        Ok(())
     }
 }
 
@@ -173,9 +169,8 @@ pub(crate) fn execute_lifespan<'py>(
         Ok((
             Some(Lifespan {
                 shutdown_future: shutdown_future.unbind(),
-                loop_: loop_.clone().unbind(),
                 constants: constants.clone(),
-                lifespan_rx: lifespan_rx.take(),
+                lifespan_rx: SyncReceiver::new(lifespan_rx.take()),
             }),
             Some(state.unbind()),
         ))

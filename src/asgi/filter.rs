@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::asgi::python;
-use crate::asgi::python::lifespan::Lifespan;
 use crate::asgi::python::*;
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
@@ -14,14 +13,13 @@ use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
-    lifespan: Option<Lifespan>,
     handles: Option<python::ExecutorHandles>,
 }
 
 impl Config {
     pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let (executor, handles, lifespan) = match python::Executor::new(module, attr, constants) {
+        let (executor, handles) = match python::Executor::new(module, attr, constants) {
             Ok(executor) => executor,
             Err(e) => {
                 Python::attach(|py| {
@@ -36,7 +34,6 @@ impl Config {
         };
         Some(Self {
             executor,
-            lifespan,
             handles: Some(handles),
         })
     }
@@ -44,9 +41,6 @@ impl Config {
 
 impl Drop for Config {
     fn drop(&mut self) {
-        if let Some(lifespan) = &self.lifespan {
-            lifespan.shutdown();
-        }
         self.executor.shutdown();
         self.handles.take().unwrap().join();
     }
