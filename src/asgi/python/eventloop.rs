@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
 };
 
@@ -61,18 +61,17 @@ impl EventLoops {
     }
 
     pub(crate) fn join(self) {
-        match Arc::into_inner(self.inner) {
-            Some(EventLoopsInner::Single(event_loop)) => {
-                let _ = event_loop.handle.join();
+        match self.inner.as_ref() {
+            EventLoopsInner::Single(event_loop) => {
+                let _ = event_loop.handle.lock().unwrap().take().unwrap().join();
             }
-            None => {}
         }
     }
 }
 
 struct EventLoop {
     loop_: Py<PyAny>,
-    handle: JoinHandle<()>,
+    handle: Mutex<Option<JoinHandle<()>>>,
     lifespan: Option<Lifespan>,
     state: Option<Py<PyDict>>,
     constants: Arc<Constants>,
@@ -113,7 +112,7 @@ impl EventLoop {
 
         Ok(Self {
             loop_,
-            handle,
+            handle: Mutex::new(Some(handle)),
             lifespan,
             state,
             constants: constants.clone(),
