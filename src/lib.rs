@@ -73,13 +73,23 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
     let interface = filter_config["interface"].as_str().unwrap_or("asgi");
     let root_path = filter_config["root_path"].as_str().unwrap_or("");
+    let worker_threads = match filter_config["worker_threads"].as_i64() {
+        Some(v) => v as usize,
+        None => {
+            if interface == "asgi" {
+                1
+            } else {
+                200
+            }
+        }
+    };
 
     let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
 
     match interface {
         "asgi" => asgi::filter::Config::new(app, constants)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
-        "wsgi" => wsgi::filter::Config::new(app, constants)
+        "wsgi" => wsgi::filter::Config::new(app, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
             envoy_log_error!("Unsupported python interface: {}", interface);

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import signal
 import sys
@@ -27,6 +28,7 @@ class CLIArgs:
     interface: Interface
     root_path: str
     log_level: LogLevel
+    worker_threads: int
     reload: bool
     reload_dirs: list[str]
     reload_includes: list[str]
@@ -110,6 +112,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--worker-threads",
+        help="number of worker threads to use (default: 1 for ASGI, 200 for WSGI)",
+        type=int,
+        default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
         "--reload",
         help="enable auto-reloading on code changes",
         action="store_true",
@@ -164,6 +173,7 @@ async def amain() -> None:
         interface=args.interface,
         root_path=args.root_path,
         log_level=args.log_level,
+        worker_threads=getattr(args, "worker_threads", None),
     )
 
     if args.print_envoy_config:

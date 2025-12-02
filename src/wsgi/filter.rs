@@ -12,9 +12,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
+    pub fn new(app: &str, constants: Arc<Constants>, worker_threads: usize) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let executor = match Executor::new(module, attr, 200, constants) {
+        let executor = match Executor::new(module, attr, worker_threads, constants) {
             Ok(executor) => executor,
             Err(err) => {
                 eprintln!("Failed to initialize WSGI app: {err}");
