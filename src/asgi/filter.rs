@@ -17,21 +17,22 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(app: &str, constants: Arc<Constants>) -> Option<Self> {
+    pub fn new(app: &str, constants: Arc<Constants>, worker_threads: usize) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let (executor, handles) = match python::Executor::new(module, attr, constants) {
-            Ok(executor) => executor,
-            Err(e) => {
-                Python::attach(|py| {
-                    let tb = e
-                        .traceback(py)
-                        .and_then(|tb| tb.format().ok())
-                        .unwrap_or_default();
-                    envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
-                });
-                return None;
-            }
-        };
+        let (executor, handles) =
+            match python::Executor::new(module, attr, constants, worker_threads) {
+                Ok(executor) => executor,
+                Err(e) => {
+                    Python::attach(|py| {
+                        let tb = e
+                            .traceback(py)
+                            .and_then(|tb| tb.format().ok())
+                            .unwrap_or_default();
+                        envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
+                    });
+                    return None;
+                }
+            };
         Some(Self {
             executor,
             handles: Some(handles),

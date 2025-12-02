@@ -20,27 +20,43 @@ class AppServer:
     name: str
     args: list[str]
     asgi_args: list[str] | None
+    asgi_args_nogil: list[str]
     wsgi_args: list[str] | None
 
 
 ASGI_APP = "tests.apps.asgi.kitchensink:app"
 WSGI_APP = "tests.apps.wsgi.kitchensink:app"
 
-PYVOY = AppServer("pyvoy", ["pyvoy"], [ASGI_APP], ["--interface", "wsgi", WSGI_APP])
+PYVOY = AppServer(
+    "pyvoy",
+    ["pyvoy"],
+    [ASGI_APP],
+    ["--worker-threads", "8"],
+    ["--interface", "wsgi", WSGI_APP],
+)
 HYPERCORN = AppServer(
-    "hypercorn", ["hypercorn", "--worker-class", "uvloop"], [ASGI_APP], [WSGI_APP]
+    "hypercorn",
+    ["hypercorn", "--worker-class", "uvloop"],
+    [ASGI_APP],
+    ["--workers", "8"],
+    [WSGI_APP],
 )
 GRANIAN = AppServer(
     "granian",
     ["granian", "--loop", "uvloop"],
     ["--interface", "asgi", ASGI_APP],
+    ["--workers", "8"],
     ["--interface", "wsgi", "--blocking-threads", "200", WSGI_APP],
 )
 GUNICORN = AppServer(
-    "gunicorn", ["gunicorn", "--reuse-port", "--threads", "200"], None, [WSGI_APP]
+    "gunicorn", ["gunicorn", "--reuse-port", "--threads", "200"], None, [], [WSGI_APP]
 )
 UVICORN = AppServer(
-    "uvicorn", ["uvicorn", "--no-access-log", "--loop", "uvloop"], [ASGI_APP], None
+    "uvicorn",
+    ["uvicorn", "--no-access-log", "--loop", "uvloop"],
+    [ASGI_APP],
+    ["--workers", "8"],
+    None,
 )
 
 
@@ -163,6 +179,9 @@ def main() -> None:
                     if app_server.wsgi_args is None:
                         continue
                     more_args = app_server.wsgi_args
+            if not sys._is_gil_enabled() and interface == "asgi":  # noqa: SLF001
+                more_args.extend(app_server.asgi_args_nogil)
+
             with subprocess.Popen(  # noqa: S603
                 [*app_server.args, *more_args],
                 stdout=subprocess.PIPE,
