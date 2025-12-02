@@ -163,7 +163,7 @@ impl Executor {
         scheduler: SyncScheduler,
     ) {
         self.tx
-            .send(Event::ExecuteApp {
+            .send(Event::ExecuteApp(ExecuteAppEvent {
                 scope,
                 request_closed,
                 trailers_accepted,
@@ -171,7 +171,7 @@ impl Executor {
                 recv_bridge,
                 send_bridge,
                 scheduler,
-            })
+            }))
             .unwrap();
     }
 
@@ -209,25 +209,19 @@ impl Executor {
 impl ExecutorInner {
     fn handle_event<'py>(&self, py: Python<'py>, event: Event) -> PyResult<bool> {
         match event {
-            Event::ExecuteApp {
-                scope,
-                request_closed,
-                trailers_accepted,
-                response_closed,
-                recv_bridge,
-                send_bridge,
-                scheduler,
-            } => {
-                self.execute_app(
-                    py,
-                    scope,
-                    request_closed,
-                    trailers_accepted,
-                    response_closed,
-                    recv_bridge,
-                    send_bridge,
-                    scheduler,
-                )?;
+            Event::ExecuteApp(event) => {
+                let (loop_, state) = self.loops.get(py);
+                let app_executor = AppExecutor {
+                    loop_: loop_.clone().unbind(),
+                    state: state.map(|s| s.unbind()),
+                    app: self.app.clone_ref(py),
+                    asgi: self.asgi.clone_ref(py),
+                    extensions: self.extensions.clone_ref(py),
+                    event: Some(event),
+                    constants: self.constants.clone(),
+                    executor: self.executor.clone(),
+                };
+                loop_.call_method1(&self.constants.call_soon_threadsafe, (app_executor,))?;
             }
             Event::HandleRecvFuture {
                 body,
@@ -253,18 +247,102 @@ impl ExecutorInner {
         Ok(true)
     }
 
-    fn execute_app<'py>(
+    fn handle_recv_future<'py>(
         &self,
         py: Python<'py>,
-        scope: Scope,
-        request_closed: bool,
-        trailers_accepted: bool,
-        response_closed: Arc<AtomicBool>,
-        recv_bridge: EventBridge<RecvFuture>,
-        send_bridge: EventBridge<SendEvent>,
-        scheduler: SyncScheduler,
+        body: Box<[u8]>,
+        more_body: bool,
+        mut future: RecvFuture,
     ) -> PyResult<()> {
-        let (loop_, state) = self.loops.get(py);
+        let f = match future.future.take() {
+            Some(f) => f,
+            None => {
+                return Ok(());
+            }
+        };
+        let set_result = f.future.getattr(py, &self.constants.set_result)?;
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.http_request)?;
+        event.set_item(&self.constants.body, PyBytes::new(py, &body))?;
+        event.set_item(&self.constants.more_body, more_body)?;
+        f.loop_.call_method1(
+            py,
+            &self.constants.call_soon_threadsafe,
+            (set_result, event),
+        )?;
+        Ok(())
+    }
+
+    fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
+        let set_result = future.future.getattr(py, &self.constants.set_result)?;
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
+        future.loop_.call_method1(
+            py,
+            &self.constants.call_soon_threadsafe,
+            (set_result, event),
+        )?;
+        Ok(())
+    }
+
+    fn handle_send_future<'py>(&self, py: Python<'py>, mut future: SendFuture) -> PyResult<()> {
+        let f = match future.future.take() {
+            Some(f) => f,
+            None => {
+                return Ok(());
+            }
+        };
+        let set_result = f.future.getattr(py, &self.constants.set_result)?;
+        f.loop_.call_method1(
+            py,
+            &self.constants.call_soon_threadsafe,
+            (set_result, PyNone::get(py)),
+        )?;
+        Ok(())
+    }
+
+    fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
+        let set_exception = future.future.getattr(py, &self.constants.set_exception)?;
+        future.loop_.call_method1(
+            py,
+            &self.constants.call_soon_threadsafe,
+            (set_exception, ClientDisconnectedError::new_err(())),
+        )?;
+        Ok(())
+    }
+
+    fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
+        self.loops.stop(py)?;
+        Ok(())
+    }
+}
+
+#[pyclass]
+struct AppExecutor {
+    loop_: Py<PyAny>,
+    state: Option<Py<PyDict>>,
+    app: Py<PyAny>,
+    asgi: Py<PyDict>,
+    extensions: Py<PyDict>,
+    event: Option<ExecuteAppEvent>,
+    constants: Arc<Constants>,
+    executor: Executor,
+}
+
+#[pymethods]
+impl AppExecutor {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+        let ExecuteAppEvent {
+            scope,
+            request_closed,
+            trailers_accepted,
+            response_closed,
+            recv_bridge,
+            send_bridge,
+            scheduler,
+        } = self.event.take().unwrap();
+
+        let loop_ = self.loop_.bind(py);
 
         let scope_dict = PyDict::new(py);
         scope_dict.set_item(&self.constants.typ, &self.constants.http)?;
@@ -287,7 +365,7 @@ impl ExecutorInner {
         }
         scope_dict.set_item(&self.constants.extensions, extensions)?;
 
-        if let Some(state) = &state {
+        if let Some(state) = &self.state {
             scope_dict.set_item(&self.constants.state, state)?;
         }
 
@@ -367,9 +445,7 @@ impl ExecutorInner {
                 constants: self.constants.clone(),
             },
         ))?;
-        let asyncio = py.import(&self.constants.asyncio)?;
-        let future =
-            asyncio.call_method1(&self.constants.run_coroutine_threadsafe, (coro, &loop_))?;
+        let future = loop_.call_method1(&self.constants.create_task, (coro,))?;
         future.call_method1(
             &self.constants.add_done_callback,
             (AppFutureHandler {
@@ -381,87 +457,20 @@ impl ExecutorInner {
 
         Ok(())
     }
+}
 
-    fn handle_recv_future<'py>(
-        &self,
-        py: Python<'py>,
-        body: Box<[u8]>,
-        more_body: bool,
-        mut future: RecvFuture,
-    ) -> PyResult<()> {
-        let f = match future.future.take() {
-            Some(f) => f,
-            None => {
-                return Ok(());
-            }
-        };
-        let set_result = f.future.getattr(py, &self.constants.set_result)?;
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, PyBytes::new(py, &body))?;
-        event.set_item(&self.constants.more_body, more_body)?;
-        f.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, event),
-        )?;
-        Ok(())
-    }
-
-    fn handle_dropped_recv_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let set_result = future.future.getattr(py, &self.constants.set_result)?;
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
-        future.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, event),
-        )?;
-        Ok(())
-    }
-
-    fn handle_send_future<'py>(&self, py: Python<'py>, mut future: SendFuture) -> PyResult<()> {
-        let f = match future.future.take() {
-            Some(f) => f,
-            None => {
-                return Ok(());
-            }
-        };
-        let set_result = f.future.getattr(py, &self.constants.set_result)?;
-        f.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, PyNone::get(py)),
-        )?;
-        Ok(())
-    }
-
-    fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let set_exception = future.future.getattr(py, &self.constants.set_exception)?;
-        future.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_exception, ClientDisconnectedError::new_err(())),
-        )?;
-        Ok(())
-    }
-
-    fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        self.loops.stop(py)?;
-        Ok(())
-    }
+struct ExecuteAppEvent {
+    scope: Scope,
+    request_closed: bool,
+    trailers_accepted: bool,
+    response_closed: Arc<AtomicBool>,
+    recv_bridge: EventBridge<RecvFuture>,
+    send_bridge: EventBridge<SendEvent>,
+    scheduler: SyncScheduler,
 }
 
 enum Event {
-    ExecuteApp {
-        scope: Scope,
-        request_closed: bool,
-        trailers_accepted: bool,
-        response_closed: Arc<AtomicBool>,
-        recv_bridge: EventBridge<RecvFuture>,
-        send_bridge: EventBridge<SendEvent>,
-        scheduler: SyncScheduler,
-    },
+    ExecuteApp(ExecuteAppEvent),
     HandleRecvFuture {
         body: Box<[u8]>,
         more_body: bool,
@@ -540,10 +549,10 @@ unsafe impl Sync for AppFutureHandler {}
 
 #[pymethods]
 impl AppFutureHandler {
-    fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) {
-        if let Err(e) = future.call_method1(&self.constants.result, (0,)) {
+    fn __call__<'py>(&mut self, py: Python<'py>, future: Bound<'py, PyAny>) -> PyResult<()> {
+        if let Err(e) = future.call_method0(&self.constants.result) {
             if e.is_instance_of::<ClientDisconnectedError>(py) {
-                return;
+                return Ok(());
             }
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
@@ -551,6 +560,7 @@ impl AppFutureHandler {
                 self.scheduler.commit(EVENT_ID_EXCEPTION);
             }
         }
+        Ok(())
     }
 }
 
