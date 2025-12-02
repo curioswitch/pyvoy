@@ -133,10 +133,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         self.response_bridge.process(|event| match event {
             ResponseEvent::Start(start_event, body_event) => {
-                let mut status_buf = itoa::Buffer::new();
                 let mut headers: Vec<(&str, &[u8])> =
                     Vec::with_capacity(start_event.headers.len() + 1);
-                headers.push((":status", status_buf.format(start_event.status).as_bytes()));
+                headers.push((":status", start_event.status.as_str().as_bytes()));
                 for (k, v) in start_event.headers.iter() {
                     headers.push((k.as_str(), v.as_bytes()));
                 }

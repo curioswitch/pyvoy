@@ -349,6 +349,12 @@ async def test_asgi_bad_app_invalid_header_name(
 
 
 @pytest.mark.asyncio
+async def test_bad_app_invalid_status(url: str, client: httpx.AsyncClient) -> None:
+    response = await client.get(f"{url}/bad-app-invalid-status")
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
 async def test_asgi_bad_app_invalid_header_value(
     url_asgi: str, client: httpx.AsyncClient
 ) -> None:

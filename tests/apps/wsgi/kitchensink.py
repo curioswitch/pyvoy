@@ -219,6 +219,21 @@ def _controlled(
     return []
 
 
+def _bad_app_invalid_status(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    try:
+        start_response("2 OK", [("content-type", "text/plain")])
+    except ValueError as e:
+        if str(e) != "Invalid HTTP status code '2'":
+            return _failure(
+                f"{e!s} != \"Invalid HTTP status code '2'\"", start_response
+            )
+        return _success(start_response)
+    else:
+        return _failure("No exception raised for invalid status", start_response)
+
+
 def _print_logs(
     _environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -675,6 +690,8 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _exception_after_response_body(environ, start_response)
         case "/controlled":
             return _controlled(environ, start_response)
+        case "/bad-app-invalid-status":
+            return _bad_app_invalid_status(environ, start_response)
         case "/print-logs":
             return _print_logs(environ, start_response)
         case "/all-the-headers":

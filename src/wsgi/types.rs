@@ -1,7 +1,7 @@
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 
 pub(crate) struct ResponseStartEvent {
-    pub status: u16,
+    pub status: StatusCode,
     pub headers: Vec<(HeaderName, HeaderValue)>,
 }
 
