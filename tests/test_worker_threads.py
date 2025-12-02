@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -64,6 +65,11 @@ def url(interface: Interface, url_asgi: str, url_wsgi: str) -> str:
 
 @pytest.mark.asyncio
 async def test_many_requests(url: str, client: httpx.AsyncClient) -> None:
+    if not sys.version_info >= (3, 11):
+        pytest.skip(
+            "asyncio.TaskGroup requires Python 3.11+ and it's not important enough to make this test work on 3.10"
+        )
+
     async def send_request() -> None:
         response = await client.get(
             f"{url}/headers-only",
