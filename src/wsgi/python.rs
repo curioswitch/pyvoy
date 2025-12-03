@@ -20,6 +20,7 @@ use std::{
 
 struct ExecuteAppEvent {
     scope: Scope,
+    request_closed: bool,
     request_read_bridge: EventBridge<RequestReadEvent>,
     request_body_rx: Receiver<RequestBody>,
     response_bridge: EventBridge<ResponseEvent>,
@@ -71,6 +72,7 @@ impl Executor {
                             if let Err(e) = inner.execute_app(
                                 py,
                                 event.scope,
+                                event.request_closed,
                                 event.request_read_bridge,
                                 event.request_body_rx,
                                 response_bridge.clone(),
@@ -102,6 +104,7 @@ impl Executor {
     pub fn execute_app(
         &self,
         scope: Scope,
+        request_closed: bool,
         request_read_bridge: EventBridge<RequestReadEvent>,
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
@@ -115,6 +118,7 @@ impl Executor {
             .unwrap()
             .send(ExecuteAppEvent {
                 scope,
+                request_closed,
                 request_read_bridge,
                 request_body_rx,
                 response_bridge,
@@ -137,6 +141,7 @@ impl ExecutorInner {
         &self,
         py: Python<'py>,
         scope: Scope,
+        request_closed: bool,
         request_read_bridge: EventBridge<RequestReadEvent>,
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
@@ -247,7 +252,7 @@ impl ExecutorInner {
                 request_read_bridge,
                 request_body_rx: SyncReceiver::new(request_body_rx),
                 scheduler: scheduler.clone(),
-                closed: false,
+                closed: request_closed,
                 constants: self.constants.clone(),
                 lock: Mutex::new(()),
             },
