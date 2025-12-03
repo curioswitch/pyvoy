@@ -10,6 +10,8 @@ mod asgi;
 mod envoy;
 /// An optimized event bridge between Envoy and Python.
 mod eventbridge;
+/// Python constants for header names.
+mod headernames;
 mod types;
 mod wsgi;
 

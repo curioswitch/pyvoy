@@ -10,9 +10,8 @@ use crate::{
     },
     envoy::SyncScheduler,
     eventbridge::EventBridge,
-    types::{
-        ClientDisconnectedError, Constants, HeaderNameExt as _, PyDictExt as _, Scope, SyncReceiver,
-    },
+    headernames::HeaderNameExt as _,
+    types::{ClientDisconnectedError, Constants, PyDictExt as _, Scope, SyncReceiver},
 };
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
@@ -380,7 +379,7 @@ impl AppExecutor {
             py,
             scope.headers.iter().map(|(k, v)| {
                 (
-                    k.as_py_bytes(py, &self.constants),
+                    k.to_asgi_bytes(py, &self.constants),
                     PyBytes::new(py, v.as_bytes()),
                 )
             }),

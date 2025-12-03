@@ -11,7 +11,7 @@ use pyo3::{
 
 use super::types::*;
 use crate::{envoy::SyncScheduler, eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
-use crate::{types::*, wsgi::response::ResponseSender};
+use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
 use std::thread::JoinHandle;
 use std::{
     sync::{Arc, Mutex, mpsc::Receiver},
@@ -214,8 +214,7 @@ impl ExecutorInner {
                     PyString::from_bytes(py, value.as_bytes())?,
                 )?,
                 _ => {
-                    let key_str = key.as_str().to_uppercase().replace("-", "_");
-                    let header_name = format!("HTTP_{}", key_str);
+                    let header_name = key.to_wsgi_string(py, &self.constants);
                     if let Some(existing) = environ.get_item(&header_name)? {
                         let value_str = String::from_utf8_lossy(value.as_bytes());
                         let existing = existing.cast::<PyString>()?;
