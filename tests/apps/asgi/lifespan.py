@@ -245,3 +245,9 @@ def immediate_exception(
         raise RuntimeError(msg)
 
     return _send_success(_send)
+
+
+# Interesting that all ASGI server seem to treat a non-async function
+# as ASGI2. It seems easy to check the function signature itself but we
+# follow the same conventions, notably of asgiref.
+immediate_exception._asgi_single_callable = True  # noqa: SLF001
