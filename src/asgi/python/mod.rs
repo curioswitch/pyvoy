@@ -894,7 +894,7 @@ fn is_asgi2_app<'py>(py: Python<'py>, app: &Bound<'py, PyAny>) -> PyResult<bool>
     }
 
     let inspect = py.import("inspect")?;
-    // Uninstanted classes are double-callable
+    // Classes are always double-callable as they cannot be a coroutine.
     if inspect.call_method1("isclass", (&app,))?.is_truthy()? {
         return Ok(true);
     }
@@ -908,13 +908,13 @@ fn is_asgi2_app<'py>(py: Python<'py>, app: &Bound<'py, PyAny>) -> PyResult<bool>
                 .unwrap()
         });
 
+    // Handle callable objects.
     if let Some(callable) = app.getattr_opt("__call__")? {
         if iscoroutinefunction.call1((callable,))?.is_truthy()? {
             return Ok(false);
         }
     }
 
-    // Non-classes we just check directly
     Ok(!iscoroutinefunction.call1((app,))?.is_truthy()?)
 }
 
