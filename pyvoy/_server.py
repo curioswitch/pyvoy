@@ -14,7 +14,6 @@ from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
 import yaml
-from envoy import get_envoy_path
 
 from ._bin import get_pyvoy_dir_path
 
@@ -151,11 +150,7 @@ class PyvoyServer:
             if self._additional_envoy_args:
                 args.extend(self._additional_envoy_args)
             self._process = await asyncio.create_subprocess_exec(
-                get_envoy_path(),
-                *args,
-                stdout=self._stdout,
-                stderr=self._stderr,
-                env=env,
+                "envoy", *args, stdout=self._stdout, stderr=self._stderr, env=env
             )
             for _ in range(100):
                 if self._process.returncode is not None:
