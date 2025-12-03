@@ -37,13 +37,14 @@ impl EventLoops {
         size: usize,
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
+        enable_lifespan: Option<bool>,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
         match size {
             n if n > 1 => {
                 let mut loops = Vec::with_capacity(n);
                 for _ in 0..n {
-                    loops.push(EventLoop::new(py, app, asgi, constants)?);
+                    loops.push(EventLoop::new(py, app, asgi, enable_lifespan, constants)?);
                 }
                 Ok(EventLoops {
                     inner: Arc::new(EventLoopsInner::Multiple {
@@ -54,7 +55,11 @@ impl EventLoops {
             }
             _ => Ok(EventLoops {
                 inner: Arc::new(EventLoopsInner::Single(EventLoop::new(
-                    py, app, asgi, constants,
+                    py,
+                    app,
+                    asgi,
+                    enable_lifespan,
+                    constants,
                 )?)),
             }),
         }
@@ -126,6 +131,7 @@ impl EventLoop {
         py: Python<'py>,
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
+        enable_lifespan: Option<bool>,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
         let (tx, rx) = mpsc::channel();
@@ -152,7 +158,16 @@ impl EventLoop {
         })?;
         drop(rx);
 
-        let (lifespan, state) = execute_lifespan(app, asgi, loop_.bind(py), constants)?;
+        let (lifespan, state) = match enable_lifespan {
+            Some(false) => (None, None),
+            _ => execute_lifespan(
+                app,
+                asgi,
+                loop_.bind(py),
+                enable_lifespan.unwrap_or(false),
+                constants,
+            )?,
+        };
 
         Ok(Self {
             loop_,

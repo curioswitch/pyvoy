@@ -68,6 +68,7 @@ class PyvoyServer:
     _log_level: LogLevel
     _require_client_certificate: bool
     _worker_threads: int | None
+    _lifespan: bool | None
     _additional_envoy_args: list[str] | None
 
     _started: bool
@@ -88,6 +89,7 @@ class PyvoyServer:
         root_path: str = "",
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
+        lifespan: bool | None = None,
         additional_envoy_args: list[str] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
@@ -109,6 +111,7 @@ class PyvoyServer:
         self._print_envoy_config = print_envoy_config
         self._log_level = log_level
         self._worker_threads = worker_threads
+        self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
 
         self._listener_port_tls = None
@@ -219,13 +222,15 @@ class PyvoyServer:
         return not self._started
 
     def get_envoy_config(self) -> dict:
-        pyvoy_config: dict[str, str | int] = {
+        pyvoy_config: dict[str, str | int | bool] = {
             "app": self._app,
             "interface": self._interface,
             "root_path": self._root_path,
         }
         if self._worker_threads is not None:
             pyvoy_config["worker_threads"] = self._worker_threads
+        if self._lifespan is not None:
+            pyvoy_config["lifespan"] = self._lifespan
 
         enable_http3 = self._tls_enable_http3 and (
             self._tls_key or self._tls_cert or self._tls_ca_cert

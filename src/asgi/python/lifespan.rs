@@ -45,14 +45,17 @@ impl Lifespan {
             Ok(LifespanEvent::ShutdownFailed(message)) => {
                 envoy_log_error!("Application shutdown failed: {}", message);
             }
-            Ok(LifespanEvent::LifespanComplete) | Err(_) => {
-                envoy_log_error!("Lifespan coroutine terminated without sending shutdown event",);
-            }
+            // Follow uvicorn's semantics of ignoring if a coroutine doesn't send events.
+            Ok(LifespanEvent::LifespanComplete) => {}
             Ok(LifespanEvent::LifespanFailed(message)) => {
                 envoy_log_error!("Lifespan exception during shutdown: {}", message);
             }
             // The send callable validates event order so we shouldn't get anything else here.
             Ok(_) => unreachable!(),
+            Err(_) => {
+                // Shouldn't happen in practice
+                envoy_log_error!("Unexpected error during lifespan shutdown.");
+            }
         }
     }
 
@@ -96,6 +99,7 @@ pub(crate) fn execute_lifespan<'py>(
     app: &Bound<'py, PyAny>,
     asgi: &Bound<'py, PyDict>,
     loop_: &Bound<'py, PyAny>,
+    require_lifespan: bool,
     constants: &Arc<Constants>,
 ) -> PyResult<(Option<Lifespan>, Option<Py<PyDict>>)> {
     let py = app.py();
@@ -126,12 +130,19 @@ pub(crate) fn execute_lifespan<'py>(
     let coro = match app.call1((scope, recv_callable, send_callable)) {
         Ok(coro) => coro,
         Err(e) => {
-            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             // While coroutines should generally not raise exceptions immediately, if they do
-            // we treat it as a failure to support lifespan.
-            let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
-            let _ = lifespan_tx.send(LifespanEvent::LifespanFailed(msg));
-            return Ok((None, None));
+            // we treat it the same as LifespanFailed.
+            if require_lifespan {
+                let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+                let msg = format!("Exception in ASGI lifespan\n{}{}", tb, e);
+                envoy_log_error!("{}", msg);
+                return Err(PyRuntimeError::new_err(
+                    "Application startup failed. Exiting.",
+                ));
+            } else {
+                envoy_log_info!("ASGI 'lifespan' protocol appears unsupported.");
+                return Ok((None, None));
+            }
         }
     };
 
@@ -155,10 +166,19 @@ pub(crate) fn execute_lifespan<'py>(
                 "Application startup failed: {}",
                 err
             ))),
-            // TODO: Add option to force lifespan and log this error if it's enabled.
-            LifespanEvent::LifespanFailed(_) => Ok(false),
+            LifespanEvent::LifespanFailed(msg) => {
+                if require_lifespan {
+                    envoy_log_error!("{}", msg);
+                    Err(PyRuntimeError::new_err(
+                        "Application startup failed. Exiting.",
+                    ))
+                } else {
+                    envoy_log_info!("ASGI 'lifespan' protocol appears unsupported.");
+                    Ok(false)
+                }
+            }
             // The ASGI spec does not document how to handle a coroutine that completes without exception
-            // but it's reasonable to treat it the same as LifespanFailed.
+            // but uvicorn seems to treat it as explicitly ignoring lifespan and does not log or fail.
             LifespanEvent::LifespanComplete => Ok(false),
             // The send callabale validates event types so we know we won't have other events here.
             _ => unreachable!(),
