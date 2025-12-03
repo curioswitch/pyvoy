@@ -77,6 +77,7 @@ impl Executor {
         app_attr: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
+        enable_lifespan: Option<bool>,
     ) -> PyResult<(Self, ExecutorHandles)> {
         // Import threading on this thread because Python records the first thread
         // that imports threading as the main thread. When running the Python interpreter, this
@@ -97,7 +98,8 @@ impl Executor {
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
 
-            let loops = EventLoops::new(py, worker_threads, &app, &asgi, &constants)?;
+            let loops =
+                EventLoops::new(py, worker_threads, &app, &asgi, enable_lifespan, &constants)?;
 
             Ok::<_, PyErr>((app.unbind(), asgi.unbind(), extensions.unbind(), loops))
         })?;

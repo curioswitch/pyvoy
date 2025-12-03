@@ -85,11 +85,12 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             }
         }
     };
+    let enable_lifespan = filter_config["lifespan"].as_bool();
 
     let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
 
     match interface {
-        "asgi" => asgi::filter::Config::new(app, constants, worker_threads)
+        "asgi" => asgi::filter::Config::new(app, constants, worker_threads, enable_lifespan)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(app, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),

@@ -76,7 +76,7 @@ async def normal(
                     await send({"type": "lifespan.shutdown.complete"})
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {"counter": 0})["counter"] += 1
     await _send_success(send)
 
 

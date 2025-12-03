@@ -42,6 +42,34 @@ async def test_normal():
 
 
 @pytest.mark.asyncio
+async def test_normal_lifespan_disabled():
+    logs: list[str] = []
+    async with (
+        PyvoyServer(
+            "tests.apps.asgi.lifespan:normal",
+            lifespan=False,
+            stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+        ) as server,
+        httpx.AsyncClient() as client,
+    ):
+        assert server.stdout is not None
+        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+
+        url = f"http://{server.listener_address}:{server.listener_port}"
+
+        for _ in range(5):
+            response = await client.get(url)
+            assert response.status_code == 200
+            assert response.text == "Ok"
+
+    await logs_task
+    assert not any("Got counter: 5" in log_line for log_line in logs), (
+        f"Logs: {''.join(logs)}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_startup_failed():
     logs: list[str] = []
     async with PyvoyServer(
@@ -146,7 +174,6 @@ async def test_return_without_events():
 
 @pytest.mark.asyncio
 async def test_return_without_events_during_shutdown():
-    logs: list[str] = []
     async with (
         PyvoyServer(
             "tests.apps.asgi.lifespan:return_without_events_during_shutdown",
@@ -155,21 +182,13 @@ async def test_return_without_events_during_shutdown():
         ) as server,
         httpx.AsyncClient() as client,
     ):
-        assert server.stdout is not None
-        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
-
         url = f"http://{server.listener_address}:{server.listener_port}"
 
-        for _ in range(5):
-            response = await client.get(url)
-            assert response.status_code == 200
-            assert response.text == "Ok"
-
-    await logs_task
-    assert any(
-        "Lifespan coroutine terminated without sending shutdown event" in log_line
-        for log_line in logs
-    ), f"Logs: {''.join(logs)}"
+        # This isn't an error case so we don't have anything to assert other than standard
+        # success.
+        response = await client.get(url)
+        assert response.status_code == 200
+        assert response.text == "Ok"
 
 
 @pytest.mark.asyncio
@@ -212,3 +231,22 @@ async def test_immediate_exception():
         response = await client.get(url)
         assert response.status_code == 200
         assert response.text == "Ok"
+
+
+# The lifespan not required version of this test is everything in test_kitchensink.py
+@pytest.mark.asyncio
+async def test_lifespan_required_not_supported():
+    logs: list[str] = []
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        lifespan=True,
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        assert server.stdout is not None
+        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+
+    await logs_task
+    assert any(
+        "Application startup failed. Exiting." in log_line for log_line in logs
+    ), f"Logs: {''.join(logs)}"

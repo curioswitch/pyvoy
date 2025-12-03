@@ -17,10 +17,15 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(app: &str, constants: Arc<Constants>, worker_threads: usize) -> Option<Self> {
+    pub fn new(
+        app: &str,
+        constants: Arc<Constants>,
+        worker_threads: usize,
+        enable_lifespan: Option<bool>,
+    ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) =
-            match python::Executor::new(module, attr, constants, worker_threads) {
+            match python::Executor::new(module, attr, constants, worker_threads, enable_lifespan) {
                 Ok(executor) => executor,
                 Err(e) => {
                     Python::attach(|py| {
