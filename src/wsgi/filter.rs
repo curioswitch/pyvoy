@@ -79,6 +79,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.executor.execute_app(
             scope,
+            end_of_stream,
             self.request_read_bridge.clone(),
             self.request_body_rx.take().unwrap(),
             self.response_bridge.clone(),
