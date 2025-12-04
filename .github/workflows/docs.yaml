@@ -5,6 +5,12 @@ on:
       - main
     paths:
       - "docs/**"
+      - zensical.toml
+      - ".github/workflows/docs.yaml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - zensical.toml
       - ".github/workflows/docs.yaml"
 
 permissions:
@@ -32,8 +38,10 @@ jobs:
       - run: uv run zensical build --clean
 
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
       - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        if: github.event_name != 'pull_request'
         id: deployment
