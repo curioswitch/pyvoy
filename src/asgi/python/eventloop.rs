@@ -145,6 +145,15 @@ impl EventLoop {
                 tx.send(loop_.clone().unbind()).unwrap();
                 drop(tx);
                 loop_.call_method0("run_forever")?;
+                let shutdown_asyncgens_coro = loop_.call_method0("shutdown_asyncgens")?;
+                loop_.call_method1("run_until_complete", (shutdown_asyncgens_coro,))?;
+                let thread_join_timeout = py
+                    .import("asyncio.constants")?
+                    .getattr("THREAD_JOIN_TIMEOUT")?;
+                let shutdown_default_executor_coro =
+                    loop_.call_method1("shutdown_default_executor", (thread_join_timeout,))?;
+                loop_.call_method1("run_until_complete", (shutdown_default_executor_coro,))?;
+                loop_.call_method0("close")?;
                 Ok(())
             });
             res.unwrap();
