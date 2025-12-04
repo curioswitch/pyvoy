@@ -53,6 +53,7 @@ dev = [
     "uvicorn[standard]",
     "watchfiles",
     "wheel",
+    "zensical",
 ]
 
 [project.urls]
