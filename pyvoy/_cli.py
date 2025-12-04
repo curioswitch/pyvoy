@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
+from envoy import get_envoy_path
 
-from ._server import Interface, LogLevel, PyvoyServer
+from ._server import Interface, LogLevel, PyvoyServer, get_envoy_environ
 from ._watcher import watch
 
 
@@ -19,6 +20,7 @@ class CLIArgs:
     address: str
     port: int
     print_envoy_config: bool
+    print_envoy_entrypoint: bool
     tls_port: int | None
     tls_key: str | None
     tls_cert: str | None
@@ -164,6 +166,13 @@ async def amain() -> None:
         default=False,
     )
 
+    parser.add_argument(
+        "--print-envoy-entrypoint",
+        help="print a shell script to execute Envoy with environment for pyvoy, generally for running in Dockerfile",
+        action="store_true",
+        default=False,
+    )
+
     argv = sys.argv[1:]
     additional_envoy_args = []
     try:
@@ -197,6 +206,17 @@ async def amain() -> None:
 
     if args.print_envoy_config:
         print(yaml.dump(server.get_envoy_config()))  # noqa: T201
+        return
+
+    if args.print_envoy_entrypoint:
+        # Assume Python environment variables are correctly set by the user.
+        env = get_envoy_environ()
+        print(f"""#!/bin/sh
+
+# Generated Envoy entrypoint for pyvoy
+
+{" ".join(f'{k}="{v}"' for k, v in env.items())} exec {get_envoy_path()} "$@"
+""")  # noqa: T201
         return
 
     if args.reload:
