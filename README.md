@@ -10,11 +10,12 @@ Python interpreter into a module that can be loaded by a stock Envoy binary.
 
 ## Features
 
-- ASGI applications
-- WSGI applications with worker threads
+- ASGI and WSGI applications
+- Worker threads for both, can be useful with free-threaded Python for ASGI
 - A complete, battle-tested HTTP stack - it's just Envoy
   - Includes full HTTP protocol support, with HTTP/2 trailers and HTTP/3
-- Any Envoy configuration features such as load shedding can be integrated as normal
+- Any Envoy configuration features can be integrated as normal
+  - It can be more performant to offload features like CORS or content encoding to Envoy
 - Auto-restart on file change and IDE debugging for development
 
 ## Limitations
@@ -92,75 +93,79 @@ HTTP/2. The main goal is to see if pyvoy runs in the same ballpark as other serv
 A single example from CI for a 10ms service with 10K response size shows:
 
 ```
-Running benchmark for pyvoy with protocol=h2 sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         13460, 2691.78, 2686.15
-Duration      [total, attack, wait]             5.011s, 5s, 10.489ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  9.546ms, 11.141ms, 11.066ms, 11.943ms, 12.246ms, 12.997ms, 16.798ms
-Bytes In      [total, mean]                     134600000, 10000.00
+Running benchmark for pyvoy with interface=asgi protocol=h2 sleep=10ms response_size=100
+
+Requests      [total, rate, throughput]         13957, 2790.41, 2784.89
+Duration      [total, attack, wait]             5.012s, 5.002s, 9.904ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  9.281ms, 10.715ms, 10.679ms, 11.392ms, 11.594ms, 11.944ms, 13.676ms
+Bytes In      [total, mean]                     1395700, 100.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:13460
+Status Codes  [code:count]                      200:13957
 Error Set:
 
 
-Running benchmark for granian with protocol=h2 sleep=10ms response_size=10000
+Running benchmark for granian with interface=asgi protocol=h2 sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         13489, 2697.08, 2691.47
-Duration      [total, attack, wait]             5.012s, 5.001s, 10.423ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  9.253ms, 11.111ms, 11.038ms, 11.883ms, 12.172ms, 12.946ms, 16.373ms
-Bytes In      [total, mean]                     134890000, 10000.00
+Requests      [total, rate, throughput]         13753, 2750.32, 2744.50
+Duration      [total, attack, wait]             5.011s, 5.001s, 10.595ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  9.272ms, 10.894ms, 10.839ms, 11.614ms, 11.891ms, 12.615ms, 16.173ms
+Bytes In      [total, mean]                     137530000, 10000.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:13489
+Status Codes  [code:count]                      200:13753
 Error Set:
 
-Running benchmark for hypercorn with protocol=h2 sleep=10ms response_size=10000
+ Running benchmark for hypercorn with interface=asgi protocol=h2 sleep=10ms response_size=10000
 
-Requests      [total, rate, throughput]         1002, 183.30, 177.42
-Duration      [total, attack, wait]             5.479s, 5.466s, 12.183ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  11.43ms, 163.65ms, 13.497ms, 16.099ms, 17.629ms, 5.019s, 5.023s
-Bytes In      [total, mean]                     9720000, 9700.60
+Requests      [total, rate, throughput]         1003, 183.39, 177.51
+Duration      [total, attack, wait]             5.481s, 5.469s, 11.985ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  10.283ms, 163.568ms, 13.266ms, 17.517ms, 18.66ms, 5.02s, 5.023s
+Bytes In      [total, mean]                     9730000, 9700.90
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           97.01%
-Status Codes  [code:count]                      0:30  200:972
+Status Codes  [code:count]                      0:30  200:973
 Error Set:
-Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2001, ErrCode=NO_ERROR, debug=""
+Get "http://localhost:8000/controlled": http2: server sent GOAWAY and closed the connection; LastStreamID=2003, ErrCode=NO_ERROR, debug=""
 ```
 
 We see that hypercorn seems to not perform well with HTTP/2, with errors and resulting poor performance numbers. We will
 focus comparisons on granian.
 
 Performance seems to be mostly the same between pyvoy and granian within the range of noise for a fast but still useful
-in real-world service.
+in real-world service. Slower services will see even less of a difference.
 
 We can try to isolate more performance of the app server itself with a less realistic service with no delay or response.
 
 ```
- Running benchmark for pyvoy with protocol=h2 sleep=0ms response_size=0
+Running benchmark for pyvoy with interface=asgi protocol=h2 sleep=0ms response_size=0
 
-Requests      [total, rate, throughput]         104043, 20808.94, 20805.37
-Duration      [total, attack, wait]             5.001s, 5s, 856.185µs
-Latencies     [min, mean, 50, 90, 95, 99, max]  344.742µs, 1.327ms, 1.294ms, 1.736ms, 1.905ms, 2.271ms, 3.965ms
+Requests      [total, rate, throughput]         160777, 32154.15, 32152.39
+Duration      [total, attack, wait]             5s, 5s, 272.72µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  160.187µs, 847.224µs, 815.162µs, 1.143ms, 1.287ms, 1.601ms, 2.736ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:104043
+Status Codes  [code:count]                      200:160777
 Error Set:
 
-Running benchmark for granian with protocol=h2 sleep=0ms response_size=0
+Running benchmark for granian with interface=asgi protocol=h2 sleep=0ms response_size=0
 
-Requests      [total, rate, throughput]         96513, 19302.87, 19298.03
-Duration      [total, attack, wait]             5.001s, 5s, 1.254ms
-Latencies     [min, mean, 50, 90, 95, 99, max]  304.289µs, 1.501ms, 1.506ms, 1.827ms, 1.931ms, 2.2ms, 3.776ms
+Requests      [total, rate, throughput]         135538, 27108.58, 27105.86
+Duration      [total, attack, wait]             5s, 5s, 501.885µs
+Latencies     [min, mean, 50, 90, 95, 99, max]  160.356µs, 1.053ms, 1.042ms, 1.306ms, 1.418ms, 1.782ms, 4.128ms
 Bytes In      [total, mean]                     0, 0.00
 Bytes Out     [total, mean]                     0, 0.00
 Success       [ratio]                           100.00%
-Status Codes  [code:count]                      200:96513
+Status Codes  [code:count]                      200:135538
 Error Set:
 ```
 
-We again see very similar performance likely within the range of noise.
+pyvoy may be showing somewhat better performance. In this test, much time will be marshaling the HTTP
+protocol itself and we may be benefitting from Envoy's battle-hardened HTTP/2 stack.
+
+More [charts](./bench/charts) are available to see performance under various configurations.
 
 [Envoy]: https://www.Envoyproxy.io/
 [Envoy dynamic modules]: https://www.Envoyproxy.io/docs/Envoy/latest/intro/arch_overview/advanced/dynamic_modules
