@@ -26,7 +26,7 @@ class CLIArgs:
     tls_cert: str | None
     tls_ca_cert: str | None
     tls_disable_http3: bool
-    require_client_certificate: bool
+    tls_require_client_certificate: bool
     interface: Interface
     root_path: str
     log_level: LogLevel
@@ -50,11 +50,14 @@ async def amain() -> None:
         "--address", help="the address to listen on", type=str, default="127.0.0.1"
     )
     parser.add_argument(
-        "--port", help="the port to listen on (0 for random)", type=int, default=8000
+        "--port",
+        help="the port to listen on (0 for random). Will use TLS if --tls-key/cert are provided without --tls-port",
+        type=int,
+        default=8000,
     )
     parser.add_argument(
         "--tls-port",
-        help="the TLS port to listen on in addition to the plaintext port (0 for random)",
+        help="a TLS port to listen on in addition to the plaintext port (0 for random)",
         type=int,
         default=None,
     )
@@ -85,7 +88,7 @@ async def amain() -> None:
     )
 
     parser.add_argument(
-        "--require-client-certificate",
+        "--tls-require-client-certificate",
         help="require client certificate for TLS connections",
         action="store_true",
         default=True,
@@ -195,7 +198,7 @@ async def amain() -> None:
         tls_cert=Path(args.tls_cert) if args.tls_cert else None,
         tls_ca_cert=Path(args.tls_ca_cert) if args.tls_ca_cert else None,
         tls_enable_http3=not args.tls_disable_http3,
-        require_client_certificate=args.require_client_certificate,
+        tls_require_client_certificate=args.tls_require_client_certificate,
         interface=args.interface,
         root_path=args.root_path,
         log_level=args.log_level,

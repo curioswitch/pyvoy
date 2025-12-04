@@ -1,0 +1,17 @@
+[project]
+site_name = "pyvoy"
+site_url = "https://curioswitch.github.io/pyvoy"
+site_description = "A Python application server built with Envoy"
+site_author = "CurioSwitch"
+copyright = "&copy; CurioSwitch"
+
+[project.theme]
+favicon = "img/favicon.png"
+logo = "img/logo.png"
+
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.pymdownx.blocks.caption]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true

@@ -167,5 +167,5 @@ protocol itself and we may be benefitting from Envoy's battle-hardened HTTP/2 st
 
 More [charts](./bench/charts) are available to see performance under various configurations.
 
-[Envoy]: https://www.Envoyproxy.io/
-[Envoy dynamic modules]: https://www.Envoyproxy.io/docs/Envoy/latest/intro/arch_overview/advanced/dynamic_modules
+[Envoy]: https://www.envoyproxy.io/
+[Envoy dynamic modules]: https://www.envoyproxy.io/docs/Envoy/latest/intro/arch_overview/advanced/dynamic_modules

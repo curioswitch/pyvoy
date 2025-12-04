@@ -18,3 +18,5 @@ pyvoy/_bin/libpyvoy.so
 profile.json.gz
 
 out
+site
+.DS_Store
