@@ -21,7 +21,7 @@ permissions:
 jobs:
   deploy:
     environment:
-      name: github-pages
+      name: ${{ github.event_name != 'pull_request' && 'github-pages' || null }}
       url: ${{ steps.deployment.outputs.page_url }}
 
     runs-on: ubuntu-24.04
