@@ -1,7 +1,5 @@
 ---
 title: Introduction
-hide:
-  - title
 ---
 
 #
