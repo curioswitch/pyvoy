@@ -1,6 +1,6 @@
 [project]
 site_name = "pyvoy"
-site_url = "https://curioswitch.github.io/pyvoy"
+site_url = "https://pyvoy.dev"
 site_description = "A Python application server built with Envoy"
 site_author = "CurioSwitch"
 copyright = "&copy; CurioSwitch"
