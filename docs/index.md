@@ -4,7 +4,7 @@ title: Introduction
 
 #
 
-![logo](./img/logo.png){ width="320" height="320" }
+<img alt="logo" src="./img/logo.png" width="320" height="320">
 /// caption
 A Python application server in Envoy
 ///
