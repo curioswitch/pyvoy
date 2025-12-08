@@ -54,35 +54,33 @@ func TestHTTP2(t *testing.T) {
 				},
 			}
 
-			if pyinterface == "asgi" {
-				t.Run("trailers_only", func(t *testing.T) {
-					req, _ := http.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("http://localhost:%d/trailers-only", port), nil)
-					req.Header.Set("TE", "trailers")
-					res, err := cl.Do(req)
-					require.NoError(t, err)
-					defer res.Body.Close()
-					require.Equal(t, http.StatusOK, res.StatusCode)
-					body, err := io.ReadAll(res.Body)
-					require.NoError(t, err)
-					require.Empty(t, body)
-					require.Equal(t, "last", res.Trailer.Get("X-First"))
-					require.Equal(t, "first", res.Trailer.Get("X-Second"))
-				})
+			t.Run("trailers_only", func(t *testing.T) {
+				req, _ := http.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("http://localhost:%d/trailers-only", port), nil)
+				req.Header.Set("TE", "trailers")
+				res, err := cl.Do(req)
+				require.NoError(t, err)
+				defer res.Body.Close()
+				require.Equal(t, http.StatusOK, res.StatusCode)
+				body, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				require.Empty(t, body)
+				require.Equal(t, "last", res.Trailer.Get("X-First"))
+				require.Equal(t, "first", res.Trailer.Get("X-Second"))
+			})
 
-				t.Run("response_and_trailers", func(t *testing.T) {
-					req, _ := http.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("http://localhost:%d/response-and-trailers", port), nil)
-					req.Header.Set("TE", "trailers")
-					res, err := cl.Do(req)
-					require.NoError(t, err)
-					defer res.Body.Close()
-					require.Equal(t, http.StatusOK, res.StatusCode)
-					body, err := io.ReadAll(res.Body)
-					require.NoError(t, err)
-					require.Equal(t, "Hello Bear", string(body))
-					require.Equal(t, "last", res.Trailer.Get("X-First"))
-					require.Equal(t, "first", res.Trailer.Get("X-Second"))
-				})
-			}
+			t.Run("response_and_trailers", func(t *testing.T) {
+				req, _ := http.NewRequestWithContext(t.Context(), "GET", fmt.Sprintf("http://localhost:%d/response-and-trailers", port), nil)
+				req.Header.Set("TE", "trailers")
+				res, err := cl.Do(req)
+				require.NoError(t, err)
+				defer res.Body.Close()
+				require.Equal(t, http.StatusOK, res.StatusCode)
+				body, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				require.Equal(t, "Hello Bear", string(body))
+				require.Equal(t, "last", res.Trailer.Get("X-First"))
+				require.Equal(t, "first", res.Trailer.Get("X-Second"))
+			})
 
 			t.Run("bidi_stream", func(t *testing.T) {
 				reqBodyR, reqBodyW := io.Pipe()
@@ -113,10 +111,8 @@ func TestHTTP2(t *testing.T) {
 				require.Equal(t, "Let's make money!", string(buf[:n]))
 				_, err = res.Body.Read(buf)
 				require.ErrorIs(t, err, io.EOF)
-				if pyinterface == "asgi" {
-					require.Equal(t, "great", res.Trailer.Get("X-Result"))
-					require.Equal(t, "fast", res.Trailer.Get("X-Time"))
-				}
+				require.Equal(t, "great", res.Trailer.Get("X-Result"))
+				require.Equal(t, "fast", res.Trailer.Get("X-Time"))
 			})
 		})
 	}

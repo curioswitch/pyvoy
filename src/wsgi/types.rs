@@ -13,6 +13,7 @@ pub(crate) struct ResponseBodyEvent {
 pub(crate) enum ResponseEvent {
     Start(ResponseStartEvent, ResponseBodyEvent),
     Body(ResponseBodyEvent),
+    Trailers(Option<ResponseStartEvent>, Vec<(HeaderName, HeaderValue)>),
     Exception,
 }
 

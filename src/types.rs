@@ -188,6 +188,8 @@ pub(crate) struct Constants {
     pub wsgi_ext_tls_version: Py<PyString>,
     /// The string "wsgi.ext.tls.client_cert_name".
     pub wsgi_ext_tls_client_cert_name: Py<PyString>,
+    /// The string "wsgi.ext.http.send_trailers"
+    pub wsgi_ext_http_send_trailers: Py<PyString>,
 
     // Misc
     /// The string "close".
@@ -302,6 +304,7 @@ impl Constants {
             wsgi_ext_tls_version: PyString::new(py, "wsgi.ext.tls.tls_version").unbind(),
             wsgi_ext_tls_client_cert_name: PyString::new(py, "wsgi.ext.tls.client_cert_name")
                 .unbind(),
+            wsgi_ext_http_send_trailers: PyString::new(py, "wsgi.ext.http.send_trailers").unbind(),
 
             close: PyString::new(py, "close").unbind(),
             with_traceback: PyString::new(py, "with_traceback").unbind(),
