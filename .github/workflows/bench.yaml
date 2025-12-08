@@ -15,6 +15,9 @@ on:
       - ".github/workflows/bench.yaml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   bench:
     runs-on: ubuntu-24.04
