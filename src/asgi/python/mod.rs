@@ -882,15 +882,15 @@ fn is_asgi2_app<'py>(py: Python<'py>, app: &Bound<'py, PyAny>) -> PyResult<bool>
     // Look for a hint on the object first. This is usually only needed for frameworks using
     // metaclass magic or a rare case where a normal function returns a coroutine, making it
     // effectively a coroutinefunction.
-    if let Some(v) = app.getattr_opt("_asgi_single_callable")? {
-        if v.is_truthy()? {
-            return Ok(false);
-        }
+    if let Some(v) = app.getattr_opt("_asgi_single_callable")?
+        && v.is_truthy()?
+    {
+        return Ok(false);
     }
-    if let Some(v) = app.getattr_opt("_asgi_double_callable")? {
-        if v.is_truthy()? {
-            return Ok(true);
-        }
+    if let Some(v) = app.getattr_opt("_asgi_double_callable")?
+        && v.is_truthy()?
+    {
+        return Ok(true);
     }
 
     let inspect = py.import("inspect")?;
@@ -909,10 +909,10 @@ fn is_asgi2_app<'py>(py: Python<'py>, app: &Bound<'py, PyAny>) -> PyResult<bool>
         });
 
     // Handle callable objects.
-    if let Some(callable) = app.getattr_opt("__call__")? {
-        if iscoroutinefunction.call1((callable,))?.is_truthy()? {
-            return Ok(false);
-        }
+    if let Some(callable) = app.getattr_opt("__call__")?
+        && iscoroutinefunction.call1((callable,))?.is_truthy()?
+    {
+        return Ok(false);
     }
 
     Ok(!iscoroutinefunction.call1((app,))?.is_truthy()?)

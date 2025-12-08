@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import sys
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar, cast
 from wsgiref.validate import validator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     if sys.version_info >= (3, 11):
         from wsgiref.types import ErrorStream as WSGIErrorStream
