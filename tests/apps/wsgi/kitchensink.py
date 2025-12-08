@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, TypeVar, cast
 from wsgiref.validate import validator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     if sys.version_info >= (3, 11):
         from wsgiref.types import ErrorStream as WSGIErrorStream
@@ -158,12 +158,49 @@ def _large_bodies(
         yield b"B" * 1000
 
 
+def _trailers_only(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response(
+        "200 OK", [("content-type", "text/plain"), ("trailer", "x-first,x-second")]
+    )
+
+    send_trailers: Callable[[list[tuple[str, str]]], None] = environ[
+        "wsgi.ext.http.send_trailers"
+    ]
+    send_trailers([("x-first", "last"), ("x-second", "first")])
+    return []
+
+
+def _response_and_trailers(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response(
+        "200 OK", [("content-type", "text/plain"), ("trailer", "x-first,x-second")]
+    )
+    send_trailers: Callable[[list[tuple[str, str]]], None] = environ[
+        "wsgi.ext.http.send_trailers"
+    ]
+
+    yield b"Hello "
+    yield b"Bear"
+    send_trailers([("x-first", "last"), ("x-second", "first")])
+
+
 def _bidi_stream(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
     start_response(
-        "202 Accepted", [("content-type", "text/plain"), ("x-animal", "bear")]
+        "202 Accepted",
+        [
+            ("content-type", "text/plain"),
+            ("x-animal", "bear"),
+            ("trailer", "x-result,x-time"),
+        ],
     )
+    send_trailers: Callable[[list[tuple[str, str]]], None] = environ[
+        "wsgi.ext.http.send_trailers"
+    ]
 
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
     yield b"Who are you?"
@@ -171,6 +208,7 @@ def _bidi_stream(
     yield b"Hi " + body + b". What do you want to do?"
     body = request_body.read()
     yield b"Let's " + body + b"!"
+    send_trailers([("x-result", "great"), ("x-time", "fast")])
 
 
 def _exception_before_response(
@@ -680,6 +718,10 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _request_and_response_body(environ, start_response)
         case "/large-bodies":
             return _large_bodies(environ, start_response)
+        case "/trailers-only":
+            return _trailers_only(environ, start_response)
+        case "/response-and-trailers":
+            return _response_and_trailers(environ, start_response)
         case "/bidi-stream":
             return _bidi_stream(environ, start_response)
         case "/exception-before-response":

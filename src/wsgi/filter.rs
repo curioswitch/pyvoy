@@ -163,6 +163,22 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 }
                 envoy_filter.send_response_data(&body_event.body, end_stream);
             }
+            ResponseEvent::Trailers(start_event, trailers) => {
+                if let Some(start_event) = start_event {
+                    let mut headers: Vec<(&str, &[u8])> =
+                        Vec::with_capacity(start_event.headers.len() + 1);
+                    headers.push((":status", start_event.status.as_str().as_bytes()));
+                    for (k, v) in start_event.headers.iter() {
+                        headers.push((k.as_str(), v.as_bytes()));
+                    }
+                    envoy_filter.send_response_headers(headers, false);
+                }
+                let trailers_ref: Vec<(&str, &[u8])> = trailers
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_bytes()))
+                    .collect();
+                envoy_filter.send_response_trailers(trailers_ref);
+            }
             ResponseEvent::Exception => {
                 if !self.response_closed {
                     self.response_closed = true;

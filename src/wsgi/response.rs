@@ -1,3 +1,4 @@
+use http::{HeaderName, HeaderValue};
 use pyo3::{exceptions::PyRuntimeError, prelude::*, types::PyTuple};
 
 use super::types::*;
@@ -17,6 +18,9 @@ struct ResponseSenderInner {
     /// Whether headers have been sent yet.
     headers_sent: bool,
 
+    /// Whether the response is closed.
+    closed: bool,
+
     /// Memoized constants.
     constants: Arc<Constants>,
 }
@@ -34,6 +38,8 @@ pub(crate) enum ResponseSenderEvent {
     Start(ResponseStartEvent),
     /// A body chunk. If the first one, this will cause the start to be sent.
     Body(ResponseBodyEvent),
+    /// Response trailers, ending the response.
+    Trailers(Vec<(HeaderName, HeaderValue)>),
 }
 
 impl ResponseSender {
@@ -48,6 +54,7 @@ impl ResponseSender {
                 scheduler,
                 start_event: None,
                 headers_sent: false,
+                closed: false,
                 constants,
             })),
         }
@@ -59,6 +66,12 @@ impl ResponseSender {
         exc_info: Option<Bound<'py, PyTuple>>,
     ) -> PyResult<()> {
         let mut inner = self.inner.lock().unwrap();
+        // With WSGI, the only way to close the response and send more after is with trailers.
+        // For now, we will describe this case as ignoring any data after trailers instead of
+        // as an error since the feature should be rare enough to be used in well-behaved apps.
+        if inner.closed {
+            return Ok(());
+        }
         match event {
             ResponseSenderEvent::Start(start) => {
                 if let Some(exc_info) = exc_info {
@@ -76,6 +89,9 @@ impl ResponseSender {
                 return Ok(());
             }
             ResponseSenderEvent::Body(body) => {
+                if !body.more_body {
+                    inner.closed = true;
+                }
                 if let Some(start) = inner.start_event.take() {
                     // First body event, need to send start first.
                     inner.headers_sent = true;
@@ -100,6 +116,21 @@ impl ResponseSender {
                     {
                         inner.scheduler.commit(EVENT_ID_RESPONSE);
                     }
+                }
+            }
+            ResponseSenderEvent::Trailers(trailers) => {
+                inner.closed = true;
+                let start = inner.start_event.take();
+                if start.is_some() {
+                    // No body event, need to send start too.
+                    inner.headers_sent = true;
+                }
+                if inner
+                    .response_bridge
+                    .send(ResponseEvent::Trailers(start, trailers))
+                    .is_ok()
+                {
+                    inner.scheduler.commit(EVENT_ID_RESPONSE);
                 }
             }
         }

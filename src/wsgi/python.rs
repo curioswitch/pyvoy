@@ -280,6 +280,13 @@ impl ExecutorInner {
             }
         }
 
+        environ.set_item(
+            &self.constants.wsgi_ext_http_send_trailers,
+            SendTrailersCallable {
+                response_sender: response_sender.clone(),
+            },
+        )?;
+
         let response = app.call1((
             environ,
             StartResponseCallable {
@@ -368,19 +375,7 @@ impl StartResponseCallable {
         response_headers: Bound<'py, PyList>,
         exc_info: Option<Bound<'py, PyTuple>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let mut headers = Vec::with_capacity(response_headers.len());
-        for item in response_headers.iter() {
-            let key_item = item.get_item(0)?;
-            let key = key_item.cast::<PyString>()?;
-            let value_item = item.get_item(1)?;
-            let value = value_item.cast::<PyString>()?;
-            headers.push((
-                HeaderName::from_bytes(key.to_str()?.as_bytes())
-                    .map_err(|e| PyValueError::new_err(format!("invalid header name: {}", e)))?,
-                HeaderValue::from_bytes(value.to_str()?.as_bytes())
-                    .map_err(|e| PyValueError::new_err(format!("invalid header value: {}", e)))?,
-            ));
-        }
+        let headers = convert_headers(response_headers)?;
 
         let status_code = match status.split_once(' ') {
             Some((code_str, _)) => code_str,
@@ -541,6 +536,22 @@ impl WriteCallable {
     }
 }
 
+/// The wsgi.ext.http.send_trailers callable to send response trailers.
+/// An extension currently only known to be provided by pyvoy.
+#[pyclass(module = "_pyvoy.wsgi")]
+struct SendTrailersCallable {
+    response_sender: ResponseSender,
+}
+
+#[pymethods]
+impl SendTrailersCallable {
+    fn __call__<'py>(&mut self, trailers_py: Bound<'py, PyList>) -> PyResult<()> {
+        let trailers = convert_headers(trailers_py)?;
+        self.response_sender
+            .send(ResponseSenderEvent::Trailers(trailers), None)
+    }
+}
+
 /// The wsgi.errors output stream.
 ///
 /// We simply write lines to the Envoy log as messages at error level.
@@ -637,4 +648,23 @@ impl ErrorsOutput {
         }
         Ok(())
     }
+}
+
+fn convert_headers<'py>(
+    headers_py: Bound<'py, PyList>,
+) -> PyResult<Vec<(HeaderName, HeaderValue)>> {
+    let mut headers = Vec::with_capacity(headers_py.len());
+    for item in headers_py.iter() {
+        let key_item = item.get_item(0)?;
+        let key = key_item.cast::<PyString>()?;
+        let value_item = item.get_item(1)?;
+        let value = value_item.cast::<PyString>()?;
+        headers.push((
+            HeaderName::from_bytes(key.to_str()?.as_bytes())
+                .map_err(|e| PyValueError::new_err(format!("invalid header name: {}", e)))?,
+            HeaderValue::from_bytes(value.to_str()?.as_bytes())
+                .map_err(|e| PyValueError::new_err(format!("invalid header value: {}", e)))?,
+        ));
+    }
+    Ok(headers)
 }
