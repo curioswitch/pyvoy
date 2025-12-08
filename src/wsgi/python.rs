@@ -536,7 +536,7 @@ impl WriteCallable {
     }
 }
 
-/// The wsgi_ext.send_trailers callable to send response trailers.
+/// The wsgi.ext.http.send_trailers callable to send response trailers.
 /// An extension currently only known to be provided by pyvoy.
 #[pyclass(module = "_pyvoy.wsgi")]
 struct SendTrailersCallable {
