@@ -6,6 +6,9 @@ on:
     - cron: "5 12 * * 1"
   workflow_dispatch:
 
+# Uses app token so default token needs no permissions
+permissions: {}
+
 jobs:
   renovate:
     uses: curioswitch/go-build/.github/workflows/export-renovate.yaml@f60fc8379d735d0415c0c56339d389f680760d96 # v0.6.3
