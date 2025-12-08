@@ -335,11 +335,6 @@ impl ExecutorInner {
                     }),
                     None,
                 )?;
-                py.detach(|| {
-                    // RecvError only is request filter was dropped, but since this
-                    // is the end always safe to ignore.
-                    let _ = response_written_rx.recv();
-                });
             }
         }
 
