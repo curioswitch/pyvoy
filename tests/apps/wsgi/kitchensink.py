@@ -142,7 +142,7 @@ def _large_bodies(
 
     body = b""
     for _ in range(10000):
-        chunk = request_body.read(1000)
+        chunk = request_body.read(10000)
         if not chunk:
             break
         body += chunk
