@@ -1,4 +1,6 @@
-use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler};
+use envoy_proxy_dynamic_modules_rust_sdk::{
+    EnvoyHttpFilter, EnvoyHttpFilterScheduler, EnvoyMutBuffer,
+};
 use http::{HeaderName, HeaderValue, uri};
 
 pub(crate) struct HeadersInfo {
@@ -80,32 +82,83 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
 
 /// Checks if there is any request body that can be read.
 pub(crate) fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
-    envoy_filter
-        .get_buffered_request_body()
-        .map(|buffers| buffers.iter().any(|buffer| !buffer.as_slice().is_empty()))
-        .unwrap_or(false)
+    if has_nonempty_buffer(&envoy_filter.get_buffered_request_body()) {
+        return true;
+    }
+
+    if has_nonempty_buffer(&envoy_filter.get_received_request_body()) {
+        return true;
+    }
+
+    false
+}
+
+fn has_nonempty_buffer(body: &Option<Vec<EnvoyMutBuffer<'_>>>) -> bool {
+    if let Some(buffers) = body {
+        buffers.iter().any(|buffer| !buffer.as_slice().is_empty())
+    } else {
+        false
+    }
 }
 
 /// Reads the entire readable request body from Envoy.
 pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> Box<[u8]> {
-    let buffers = envoy_filter.get_buffered_request_body().unwrap_or_default();
-    match buffers.len() {
-        0 => Box::default(),
-        1 => {
-            let body: Box<[u8]> = Box::from(buffers[0].as_slice());
+    let buffered_len = envoy_filter
+        .get_buffered_request_body()
+        .unwrap_or_default()
+        .len();
+    let received_len = envoy_filter
+        .get_received_request_body()
+        .unwrap_or_default()
+        .len();
+
+    match (buffered_len, received_len) {
+        (0, 0) => Box::default(),
+        (1, 0) => {
+            let body: Box<[u8]> =
+                Box::from(envoy_filter.get_buffered_request_body().unwrap()[0].as_slice());
             envoy_filter.drain_buffered_request_body(body.len());
             body
         }
+        (0, 1) => {
+            let body: Box<[u8]> =
+                Box::from(envoy_filter.get_received_request_body().unwrap()[0].as_slice());
+            envoy_filter.drain_received_request_body(body.len());
+            body
+        }
         _ => {
-            let body_len = buffers.iter().map(|b| b.as_slice().len()).sum();
+            let body_len = buffers_len(&envoy_filter.get_buffered_request_body())
+                + buffers_len(&envoy_filter.get_received_request_body());
             let mut body = Vec::with_capacity(body_len);
-            for buffer in buffers {
-                body.extend_from_slice(buffer.as_slice());
-            }
-            envoy_filter.drain_buffered_request_body(body.len());
+            let buffered_read =
+                extend_from_buffers(&envoy_filter.get_buffered_request_body(), &mut body);
+            envoy_filter.drain_buffered_request_body(buffered_read);
+            let received_read =
+                extend_from_buffers(&envoy_filter.get_received_request_body(), &mut body);
+            envoy_filter.drain_received_request_body(received_read);
             body.into_boxed_slice()
         }
     }
+}
+
+fn buffers_len(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>) -> usize {
+    if let Some(buffers) = buffers {
+        buffers.iter().map(|b| b.as_slice().len()).sum()
+    } else {
+        0
+    }
+}
+
+fn extend_from_buffers(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>, vec: &mut Vec<u8>) -> usize {
+    let mut read = 0;
+    if let Some(buffers) = buffers {
+        for buffer in buffers {
+            let buffer_slice = buffer.as_slice();
+            vec.extend_from_slice(buffer_slice);
+            read += buffer_slice.len();
+        }
+    }
+    read
 }
 
 /// A Sync wrapper around EnvoyHttpFilterScheduler.
