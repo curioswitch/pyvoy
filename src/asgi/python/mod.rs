@@ -480,8 +480,7 @@ struct DroppedRecvFutureExecutor {
 #[pymethods]
 impl DroppedRecvFutureExecutor {
     fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
+        let event = self.constants.asgi_empty_recv_disconnect.bind(py).copy()?;
         self.future
             .call_method1(py, &self.constants.set_result, (event,))?;
         Ok(())
@@ -555,17 +554,14 @@ struct EmptyRecvCallable {
 #[pymethods]
 impl EmptyRecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let event = PyDict::new(py);
-        if self
+        let event = if self
             .response_closed
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            event.set_item(&self.constants.typ, &self.constants.http_disconnect)?;
+            self.constants.asgi_empty_recv_disconnect.bind(py).copy()?
         } else {
-            event.set_item(&self.constants.typ, &self.constants.http_request)?;
-            event.set_item(&self.constants.body, &self.constants.empty_bytes)?;
-            event.set_item(&self.constants.more_body, false)?;
-        }
+            self.constants.asgi_empty_recv.bind(py).copy()?
+        };
         ValueAwaitable::new_py(py, event.into_any().unbind())
     }
 }

@@ -105,6 +105,11 @@ pub(crate) struct Constants {
     /// The string "client_cert_name".
     pub client_cert_name: Py<PyString>,
 
+    /// A dictionary containing { type: "http.request", body: b"", more_body: False }
+    pub asgi_empty_recv: Py<PyDict>,
+    /// A dictionary containing { type: "http.disconnect" }
+    pub asgi_empty_recv_disconnect: Py<PyDict>,
+
     // ASGI event fields
     /// The string "body".
     pub body: Py<PyString>,
@@ -112,8 +117,6 @@ pub(crate) struct Constants {
     pub more_body: Py<PyString>,
     /// The string "http.request".
     pub http_request: Py<PyString>,
-    /// The string "http.disconnect".
-    pub http_disconnect: Py<PyString>,
     /// The string "status".
     pub status: Py<PyString>,
     /// The string "trailers".
@@ -218,6 +221,19 @@ impl Constants {
         client_disconnected_err
             .setattr(py, "__traceback__", PyNone::get(py))
             .unwrap();
+
+        let asgi_empty_recv = PyDict::new(py);
+        asgi_empty_recv.set_item("type", "http.request").unwrap();
+        asgi_empty_recv
+            .set_item("body", PyBytes::new(py, b""))
+            .unwrap();
+        asgi_empty_recv.set_item("more_body", false).unwrap();
+
+        let asgi_empty_recv_disconnect = PyDict::new(py);
+        asgi_empty_recv_disconnect
+            .set_item("type", "http.disconnect")
+            .unwrap();
+
         Self {
             asgi: PyString::new(py, "asgi").unbind(),
             extensions: PyString::new(py, "extensions").unbind(),
@@ -235,6 +251,9 @@ impl Constants {
             tls: PyString::new(py, "tls").unbind(),
             tls_version: PyString::new(py, "tls_version").unbind(),
             client_cert_name: PyString::new(py, "client_cert_name").unbind(),
+
+            asgi_empty_recv: asgi_empty_recv.unbind(),
+            asgi_empty_recv_disconnect: asgi_empty_recv_disconnect.unbind(),
 
             http_version: PyString::new(py, "http_version").unbind(),
             http_10: PyString::new(py, "1.0").unbind(),
@@ -264,7 +283,6 @@ impl Constants {
             body: PyString::new(py, "body").unbind(),
             more_body: PyString::new(py, "more_body").unbind(),
             http_request: PyString::new(py, "http.request").unbind(),
-            http_disconnect: PyString::new(py, "http.disconnect").unbind(),
 
             asyncio: PyString::new(py, "asyncio").unbind(),
             run_coroutine_threadsafe: PyString::new(py, "run_coroutine_threadsafe").unbind(),
