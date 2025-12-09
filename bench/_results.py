@@ -18,7 +18,7 @@ class ChartKey:
 @dataclass(frozen=True)
 class ChartValue:
     label: str
-    label_value: int
+    label_value: str
     app_server: str
     vegeta_result: dict
     avg_cpu: float
@@ -40,6 +40,7 @@ class BenchmarkResults:
         interface: str,
         app_server: str,
         sleep: int,
+        request_size: int,
         response_size: int,
         vegeta_result: dict,
         avg_cpu: float,
@@ -47,7 +48,9 @@ class BenchmarkResults:
     ) -> None:
         key = ChartKey(protocol, interface, min(sleep, 200))
         label, label_value = (
-            ("sleep", sleep) if sleep >= 200 else ("response_size", response_size)
+            ("sleep", str(sleep))
+            if sleep >= 200
+            else ("request/response_size", f"{request_size}/{response_size}")
         )
         value = ChartValue(
             label, label_value, app_server, vegeta_result, avg_cpu, avg_ram

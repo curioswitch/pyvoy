@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import subprocess
 import sys
@@ -67,6 +68,12 @@ class Protocol(Enum):
 
 class Args(argparse.Namespace):
     short: bool
+    server: str | None
+    protocol: str | None
+    interface: str | None
+    sleep: int | None
+    request_size: int | None
+    response_size: int | None
 
 
 @dataclass
@@ -138,7 +145,61 @@ class ResourceMonitor:
             time.sleep(0.5)
 
 
-def response_sizes(sleep: int) -> tuple[int, ...]:
+def app_servers(server_arg: str | None) -> tuple[AppServer, ...]:
+    match server_arg:
+        case "pyvoy":
+            return (PYVOY,)
+        case "granian":
+            return (GRANIAN,)
+        case "gunicorn":
+            return (GUNICORN,)
+        case "hypercorn":
+            return (HYPERCORN,)
+        case "uvicorn":
+            return (UVICORN,)
+        case _:
+            return (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN)
+
+
+def protocols(protocol_arg: str | None) -> tuple[Protocol, ...]:
+    match protocol_arg:
+        case "h1":
+            return (Protocol.HTTP1,)
+        case "h2":
+            return (Protocol.HTTP2,)
+        case _:
+            return (Protocol.HTTP1, Protocol.HTTP2)
+
+
+def interfaces(interface_arg: str | None) -> tuple[str, ...]:
+    match interface_arg:
+        case "asgi":
+            return ("asgi",)
+        case "wsgi":
+            return ("wsgi",)
+        case _:
+            return ("asgi", "wsgi")
+
+
+def sleeps(sleep_arg: int | None) -> tuple[int, ...]:
+    if sleep_arg is not None:
+        return (sleep_arg,)
+    return (0, 10, 200, 500, 1000)
+
+
+def request_sizes(request_size_arg: int | None, sleep: int) -> tuple[int, ...]:
+    if request_size_arg is not None:
+        return (request_size_arg,)
+    if sleep <= 10:
+        return (0, 1000)
+    # Past 10ms latency, request size has no perceivable effect on throughput so
+    # we reduce bench time by checking just one.
+    return (1000,)
+
+
+def response_sizes(response_size_arg: int | None, sleep: int) -> tuple[int, ...]:
+    if response_size_arg is not None:
+        return (response_size_arg,)
     if sleep <= 10:
         return (0, 100, 10000, 100000)
     # Past 10ms latency, response size has no perceivable effect on throughput so
@@ -153,6 +214,42 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         help="Run a short version of the tests",
     )
+    parser.add_argument(
+        "--server",
+        type=str,
+        default=None,
+        help="Run benchmark for a specific server only",
+    )
+    parser.add_argument(
+        "--protocol",
+        type=str,
+        default=None,
+        help="Run benchmark for a specific protocol only",
+    )
+    parser.add_argument(
+        "--interface",
+        type=str,
+        default=None,
+        help="Run benchmark for a specific interface only",
+    )
+    parser.add_argument(
+        "--sleep",
+        type=int,
+        default=None,
+        help="Run benchmark for a specific sleep only",
+    )
+    parser.add_argument(
+        "--request-size",
+        type=int,
+        default=None,
+        help="Run benchmark for a specific request size only",
+    )
+    parser.add_argument(
+        "--response-size",
+        type=int,
+        default=None,
+        help="Run benchmark for a specific response size only",
+    )
     args = parser.parse_args(namespace=Args())
 
     benchmark_results = BenchmarkResults()
@@ -165,8 +262,8 @@ def main() -> None:
         stderr=subprocess.DEVNULL,
     )
 
-    for app_server in (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN):
-        for interface in ("asgi", "wsgi"):
+    for app_server in app_servers(args.server):
+        for interface in interfaces(args.interface):
             if not sys._is_gil_enabled() and app_server == GRANIAN:  # noqa: SLF001
                 # granian hangs on free-threaded for some reason
                 continue
@@ -216,107 +313,118 @@ def main() -> None:
                 monitor = ResourceMonitor(pid)
                 monitor.start()
 
-                for protocol in (Protocol.HTTP2, Protocol.HTTP1):
+                for protocol in protocols(args.protocol):
                     if protocol != Protocol.HTTP1 and app_server in (GUNICORN, UVICORN):
                         continue
-                    for sleep in (0, 10, 200, 500, 1000):
-                        for response_size in response_sizes(sleep):
-                            if args.short and (sleep > 0 or response_size > 0):
-                                continue
-                            print(  # noqa: T201
-                                f"Running benchmark for {app_server.name} with interface={interface} protocol={protocol.value} sleep={sleep}ms response_size={response_size}\n",
-                                flush=True,
-                            )
-                            target = {
-                                "method": "GET",
-                                "url": "http://localhost:8000/controlled",
-                                "header": {
-                                    "X-Sleep-Ms": [str(sleep)],
-                                    "X-Response-Bytes": [str(response_size)],
-                                },
-                            }
-                            vegeta_args = [
-                                "go",
-                                "run",
-                                "github.com/tsenart/vegeta/v12@v12.12.0",
-                                "attack",
-                                "-format=json",
-                                "-rate=0",
-                                "-max-workers=30",
-                                "-duration=5s",
-                            ]
-                            if protocol == Protocol.HTTP2:
-                                vegeta_args.append("-h2c")
-
-                            monitor.clear()
-                            vegeta = subprocess.Popen(  # noqa: S603
-                                vegeta_args,
-                                stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE,
-                                stderr=sys.stderr,
-                            )
-
-                            vegeta_result, _ = vegeta.communicate(
-                                f"{json.dumps(target)}\n".encode()
-                            )
-
-                            resource = monitor.aggregate()
-
-                            # Print text report to console
-                            subprocess.run(
-                                [  # noqa: S607
+                    for sleep in sleeps(args.sleep):
+                        for request_size in request_sizes(args.request_size, sleep):
+                            for response_size in response_sizes(
+                                args.response_size, sleep
+                            ):
+                                if args.short and (
+                                    sleep > 0 or request_size > 0 or response_size > 0
+                                ):
+                                    continue
+                                print(  # noqa: T201
+                                    f"Running benchmark for {app_server.name} with interface={interface} protocol={protocol.value} sleep={sleep}ms request_size={request_size} response_size={response_size}\n",
+                                    flush=True,
+                                )
+                                target = {
+                                    "method": "GET",
+                                    "url": "http://localhost:8000/controlled",
+                                    "header": {
+                                        "X-Sleep-Ms": [str(sleep)],
+                                        "X-Response-Bytes": [str(response_size)],
+                                    },
+                                }
+                                if request_size > 0:
+                                    target["body"] = base64.b64encode(
+                                        b"a" * request_size
+                                    ).decode()
+                                vegeta_args = [
                                     "go",
                                     "run",
                                     "github.com/tsenart/vegeta/v12@v12.12.0",
-                                    "report",
-                                ],
-                                check=True,
-                                input=vegeta_result,
-                            )
+                                    "attack",
+                                    "-format=json",
+                                    "-rate=0",
+                                    "-max-workers=30",
+                                    "-duration=5s",
+                                ]
+                                if protocol == Protocol.HTTP2:
+                                    vegeta_args.append("-h2c")
 
-                            # Get JSON report for parsing
-                            json_report = subprocess.run(
-                                [  # noqa: S607
-                                    "go",
-                                    "run",
-                                    "github.com/tsenart/vegeta/v12@v12.12.0",
-                                    "report",
-                                    "-type=json",
-                                ],
-                                check=True,
-                                input=vegeta_result,
-                                capture_output=True,
-                            )
-                            vegeta_json = json.loads(json_report.stdout)
+                                monitor.clear()
+                                vegeta = subprocess.Popen(  # noqa: S603
+                                    vegeta_args,
+                                    stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE,
+                                    stderr=sys.stderr,
+                                )
 
-                            benchmark_results.store_result(
-                                protocol.value,
-                                interface,
-                                app_server.name,
-                                sleep,
-                                response_size,
-                                vegeta_json,
-                                resource.avg.cpu_percent,
-                                resource.avg.rss,
-                            )
+                                vegeta_result, _ = vegeta.communicate(
+                                    f"{json.dumps(target)}\n".encode()
+                                )
 
-                            print(  # noqa: T201
-                                f"\nCPU Percentage\t[Min, Max, Avg]\t\t{resource.min.cpu_percent:.2f}, {resource.max.cpu_percent:.2f}, {resource.avg.cpu_percent:.2f}%"
-                            )
-                            print(  # noqa: T201
-                                f"Memory RSS\t[Min, Max, Avg]\t\t{resource.min.rss}, {resource.max.rss}, {resource.avg.rss}\n"
-                            )
+                                resource = monitor.aggregate()
 
-                            print("\n", flush=True)  # noqa: T201
+                                # Print text report to console
+                                subprocess.run(
+                                    [  # noqa: S607
+                                        "go",
+                                        "run",
+                                        "github.com/tsenart/vegeta/v12@v12.12.0",
+                                        "report",
+                                    ],
+                                    check=True,
+                                    input=vegeta_result,
+                                )
+
+                                # Get JSON report for parsing
+                                json_report = subprocess.run(
+                                    [  # noqa: S607
+                                        "go",
+                                        "run",
+                                        "github.com/tsenart/vegeta/v12@v12.12.0",
+                                        "report",
+                                        "-type=json",
+                                    ],
+                                    check=True,
+                                    input=vegeta_result,
+                                    capture_output=True,
+                                )
+                                vegeta_json = json.loads(json_report.stdout)
+
+                                benchmark_results.store_result(
+                                    protocol.value,
+                                    interface,
+                                    app_server.name,
+                                    sleep,
+                                    request_size,
+                                    response_size,
+                                    vegeta_json,
+                                    resource.avg.cpu_percent,
+                                    resource.avg.rss,
+                                )
+
+                                print(  # noqa: T201
+                                    f"\nCPU Percentage\t[Min, Max, Avg]\t\t{resource.min.cpu_percent:.2f}, {resource.max.cpu_percent:.2f}, {resource.avg.cpu_percent:.2f}%"
+                                )
+                                print(  # noqa: T201
+                                    f"Memory RSS\t[Min, Max, Avg]\t\t{resource.min.rss}, {resource.max.rss}, {resource.avg.rss}\n"
+                                )
+
+                                print("\n", flush=True)  # noqa: T201
                 monitor.stop()
                 server.terminate()
                 server.communicate()
 
-    # Lazy import since some dependencies disable the GIL, and it seems to get
-    # propagated to subprocesses through environment if it happens above.
-    from . import _charts  # noqa: PLC0415
+    if args == parser.parse_args([], namespace=Args()):
+        # Lazy import since some dependencies disable the GIL, and it seems to get
+        # propagated to subprocesses through environment if it happens above.
+        from . import _charts  # noqa: PLC0415
 
-    _charts.generate_charts(benchmark_results)
+        _charts.generate_charts(benchmark_results)
 
 
 if __name__ == "__main__":
