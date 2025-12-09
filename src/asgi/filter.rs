@@ -114,9 +114,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        // Read from the buffered request body in the scheduled event since the body
-        // may be split between two buffers here.
-        envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
+        self.handle_read(envoy_filter);
 
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
@@ -137,15 +135,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            if self.request_closed || has_request_body(envoy_filter) {
-                self.recv_bridge.process(|future| {
-                    self.executor.handle_recv_future(
-                        read_request_body(envoy_filter),
-                        !self.request_closed,
-                        future,
-                    );
-                });
-            }
+            self.handle_read(envoy_filter);
             return;
         }
         self.send_bridge.process(|event| {
@@ -210,5 +200,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 }
             }
         });
+    }
+}
+
+impl Filter {
+    fn handle_read(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.request_closed || has_request_body(envoy_filter) {
+            self.recv_bridge.process(|future| {
+                self.executor.handle_recv_future(
+                    read_request_body(envoy_filter),
+                    !self.request_closed,
+                    future,
+                );
+            });
+        }
     }
 }
