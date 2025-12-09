@@ -48,8 +48,6 @@ pub(crate) struct ASGIHeaderNameConstants {
     pub cache_status: Py<PyBytes>,
     /// The string "cdn-cache-control"
     pub cdn_cache_control: Py<PyBytes>,
-    /// The string "connection"
-    pub connection: Py<PyBytes>,
     /// The string "content-disposition"
     pub content_disposition: Py<PyBytes>,
     /// The string "content-encoding"
@@ -146,12 +144,8 @@ pub(crate) struct ASGIHeaderNameConstants {
     pub te: Py<PyBytes>,
     /// The string "trailer"
     pub trailer: Py<PyBytes>,
-    /// The string "transfer-encoding"
-    pub transfer_encoding: Py<PyBytes>,
     /// The string "user-agent"
     pub user_agent: Py<PyBytes>,
-    /// The string "upgrade"
-    pub upgrade: Py<PyBytes>,
     /// The string "upgrade-insecure-requests"
     pub upgrade_insecure_requests: Py<PyBytes>,
     /// The string "vary"
@@ -203,7 +197,6 @@ impl ASGIHeaderNameConstants {
             cache_control: PyBytes::new(py, b"cache-control").unbind(),
             cache_status: PyBytes::new(py, b"cache-status").unbind(),
             cdn_cache_control: PyBytes::new(py, b"cdn-cache-control").unbind(),
-            connection: PyBytes::new(py, b"connection").unbind(),
             content_disposition: PyBytes::new(py, b"content-disposition").unbind(),
             content_encoding: PyBytes::new(py, b"content-encoding").unbind(),
             content_language: PyBytes::new(py, b"content-language").unbind(),
@@ -256,9 +249,7 @@ impl ASGIHeaderNameConstants {
             strict_transport_security: PyBytes::new(py, b"strict-transport-security").unbind(),
             te: PyBytes::new(py, b"te").unbind(),
             trailer: PyBytes::new(py, b"trailer").unbind(),
-            transfer_encoding: PyBytes::new(py, b"transfer-encoding").unbind(),
             user_agent: PyBytes::new(py, b"user-agent").unbind(),
-            upgrade: PyBytes::new(py, b"upgrade").unbind(),
             upgrade_insecure_requests: PyBytes::new(py, b"upgrade-insecure-requests").unbind(),
             vary: PyBytes::new(py, b"vary").unbind(),
             via: PyBytes::new(py, b"via").unbind(),
@@ -314,8 +305,6 @@ pub(crate) struct WSGIHeaderNameConstants {
     pub http_cache_status: Py<PyString>,
     /// The string "HTTP_CDN_CACHE_CONTROL"
     pub http_cdn_cache_control: Py<PyString>,
-    /// The string "HTTP_CONNECTION"
-    pub http_connection: Py<PyString>,
     /// The string "HTTP_CONTENT_DISPOSITION"
     pub http_content_disposition: Py<PyString>,
     /// The string "HTTP_CONTENT_ENCODING"
@@ -408,12 +397,8 @@ pub(crate) struct WSGIHeaderNameConstants {
     pub http_te: Py<PyString>,
     /// The string "HTTP_TRAILER"
     pub http_trailer: Py<PyString>,
-    /// The string "HTTP_TRANSFER_ENCODING"
-    pub http_transfer_encoding: Py<PyString>,
     /// The string "HTTP_USER_AGENT"
     pub http_user_agent: Py<PyString>,
-    /// The string "HTTP_UPGRADE"
-    pub http_upgrade: Py<PyString>,
     /// The string "HTTP_UPGRADE_INSECURE_REQUESTS"
     pub http_upgrade_insecure_requests: Py<PyString>,
     /// The string "HTTP_VARY"
@@ -484,7 +469,6 @@ impl WSGIHeaderNameConstants {
             http_cache_control: PyString::new(py, "HTTP_CACHE_CONTROL").unbind(),
             http_cache_status: PyString::new(py, "HTTP_CACHE_STATUS").unbind(),
             http_cdn_cache_control: PyString::new(py, "HTTP_CDN_CACHE_CONTROL").unbind(),
-            http_connection: PyString::new(py, "HTTP_CONNECTION").unbind(),
             http_content_disposition: PyString::new(py, "HTTP_CONTENT_DISPOSITION").unbind(),
             http_content_encoding: PyString::new(py, "HTTP_CONTENT_ENCODING").unbind(),
             http_content_language: PyString::new(py, "HTTP_CONTENT_LANGUAGE").unbind(),
@@ -539,9 +523,7 @@ impl WSGIHeaderNameConstants {
                 .unbind(),
             http_te: PyString::new(py, "HTTP_TE").unbind(),
             http_trailer: PyString::new(py, "HTTP_TRAILER").unbind(),
-            http_transfer_encoding: PyString::new(py, "HTTP_TRANSFER_ENCODING").unbind(),
             http_user_agent: PyString::new(py, "HTTP_USER_AGENT").unbind(),
-            http_upgrade: PyString::new(py, "HTTP_UPGRADE").unbind(),
             http_upgrade_insecure_requests: PyString::new(py, "HTTP_UPGRADE_INSECURE_REQUESTS")
                 .unbind(),
             http_vary: PyString::new(py, "HTTP_VARY").unbind(),
@@ -644,7 +626,6 @@ impl HeaderNameExt for HeaderName {
                 .cdn_cache_control
                 .bind(py)
                 .to_owned(),
-            header::CONNECTION => constants.asgi_header_names.connection.bind(py).to_owned(),
             header::CONTENT_DISPOSITION => constants
                 .asgi_header_names
                 .content_disposition
@@ -785,13 +766,7 @@ impl HeaderNameExt for HeaderName {
                 .to_owned(),
             header::TE => constants.asgi_header_names.te.bind(py).to_owned(),
             header::TRAILER => constants.asgi_header_names.trailer.bind(py).to_owned(),
-            header::TRANSFER_ENCODING => constants
-                .asgi_header_names
-                .transfer_encoding
-                .bind(py)
-                .to_owned(),
             header::USER_AGENT => constants.asgi_header_names.user_agent.bind(py).to_owned(),
-            header::UPGRADE => constants.asgi_header_names.upgrade.bind(py).to_owned(),
             header::UPGRADE_INSECURE_REQUESTS => constants
                 .asgi_header_names
                 .upgrade_insecure_requests
@@ -915,11 +890,6 @@ impl HeaderNameExt for HeaderName {
                 .http_cdn_cache_control
                 .bind(py)
                 .to_owned(),
-            header::CONNECTION => constants
-                .wsgi_header_names
-                .http_connection
-                .bind(py)
-                .to_owned(),
             header::CONTENT_DISPOSITION => constants
                 .wsgi_header_names
                 .http_content_disposition
@@ -935,10 +905,6 @@ impl HeaderNameExt for HeaderName {
                 .http_content_language
                 .bind(py)
                 .to_owned(),
-            header::CONTENT_LENGTH => {
-                // CONTENT_LENGTH is special in WSGI - it doesn't have HTTP_ prefix
-                PyString::new(py, "CONTENT_LENGTH")
-            }
             header::CONTENT_LOCATION => constants
                 .wsgi_header_names
                 .http_content_location
@@ -959,10 +925,6 @@ impl HeaderNameExt for HeaderName {
                 .http_content_security_policy_report_only
                 .bind(py)
                 .to_owned(),
-            header::CONTENT_TYPE => {
-                // CONTENT_TYPE is special in WSGI - it doesn't have HTTP_ prefix
-                PyString::new(py, "CONTENT_TYPE")
-            }
             header::COOKIE => constants.wsgi_header_names.http_cookie.bind(py).to_owned(),
             header::DNT => constants.wsgi_header_names.http_dnt.bind(py).to_owned(),
             header::DATE => constants.wsgi_header_names.http_date.bind(py).to_owned(),
@@ -1090,17 +1052,11 @@ impl HeaderNameExt for HeaderName {
                 .to_owned(),
             header::TE => constants.wsgi_header_names.http_te.bind(py).to_owned(),
             header::TRAILER => constants.wsgi_header_names.http_trailer.bind(py).to_owned(),
-            header::TRANSFER_ENCODING => constants
-                .wsgi_header_names
-                .http_transfer_encoding
-                .bind(py)
-                .to_owned(),
             header::USER_AGENT => constants
                 .wsgi_header_names
                 .http_user_agent
                 .bind(py)
                 .to_owned(),
-            header::UPGRADE => constants.wsgi_header_names.http_upgrade.bind(py).to_owned(),
             header::UPGRADE_INSECURE_REQUESTS => constants
                 .wsgi_header_names
                 .http_upgrade_insecure_requests
