@@ -217,7 +217,7 @@ enum NextLifespanEvent {
 }
 
 /// Callable for the receive function in the lifespan protocol.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi.lifespan")]
 struct RecvCallable {
     /// The next lifespan event to expect.
     next_event: NextLifespanEvent,
@@ -253,7 +253,7 @@ impl RecvCallable {
 }
 
 /// Callable for the send function in the lifespan protocol.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi.lifespan")]
 struct SendCallable {
     /// The current lifespan state.
     next_event: NextLifespanEvent,
@@ -352,7 +352,7 @@ impl SendCallable {
 /// Usually the coroutine won't complete until the server is shutting down,
 /// but if it doesn't support lifespan at all it will raise an exception immediately
 /// which indicates the server should continue without lifespan.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi.lifespan")]
 struct FutureHandler {
     lifespan_tx: Sender<LifespanEvent>,
     constants: Arc<Constants>,

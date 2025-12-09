@@ -43,6 +43,7 @@ pub(crate) enum ResponseSenderEvent {
 }
 
 impl ResponseSender {
+    /// Creates a new [`ResponseSender`].
     pub(crate) fn new(
         response_bridge: EventBridge<ResponseEvent>,
         scheduler: Arc<SyncScheduler>,
@@ -60,6 +61,8 @@ impl ResponseSender {
         }
     }
 
+    /// Sends a response event to the filter if needed. Allows replacing a start event with
+    /// exc_info as specified in PEP 3333.
     pub(crate) fn send<'py>(
         &mut self,
         event: ResponseSenderEvent,
