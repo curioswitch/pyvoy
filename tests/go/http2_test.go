@@ -87,6 +87,8 @@ func TestHTTP2(t *testing.T) {
 				req, _ := http.NewRequestWithContext(t.Context(), "POST", fmt.Sprintf("http://localhost:%d/bidi-stream", port), reqBodyR)
 				req.ContentLength = -1
 				req.Header.Set("TE", "trailers")
+				req.Trailer = http.Header{}
+				req.Trailer.Set("X-Client", "choko")
 				res, err := cl.Do(req)
 				require.NoError(t, err)
 				defer res.Body.Close()
