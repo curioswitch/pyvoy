@@ -305,7 +305,8 @@ impl ExecutorInner {
     }
 }
 
-#[pyclass]
+/// The callable scheduled on the event loop to execute the ASGI application.
+#[pyclass(module = "_pyvoy.asgi")]
 struct AppExecutor {
     loop_: Py<PyAny>,
     state: Option<Py<PyDict>>,
@@ -447,7 +448,8 @@ impl AppExecutor {
     }
 }
 
-#[pyclass]
+/// The callable scheduled on the event loop to handle a receive future.
+#[pyclass(module = "_pyvoy.asgi")]
 struct RecvFutureExecutor {
     body: Box<[u8]>,
     more_body: bool,
@@ -468,7 +470,8 @@ impl RecvFutureExecutor {
     }
 }
 
-#[pyclass]
+/// The callable scheduled on the event loop to handle a dropped receive future.
+#[pyclass(module = "_pyvoy.asgi")]
 struct DroppedRecvFutureExecutor {
     future: Py<PyAny>,
     constants: Arc<Constants>,
@@ -508,7 +511,8 @@ enum Event {
     Shutdown,
 }
 
-#[pyclass]
+/// The receive callable we pass to the application.
+#[pyclass(module = "_pyvoy.asgi")]
 struct RecvCallable {
     recv_bridge: EventBridge<RecvFuture>,
     scheduler: Arc<SyncScheduler>,
@@ -540,7 +544,9 @@ impl RecvCallable {
     }
 }
 
-#[pyclass]
+/// The receive callable we pass to the application when the request was closed
+/// with headers, usually a GET request.
+#[pyclass(module = "_pyvoy.asgi")]
 struct EmptyRecvCallable {
     response_closed: Arc<AtomicBool>,
     constants: Arc<Constants>,
@@ -564,7 +570,8 @@ impl EmptyRecvCallable {
     }
 }
 
-#[pyclass]
+/// The done callback to run when the ASGI application completes.
+#[pyclass(module = "_pyvoy.asgi")]
 struct AppFutureHandler {
     send_bridge: EventBridge<SendEvent>,
     scheduler: Arc<SyncScheduler>,
@@ -583,7 +590,7 @@ impl AppFutureHandler {
             let tb = e.traceback(py).unwrap().format().unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
             if self.send_bridge.send(SendEvent::Exception).is_ok() {
-                self.scheduler.commit(EVENT_ID_EXCEPTION);
+                self.scheduler.commit(EVENT_ID_RESPONSE);
             }
         }
         Ok(())
@@ -597,7 +604,8 @@ enum NextASGIEvent {
     Done,
 }
 
-#[pyclass]
+/// The send callable passed to ASGI applications.
+#[pyclass(module = "_pyvoy.asgi")]
 struct SendCallable {
     next_event: NextASGIEvent,
     response_start: Option<ResponseStartEvent>,
@@ -776,6 +784,7 @@ impl SendCallable {
     }
 }
 
+/// Converts headers from Python to Rust.
 fn extract_headers_from_event<'py>(
     _py: Python<'py>,
     constants: &Constants,
@@ -804,13 +813,19 @@ fn extract_headers_from_event<'py>(
     }
 }
 
+/// An event to begin a response with headers.
 pub(crate) struct ResponseStartEvent {
+    /// The status code of the response.
     pub status: StatusCode,
+    /// The headers of the response.
     pub headers: Vec<(HeaderName, HeaderValue)>,
+    /// Whether trailers will be sent after the body.
     pub trailers: bool,
 }
 
+/// An event to send a chunk of the response body.
 pub(crate) struct ResponseBodyEvent {
+    /// The body bytes to send.
     pub body: Box<[u8]>,
     // Future to notify when the body is completed writing.
     // Not sent for the final piece of body, so None indicates
@@ -818,18 +833,27 @@ pub(crate) struct ResponseBodyEvent {
     pub future: Option<SendFuture>,
 }
 
+/// An event to send response trailers.
 pub(crate) struct ResponseTrailersEvent {
+    /// The trailers.
     pub headers: Vec<(HeaderName, HeaderValue)>,
+    /// Whether more trailers will follow.
     pub more_trailers: bool,
 }
 
+/// An event to send a response, read by the filter when scheduling [`EVENT_ID_RESPONSE`].
 pub(crate) enum SendEvent {
+    /// Start the response with headers and the first body chunk.
     Start(ResponseStartEvent, ResponseBodyEvent),
+    /// Send a chunk of the response body.
     Body(ResponseBodyEvent),
+    /// Send response trailers.
     Trailers(ResponseTrailersEvent),
+    /// Complete the response with failure due to an application exception.
     Exception,
 }
 
+/// A Python future to notify when a receive completes.
 pub(crate) struct RecvFuture {
     future: Option<LoopFuture>,
     executor: Executor,
@@ -843,11 +867,13 @@ impl Drop for RecvFuture {
     }
 }
 
+/// A Python future with its associated event loop for easy access from Rust.
 pub(crate) struct LoopFuture {
     future: Py<PyAny>,
     loop_: Py<PyAny>,
 }
 
+/// A Python future to notify when a send completes.
 pub(crate) struct SendFuture {
     future: Option<LoopFuture>,
     executor: Executor,
@@ -861,9 +887,10 @@ impl Drop for SendFuture {
     }
 }
 
+/// The event ID to trigger the filter to process request events.
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
+/// The event ID to trigger the filter to process response events.
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
-pub(crate) const EVENT_ID_EXCEPTION: u64 = 3;
 
 /// Converts an ASGI2 app to ASGI3 if needed.
 ///
@@ -918,7 +945,8 @@ fn is_asgi2_app<'py>(py: Python<'py>, app: &Bound<'py, PyAny>) -> PyResult<bool>
     Ok(!iscoroutinefunction.call1((app,))?.is_truthy()?)
 }
 
-#[pyclass]
+/// An ASGI3 application that invokes an ASGI2 application.
+#[pyclass(module = "_pyvoy.asgi")]
 struct ASGI2Invoker {
     app: Py<PyAny>,
 }

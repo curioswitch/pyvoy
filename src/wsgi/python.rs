@@ -35,6 +35,9 @@ struct ExecutorInner {
     rx: crossbeam_channel::Receiver<ExecuteAppEvent>,
 }
 
+/// The Python executor of the WSGI application. Because WSGI applications will block,
+/// the executor creates a pool of threads that listen for request events to execute
+/// the application.
 #[derive(Clone)]
 pub(crate) struct Executor {
     tx: Option<crossbeam_channel::Sender<ExecuteAppEvent>>,
@@ -84,8 +87,9 @@ impl Executor {
                                     .and_then(|tb| tb.format().ok())
                                     .unwrap_or_default();
                                 eprintln!("Exception in WSGI application\n{}{}", tb, e);
-                                let _ = response_bridge.send(ResponseEvent::Exception);
-                                scheduler.commit(EVENT_ID_EXCEPTION);
+                                if response_bridge.send(ResponseEvent::Exception).is_ok() {
+                                    scheduler.commit(EVENT_ID_RESPONSE);
+                                }
                             }
                         }
 
@@ -101,6 +105,7 @@ impl Executor {
         })
     }
 
+    /// Execute the WSGI application for a request on a Python thread.
     pub fn execute_app(
         &self,
         scope: Scope,
@@ -128,6 +133,7 @@ impl Executor {
             .unwrap();
     }
 
+    /// Shutdown the executor, waiting for all threads to complete.
     pub fn shutdown(&mut self) {
         drop(self.tx.take());
         for handle in Arc::get_mut(&mut self.handles).unwrap().drain(..) {
@@ -137,6 +143,7 @@ impl Executor {
 }
 
 impl ExecutorInner {
+    /// The real execution of the WSGI application, on a Python thread.
     fn execute_app<'py>(
         &self,
         py: Python<'py>,
@@ -295,7 +302,7 @@ impl ExecutorInner {
         ))?;
 
         // We ignore all send errors here since they only happen if the filter was dropped meaning
-        // the request was closed, usually by the client. This is not an application error, and we just need
+        // the request was closed, usually by the client. In WSGI is not an application error, and we just need
         // to make sure a close() method for a generator is called before returning.
 
         match response.len() {
@@ -360,7 +367,7 @@ impl ExecutorInner {
 /// response.
 ///
 /// https://peps.python.org/pep-3333/#the-start-response-callable
-#[pyclass]
+#[pyclass(module = "_pyvoy.wsgi")]
 struct StartResponseCallable {
     response_sender: ResponseSender,
 }
@@ -404,7 +411,7 @@ impl StartResponseCallable {
 /// proper backpressure. Because in WSGI we block on reads, we use channels for the bodies themselves.
 ///
 /// https://peps.python.org/pep-3333/#input-and-error-streams
-#[pyclass]
+#[pyclass(module = "_pyvoy.wsgi")]
 struct RequestInput {
     /// The event bridge to send read requests.
     request_read_bridge: EventBridge<RequestReadEvent>,
@@ -426,6 +433,10 @@ unsafe impl Sync for RequestInput {}
 
 #[pymethods]
 impl RequestInput {
+    /// Reads request input, blocking until any amount is available. If size is non-negative, only
+    /// up-to size bytes are returned.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.RawIOBase.read
     #[pyo3(signature = (size=-1))]
     fn read<'py>(&mut self, py: Python<'py>, size: Option<isize>) -> PyResult<Bound<'py, PyBytes>> {
         let size = size.unwrap_or(-1);
@@ -436,6 +447,9 @@ impl RequestInput {
         }
     }
 
+    /// Read until newline or EOF. If size is non-negative, at most size bytes are returned.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.IOBase.readline
     #[pyo3(signature = (size=-1))]
     fn readline<'py>(
         &mut self,
@@ -450,10 +464,12 @@ impl RequestInput {
         }
     }
 
+    /// Iterate over lines in the request input.
     fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
         slf
     }
 
+    /// Read the next line from the request input.
     fn __next__<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let line = self.do_read(py, RequestReadEvent::Line(-1))?;
         if line.as_bytes().is_empty() {
@@ -463,6 +479,9 @@ impl RequestInput {
         }
     }
 
+    /// Read all lines from the request input. hint is ignored.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.IOBase.readlines
     #[pyo3(signature = (hint=-1))]
     fn readlines<'py>(
         &mut self,
@@ -570,6 +589,9 @@ struct ErrorsOutput {
 
 #[pymethods]
 impl ErrorsOutput {
+    /// Writes lines in data as error messages.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.TextIOBase.write
     fn write<'py>(&self, py: Python<'py>, data: Bound<'py, PyString>) -> PyResult<usize> {
         let str = data.to_str()?;
 
@@ -617,6 +639,9 @@ impl ErrorsOutput {
         Ok(str.len())
     }
 
+    /// Writes the list of lines as error messages.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.IOBase.writelines
     fn writelines<'py>(&self, py: Python<'py>, lines: Bound<'py, PyAny>) -> PyResult<()> {
         self.flush(py)?;
 
@@ -637,6 +662,9 @@ impl ErrorsOutput {
         Ok(())
     }
 
+    /// Flushes any buffered bytes to error logs.
+    ///
+    /// https://docs.python.org/3/library/io.html#io.BufferedWriter.flush
     fn flush<'py>(&self, py: Python<'py>) -> PyResult<()> {
         let buffer = &mut *self.buffer.lock_py_attached(py).unwrap();
         if !buffer.is_empty() {
@@ -650,6 +678,7 @@ impl ErrorsOutput {
     }
 }
 
+/// Converts headers from Python to Rust.
 fn convert_headers<'py>(
     headers_py: Bound<'py, PyList>,
 ) -> PyResult<Vec<(HeaderName, HeaderValue)>> {

@@ -1,7 +1,7 @@
 use pyo3::{IntoPyObjectExt, exceptions::PyStopIteration, prelude::*};
 
 /// An awaitable that returns `None` when awaited.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi")]
 pub(crate) struct EmptyAwaitable;
 
 impl EmptyAwaitable {
@@ -23,7 +23,7 @@ impl EmptyAwaitable {
 }
 
 /// An awaitable that returns the given value when awaited.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi")]
 pub(crate) struct ValueAwaitable {
     value: Option<Py<PyAny>>,
 }
@@ -52,7 +52,7 @@ impl ValueAwaitable {
 }
 
 /// An awaitable that raises the given error when awaited.
-#[pyclass]
+#[pyclass(module = "_pyvoy.asgi")]
 pub(crate) struct ErrorAwaitable {
     error: Option<PyErr>,
 }
