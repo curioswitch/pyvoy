@@ -110,9 +110,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_request_trailers(
         &mut self,
-        _envoy_filter: &mut EHF,
+        envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status {
         self.request_closed = true;
+
+        self.process_read(envoy_filter);
+
         abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::Continue
     }
 
