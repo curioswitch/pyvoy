@@ -141,7 +141,7 @@ def _large_bodies(
     request_body = cast("WSGIInputStream", environ["wsgi.input"])
 
     body = b""
-    for _ in range(1):
+    for _ in range(10000):
         chunk = request_body.read(10000000)
         if not chunk:
             break
