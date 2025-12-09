@@ -1,4 +1,4 @@
-use crate::envoy::{SyncScheduler, has_request_body};
+use crate::envoy::{SyncScheduler, buffers_len, extend_from_buffers, has_request_body};
 use crate::eventbridge::EventBridge;
 use crate::wsgi::python::Executor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
@@ -103,9 +103,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_closed = true;
         }
 
-        // Read from the buffered request body in the scheduled event since the body
-        // may be split between two buffers here.
-        envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
+        self.process_read(envoy_filter);
 
         abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
     }
@@ -126,9 +124,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            self.request_read_bridge.process(|event| {
-                self.pending_read = event;
-            });
             self.process_read(envoy_filter);
             return;
         }
@@ -198,6 +193,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
 impl Filter {
     fn process_read<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+        self.request_read_bridge.process(|event| {
+            self.pending_read = event;
+        });
         // Reads always block until there is data or the request is finished,
         // so don't process them otherwise.
         if !has_request_body(envoy_filter) && !self.request_closed {
@@ -208,15 +206,32 @@ impl Filter {
                 let mut remaining = n as usize;
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
                 if let Some(buffers) = envoy_filter.get_buffered_request_body() {
-                    for buffer in buffers {
-                        let to_read = std::cmp::min(remaining, buffer.as_slice().len());
-                        body.extend_from_slice(&buffer.as_slice()[..to_read]);
+                    let mut read = 0;
+                    for buffer in buffers.iter().map(|b| b.as_slice()) {
+                        let to_read = std::cmp::min(remaining, buffer.len());
+                        body.extend_from_slice(&buffer[..to_read]);
                         remaining -= to_read;
+                        read += to_read;
                         if remaining == 0 {
                             break;
                         }
                     }
-                    envoy_filter.drain_buffered_request_body(body.len());
+                    envoy_filter.drain_buffered_request_body(read);
+                }
+                if remaining > 0
+                    && let Some(buffers) = envoy_filter.get_received_request_body()
+                {
+                    let mut read = 0;
+                    for buffer in buffers.iter().map(|b| b.as_slice()) {
+                        let to_read = std::cmp::min(remaining, buffer.len());
+                        body.extend_from_slice(&buffer[..to_read]);
+                        remaining -= to_read;
+                        read += to_read;
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                    envoy_filter.drain_received_request_body(read);
                 }
                 self.pending_read = RequestReadEvent::Wait;
                 send_or_log(
@@ -228,13 +243,23 @@ impl Filter {
                 );
             }
             RequestReadEvent::Raw(_) => {
-                if let Some(buffers) = envoy_filter.get_buffered_request_body() {
-                    let mut read = 0;
-                    for buffer in buffers {
-                        self.read_buffer.extend_from_slice(buffer.as_slice());
-                        read += buffer.as_slice().len();
-                    }
-                    envoy_filter.drain_buffered_request_body(read);
+                self.read_buffer.reserve(
+                    buffers_len(&envoy_filter.get_buffered_request_body())
+                        + buffers_len(&envoy_filter.get_received_request_body()),
+                );
+                let buffered_read = extend_from_buffers(
+                    &envoy_filter.get_buffered_request_body(),
+                    &mut self.read_buffer,
+                );
+                if buffered_read > 0 {
+                    envoy_filter.drain_buffered_request_body(buffered_read);
+                }
+                let received_read = extend_from_buffers(
+                    &envoy_filter.get_received_request_body(),
+                    &mut self.read_buffer,
+                );
+                if received_read > 0 {
+                    envoy_filter.drain_received_request_body(received_read);
                 }
                 if self.request_closed {
                     self.pending_read = RequestReadEvent::Wait;
@@ -248,35 +273,49 @@ impl Filter {
                 }
             }
             RequestReadEvent::Line(n) => {
+                let mut send = false;
                 if let Some(buffers) = envoy_filter.get_buffered_request_body() {
-                    let mut read = 0;
-                    let mut send = false;
-                    'outer: for buffer in buffers {
-                        for &b in buffer.as_slice() {
-                            self.read_buffer.push(b);
-                            read += 1;
-                            if b == b'\n' || (n > 0 && self.read_buffer.len() >= n as usize) {
-                                send = true;
-                                break 'outer;
-                            }
-                        }
-                    }
+                    let (should_send, read) = self.read_request_until_line_or_size(&buffers, n);
+                    send = should_send;
                     envoy_filter.drain_buffered_request_body(read);
-                    if send || self.request_closed {
-                        let body = std::mem::take(&mut self.read_buffer);
-                        self.pending_read = RequestReadEvent::Wait;
-                        send_or_log(
-                            &self.request_body_tx,
-                            RequestBody {
-                                body: body.into_boxed_slice(),
-                                closed: !has_request_body(envoy_filter) && self.request_closed,
-                            },
-                        );
-                    }
+                }
+                if !send && let Some(buffers) = envoy_filter.get_received_request_body() {
+                    let (should_send, read) = self.read_request_until_line_or_size(&buffers, n);
+                    send = should_send;
+                    envoy_filter.drain_received_request_body(read);
+                }
+                if send || self.request_closed {
+                    let body = std::mem::take(&mut self.read_buffer);
+                    self.pending_read = RequestReadEvent::Wait;
+                    send_or_log(
+                        &self.request_body_tx,
+                        RequestBody {
+                            body: body.into_boxed_slice(),
+                            closed: !has_request_body(envoy_filter) && self.request_closed,
+                        },
+                    );
                 }
             }
             _ => (),
         }
+    }
+
+    fn read_request_until_line_or_size(
+        &mut self,
+        buffers: &Vec<EnvoyMutBuffer<'_>>,
+        n: isize,
+    ) -> (bool, usize) {
+        let mut read = 0;
+        for buffer in buffers.iter().map(|b| b.as_slice()) {
+            for &b in buffer {
+                self.read_buffer.push(b);
+                read += 1;
+                if b == b'\n' || (n > 0 && self.read_buffer.len() >= n as usize) {
+                    return (true, read);
+                }
+            }
+        }
+        (false, read)
     }
 }
 
