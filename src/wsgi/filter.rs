@@ -124,9 +124,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
-            self.request_read_bridge.process(|event| {
-                self.pending_read = event;
-            });
             self.process_read(envoy_filter);
             return;
         }
@@ -196,6 +193,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
 impl Filter {
     fn process_read<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+        self.request_read_bridge.process(|event| {
+            self.pending_read = event;
+        });
         // Reads always block until there is data or the request is finished,
         // so don't process them otherwise.
         if !has_request_body(envoy_filter) && !self.request_closed {
