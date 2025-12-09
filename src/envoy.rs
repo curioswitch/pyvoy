@@ -81,19 +81,19 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
 /// Checks if there is any request body that can be read.
 pub(crate) fn has_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> bool {
     envoy_filter
-        .get_request_body()
+        .get_buffered_request_body()
         .map(|buffers| buffers.iter().any(|buffer| !buffer.as_slice().is_empty()))
         .unwrap_or(false)
 }
 
 /// Reads the entire readable request body from Envoy.
 pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) -> Box<[u8]> {
-    let buffers = envoy_filter.get_request_body().unwrap_or_default();
+    let buffers = envoy_filter.get_buffered_request_body().unwrap_or_default();
     match buffers.len() {
         0 => Box::default(),
         1 => {
             let body: Box<[u8]> = Box::from(buffers[0].as_slice());
-            envoy_filter.drain_request_body(body.len());
+            envoy_filter.drain_buffered_request_body(body.len());
             body
         }
         _ => {
@@ -102,7 +102,7 @@ pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) ->
             for buffer in buffers {
                 body.extend_from_slice(buffer.as_slice());
             }
-            envoy_filter.drain_request_body(body.len());
+            envoy_filter.drain_buffered_request_body(body.len());
             body.into_boxed_slice()
         }
     }

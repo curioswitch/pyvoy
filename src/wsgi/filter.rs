@@ -207,7 +207,7 @@ impl Filter {
             RequestReadEvent::Raw(n) if n > 0 => {
                 let mut remaining = n as usize;
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
-                if let Some(buffers) = envoy_filter.get_request_body() {
+                if let Some(buffers) = envoy_filter.get_buffered_request_body() {
                     for buffer in buffers {
                         let to_read = std::cmp::min(remaining, buffer.as_slice().len());
                         body.extend_from_slice(&buffer.as_slice()[..to_read]);
@@ -216,7 +216,7 @@ impl Filter {
                             break;
                         }
                     }
-                    envoy_filter.drain_request_body(body.len());
+                    envoy_filter.drain_buffered_request_body(body.len());
                 }
                 self.pending_read = RequestReadEvent::Wait;
                 send_or_log(
@@ -228,13 +228,13 @@ impl Filter {
                 );
             }
             RequestReadEvent::Raw(_) => {
-                if let Some(buffers) = envoy_filter.get_request_body() {
+                if let Some(buffers) = envoy_filter.get_buffered_request_body() {
                     let mut read = 0;
                     for buffer in buffers {
                         self.read_buffer.extend_from_slice(buffer.as_slice());
                         read += buffer.as_slice().len();
                     }
-                    envoy_filter.drain_request_body(read);
+                    envoy_filter.drain_buffered_request_body(read);
                 }
                 if self.request_closed {
                     self.pending_read = RequestReadEvent::Wait;
@@ -248,7 +248,7 @@ impl Filter {
                 }
             }
             RequestReadEvent::Line(n) => {
-                if let Some(buffers) = envoy_filter.get_request_body() {
+                if let Some(buffers) = envoy_filter.get_buffered_request_body() {
                     let mut read = 0;
                     let mut send = false;
                     'outer: for buffer in buffers {
@@ -261,7 +261,7 @@ impl Filter {
                             }
                         }
                     }
-                    envoy_filter.drain_request_body(read);
+                    envoy_filter.drain_buffered_request_body(read);
                     if send || self.request_closed {
                         let body = std::mem::take(&mut self.read_buffer);
                         self.pending_read = RequestReadEvent::Wait;
