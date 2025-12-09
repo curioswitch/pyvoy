@@ -132,16 +132,20 @@ pub(crate) fn read_request_body<EHF: EnvoyHttpFilter>(envoy_filter: &mut EHF) ->
             let mut body = Vec::with_capacity(body_len);
             let buffered_read =
                 extend_from_buffers(&envoy_filter.get_buffered_request_body(), &mut body);
-            envoy_filter.drain_buffered_request_body(buffered_read);
+            if buffered_read > 0 {
+                envoy_filter.drain_buffered_request_body(buffered_read);
+            }
             let received_read =
                 extend_from_buffers(&envoy_filter.get_received_request_body(), &mut body);
-            envoy_filter.drain_received_request_body(received_read);
+            if received_read > 0 {
+                envoy_filter.drain_received_request_body(received_read);
+            }
             body.into_boxed_slice()
         }
     }
 }
 
-fn buffers_len(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>) -> usize {
+pub(crate) fn buffers_len(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>) -> usize {
     if let Some(buffers) = buffers {
         buffers.iter().map(|b| b.as_slice().len()).sum()
     } else {
@@ -149,13 +153,15 @@ fn buffers_len(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>) -> usize {
     }
 }
 
-fn extend_from_buffers(buffers: &Option<Vec<EnvoyMutBuffer<'_>>>, vec: &mut Vec<u8>) -> usize {
+pub(crate) fn extend_from_buffers(
+    buffers: &Option<Vec<EnvoyMutBuffer<'_>>>,
+    vec: &mut Vec<u8>,
+) -> usize {
     let mut read = 0;
     if let Some(buffers) = buffers {
-        for buffer in buffers {
-            let buffer_slice = buffer.as_slice();
-            vec.extend_from_slice(buffer_slice);
-            read += buffer_slice.len();
+        for buffer in buffers.iter().map(|b| b.as_slice()) {
+            vec.extend_from_slice(buffer);
+            read += buffer.len();
         }
     }
     read
