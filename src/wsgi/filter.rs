@@ -206,28 +206,32 @@ impl Filter {
                 let mut remaining = n as usize;
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
                 if let Some(buffers) = envoy_filter.get_buffered_request_body() {
+                    let mut read = 0;
                     for buffer in buffers.iter().map(|b| b.as_slice()) {
                         let to_read = std::cmp::min(remaining, buffer.len());
                         body.extend_from_slice(&buffer[..to_read]);
                         remaining -= to_read;
+                        read += to_read;
                         if remaining == 0 {
                             break;
                         }
                     }
-                    envoy_filter.drain_buffered_request_body(body.len());
+                    envoy_filter.drain_buffered_request_body(read);
                 }
                 if remaining > 0
                     && let Some(buffers) = envoy_filter.get_received_request_body()
                 {
+                    let mut read = 0;
                     for buffer in buffers.iter().map(|b| b.as_slice()) {
                         let to_read = std::cmp::min(remaining, buffer.len());
                         body.extend_from_slice(&buffer[..to_read]);
                         remaining -= to_read;
+                        read += to_read;
                         if remaining == 0 {
                             break;
                         }
                     }
-                    envoy_filter.drain_received_request_body(body.len());
+                    envoy_filter.drain_received_request_body(read);
                 }
                 self.pending_read = RequestReadEvent::Wait;
                 send_or_log(
