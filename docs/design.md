@@ -49,7 +49,7 @@ is guaranteed to be dropped, completing the future.
 ## WSGI
 
 Unlike ASGI, the Python execution under WSGI blocks on I/O. This simplifies the implementation
-compared to WSGI - because of blocking, it is not enough to have a single Python thread, and we need
+compared to ASGI - because of blocking, it is not enough to have a single Python thread, and we need
 to have at least as much as the expected concurrency of the server - we default to 200 to match
 the Java server Tomcat, but this is a user-workload driven parameter. These threads can directly
 block on channels to receive events from the Envoy threads, meaning there is no additional GIL
