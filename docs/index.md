@@ -1,7 +1,3 @@
----
-title: Introduction
----
-
 #
 
 <img alt="logo" src="./img/logo.png" width="320" height="320">
@@ -54,5 +50,80 @@ pyvoy is available on [PyPI](https://pypi.org/project/pyvoy/) so can be installe
 
 This will also include the Envoy binary itself - there are no other steps to get running.
 
+---
+
+Given a simple ASGI application:
+
+```python title="main.py"
+async def app(scope, receive, send):
+    await send({
+        'type': 'http.response.start',
+        'status': 200,
+        'headers': [
+            (b'content-type', b'text/plain'),
+            (b'content-length', b'13'),
+        ],
+    })
+    await send({
+        'type': 'http.response.body',
+        'body': b'Hello, world!',
+        'more_body': False,
+    })
+```
+
+Pass it to pyvoy to run.
+
+=== "uv"
+
+    ```bash
+    uv run pyvoy main:app
+    ```
+
+=== "pip"
+
+    ```bash
+    pyvoy main:app
+    ```
+
+Using cURL, you can try out a request.
+
+```bash
+❯ curl http://localhost:8000/
+Hello, world!
+```
+
+Flask works fine too, just make sure to pass `--interface=wsgi` when running pyvoy.
+
+For a list of all settings
+
+=== "uv"
+
+    ```bash
+    uv run pyvoy -h
+    ```
+
+=== "pip"
+
+    ```bash
+    pyvoy -h
+    ```
+
+or see the documentation for [settings](./settings.md).
+
 [Envoy]: https://www.envoyproxy.io/
-[Envoy dynamic modules]: https://www.Envoyproxy.io/docs/Envoy/latest/intro/arch_overview/advanced/dynamic_modules
+[Envoy dynamic modules]: https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/advanced/dynamic_modules
+
+## Why pyvoy?
+
+pyvoy was created out of a desire to bring HTTP/2 trailers to Python application servers to allow using the gRPC
+protocol with standard applications. While developing it, we have found it to be a very fast, stable server for
+any workload - notably, it is the only server known to pass all of the conformance tests for
+[connect-python](https://github.com/connectrpc/connect-python).
+
+What pyvoy isn't is a traditional Python application - we execute Envoy itself, which then loads the Python
+interpreter to start the application server. This means certain features like listening on sockets in forked
+processes cannot be implemented no matter how hard we try as it is in the domain of Envoy, which ensures they
+are handled efficiently and stably. It doesn't mean we miss out on features like IDE debugging though, which
+we do support.
+
+ASGI and WSGI make it easy to switch servers to try - hopefully you can give it a try and we hope you like it.
