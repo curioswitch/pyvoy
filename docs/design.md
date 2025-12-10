@@ -39,7 +39,7 @@ Because the Python event loop also cannot block, it needs to be notified of I/O 
 or completion of response data, via `asyncio.Future`. For any invocation of `send` and `receive`, we
 create a new `asyncio.Future` and return it to the application. It is passed to the Envoy request thread
 which completes it when appropriate. One important point is these futures must be completed, or else
-the Python side wil hang forever and be effectively leaked. We accomplish this by implementing the
+the Python side will hang forever and be effectively leaked. We accomplish this by implementing the
 Rust trait `Drop` for structs that hold the futures which we send to Envoy. If the Envoy request
 filter itself drops because the client disconnected, this is invoked and we complete the future with
 a disconnection event. These wrappers do not use `Arc`, etc - thanks to Rust's assurances on ownership,
