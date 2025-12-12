@@ -10,7 +10,10 @@ bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 
 def main() -> None:
     print("Building libpyvoy...")  # noqa: T201
-    pyvoy_path = bin_dir / "libpyvoy.so"
+    if sys.platform == "win32":
+        pyvoy_path = bin_dir / "libpyvoy.dll"
+    else:
+        pyvoy_path = bin_dir / "libpyvoy.so"
     pyvoy_path.unlink(missing_ok=True)
 
     target_dir = Path(__file__).parent.parent / "target"
@@ -45,8 +48,7 @@ def main() -> None:
                 check=True,
             )
     elif sys.platform == "win32":
-        (release_dir / "pyvoy.dll").rename(release_dir / "libpyvoy.dll")
-        libpyvoy_path = release_dir / "libpyvoy.dll"
+        libpyvoy_path = release_dir / "pyvoy.dll"
     else:
         libpyvoy_path = release_dir / "libpyvoy.so"
 
