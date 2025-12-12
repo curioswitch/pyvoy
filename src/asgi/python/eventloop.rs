@@ -138,9 +138,9 @@ impl EventLoop {
         let rx = SyncReceiver::new(rx);
         let handle = thread::spawn(|| {
             let res: PyResult<()> = Python::attach(|py| {
-                let uvloop = py.import("uvloop")?;
+                //let uvloop = py.import("uvloop")?;
                 let asyncio = py.import("asyncio")?;
-                let loop_ = uvloop.call_method0("new_event_loop")?;
+                let loop_ = asyncio.call_method0("new_event_loop")?;
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
                 tx.send(loop_.clone().unbind()).unwrap();
                 drop(tx);

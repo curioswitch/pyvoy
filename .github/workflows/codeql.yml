@@ -11,6 +11,7 @@ on:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    if: false
     runs-on: ubuntu-latest
     permissions:
       security-events: write

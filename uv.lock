@@ -1614,7 +1614,7 @@ dependencies = [
     { name = "envoy-server", version = "1.36.3", source = { path = "envoy_server-1.36.3-py3-none-any.whl" }, marker = "sys_platform == 'win32'" },
     { name = "find-libpython" },
     { name = "pyyaml" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -1646,7 +1646,7 @@ requires-dist = [
     { name = "envoy-server", marker = "sys_platform == 'win32'", path = "envoy_server-1.36.3-py3-none-any.whl" },
     { name = "find-libpython" },
     { name = "pyyaml" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 
 [package.metadata.requires-dev]
