@@ -44,6 +44,8 @@ def main() -> None:
                 ],
                 check=True,
             )
+    elif sys.platform == "win32":
+        libpyvoy_path = release_dir / "libpyvoy.dll"
     else:
         libpyvoy_path = release_dir / "libpyvoy.so"
 

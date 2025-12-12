@@ -2,9 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
-    "python_full_version < '3.11'",
+    "python_full_version >= '3.12' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version < '3.11' and sys_platform != 'win32'",
+    "python_full_version < '3.11' and sys_platform == 'win32'",
 ]
 
 [[package]]
@@ -160,7 +163,8 @@ name = "contourpy"
 version = "1.3.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and sys_platform != 'win32'",
+    "python_full_version < '3.11' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -230,8 +234,10 @@ name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
+    "python_full_version >= '3.12' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
 ]
 dependencies = [
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -502,12 +508,30 @@ wheels = [
 name = "envoy-server"
 version = "1.36.3"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'win32'",
+    "python_full_version < '3.11' and sys_platform != 'win32'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/8e/50/8f6c4ccb5ce854fd320a6de5c8fa754fd9455f0be40308514ba718df1a59/envoy_server-1.36.3.tar.gz", hash = "sha256:157fa0a0502a4deea9654cec35f55e1bee3d1e31a31cb6606b3243a921f47fe9", size = 5681, upload-time = "2025-12-09T02:50:27.484Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/34/43/53cb71770daa5eeff827a3610a9e739020cb1b514a4ca29dde1264793888/envoy_server-1.36.3-py3-none-any.whl", hash = "sha256:74812ea41b8e2d7602313abe6b3a836a530bd14778332081fb1fbf7c8c8bf8b6", size = 6598, upload-time = "2025-12-09T02:50:16.531Z" },
     { url = "https://files.pythonhosted.org/packages/89/61/0e29b6713ae49179eecb8a17febb551d9adb0d3fb94b50964946c293a06d/envoy_server-1.36.3-py3-none-macosx_15_0_arm64.whl", hash = "sha256:00e88f9cd0660c803982b064154ad3d38cbd314516b8a94473aa7e085f4c59bc", size = 31982864, upload-time = "2025-12-09T02:50:18.846Z" },
     { url = "https://files.pythonhosted.org/packages/4c/a8/d51a37852700effc1dee2b4fcd7ced4c7ff1658247d4ba983d5c9c0fce3f/envoy_server-1.36.3-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:3a524b0421bec60900c272a01d27b4a8ab7b2ba2809659d6a81985aa2b70738b", size = 27890778, upload-time = "2025-12-09T02:50:21.814Z" },
     { url = "https://files.pythonhosted.org/packages/38/e3/452d45fed36da47ab4985226de85f9f31eac4854dd899f93f7c7e8464b5e/envoy_server-1.36.3-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:39f6630bbaa4a3d0af8dbbec2fb004354f189e18e3b59a56178fa0ff512a2014", size = 29513743, upload-time = "2025-12-09T02:50:24.97Z" },
+]
+
+[[package]]
+name = "envoy-server"
+version = "1.36.3"
+source = { path = "envoy_server-1.36.3-py3-none-any.whl" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
+    "python_full_version < '3.11' and sys_platform == 'win32'",
+]
+wheels = [
+    { filename = "envoy_server-1.36.3-py3-none-any.whl", hash = "sha256:d0947f848592b386cffe91e27644df200d7f2eea2df7b4c7610482174d31fe1b" },
 ]
 
 [[package]]
@@ -1063,7 +1087,8 @@ name = "numpy"
 version = "2.2.6"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11'",
+    "python_full_version < '3.11' and sys_platform != 'win32'",
+    "python_full_version < '3.11' and sys_platform == 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/76/21/7d2a95e4bba9dc13d043ee156a356c0a8f0c6309dff6b21b4d71a073b8a8/numpy-2.2.6.tar.gz", hash = "sha256:e29554e2bef54a90aa5cc07da6ce955accb83f21ab5de01a62c8478897b264fd", size = 20276440, upload-time = "2025-05-17T22:38:04.611Z" }
 wheels = [
@@ -1128,8 +1153,10 @@ name = "numpy"
 version = "2.3.5"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
+    "python_full_version >= '3.12' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/76/65/21b3bc86aac7b8f2862db1e808f1ea22b028e30a225a34a5ede9bf8678f2/numpy-2.3.5.tar.gz", hash = "sha256:784db1dcdab56bf0517743e746dfb0f885fc68d948aba86eeec2cba234bdf1c0", size = 20584950, upload-time = "2025-11-16T22:52:42.067Z" }
 wheels = [
@@ -1583,7 +1610,8 @@ name = "pyvoy"
 version = "0.1.3"
 source = { editable = "." }
 dependencies = [
-    { name = "envoy-server" },
+    { name = "envoy-server", version = "1.36.3", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "envoy-server", version = "1.36.3", source = { path = "envoy_server-1.36.3-py3-none-any.whl" }, marker = "sys_platform == 'win32'" },
     { name = "find-libpython" },
     { name = "pyyaml" },
     { name = "uvloop" },
@@ -1614,7 +1642,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "envoy-server", specifier = "==1.36.3" },
+    { name = "envoy-server", marker = "sys_platform != 'win32'", specifier = "==1.36.3" },
+    { name = "envoy-server", marker = "sys_platform == 'win32'", path = "envoy_server-1.36.3-py3-none-any.whl" },
     { name = "find-libpython" },
     { name = "pyyaml" },
     { name = "uvloop" },
