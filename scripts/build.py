@@ -54,6 +54,9 @@ def main() -> None:
 
     with libpyvoy_path.open("rb") as src, pyvoy_path.open("wb") as dst:
         copyfileobj(src, dst)
+    print(pyvoy_path)
+    for root, dirs, files in bin_dir.walk():
+        print(root, dirs, files)
 
 
 if __name__ == "__main__":
