@@ -138,9 +138,15 @@ class PyvoyServer:
         env = {**os.environ, **get_envoy_environ()}
 
         with NamedTemporaryFile("r") as admin_address_file:
-            args = [
-                "--config-yaml",
-                json.dumps(config),
+            if sys.platform == "win32":
+                # config-yaml doesn't seem to work on Windows
+                config_file = NamedTemporaryFile("w", suffix=".yaml", delete=False)
+                yaml.dump(config, config_file)
+                config_file.close()
+                args = ["--config-path", config_file.name]
+            else:
+                args = ["--config-yaml", json.dumps(config)]
+            args += [
                 "--admin-address-path",
                 admin_address_file.name,
                 "--use-dynamic-base-id",
