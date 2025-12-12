@@ -45,9 +45,8 @@ def main() -> None:
                 check=True,
             )
     elif sys.platform == "win32":
-        for root, dirs, files in release_dir.walk():
-            print(root, dirs, files)  # noqa: T201
-        libpyvoy_path = release_dir / "pyvoy.dll"
+        (release_dir / "pyvoy.dll").rename(release_dir / "libpyvoy.dll")
+        libpyvoy_path = release_dir / "libpyvoy.dll"
     else:
         libpyvoy_path = release_dir / "libpyvoy.so"
 
