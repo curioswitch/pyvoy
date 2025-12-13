@@ -30,6 +30,8 @@ def main() -> None:
                 case _:
                     msg = f"Unsupported architecture: {platform.machine()}"
                     raise RuntimeError(msg)
+        case "win32":
+            platform_tag = "win_amd64"
         case _:
             msg = f"Unsupported platform: {sys.platform}"
             raise RuntimeError(msg)

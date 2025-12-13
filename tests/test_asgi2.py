@@ -20,7 +20,7 @@ from pyvoy import PyvoyServer
 )
 async def test_asgi2_compat(app: str):
     async with (
-        PyvoyServer(f"tests.apps.asgi.asgi2:{app}") as server,
+        PyvoyServer(f"tests.apps.asgi.asgi2:{app}", stdout=None, stderr=None) as server,
         httpx.AsyncClient() as client,
     ):
         url = f"http://{server.listener_address}:{server.listener_port}"

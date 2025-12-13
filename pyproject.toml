@@ -26,7 +26,13 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
 ]
 
-dependencies = ["envoy-server==1.36.3", "find-libpython", "pyyaml", "uvloop"]
+dependencies = [
+    "envoy-server==1.36.3",
+    "find-libpython",
+    "pyyaml",
+    "uvloop; sys_platform != 'win32'",
+    "winloop; sys_platform == 'win32'",
+]
 
 [dependency-groups]
 dev = [
@@ -220,3 +226,6 @@ allow_dirty = true
 ignore_missing_version = false
 commit = true
 message = "Bump version: {current_version} → {new_version}"
+
+[tool.uv.sources]
+envoy-server = { path = "envoy_server-1.36.3-py3-none-any.whl", marker = "sys_platform == 'win32'" }

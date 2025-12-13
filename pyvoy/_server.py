@@ -14,6 +14,7 @@ from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
 import yaml
+from envoy import get_envoy_path
 
 from ._bin import get_pyvoy_dir_path
 
@@ -50,6 +51,10 @@ def get_envoy_environ() -> dict[str, str]:
                 env["DYLD_LIBRARY_PATH"] = libpython_dir
             else:
                 env["LD_PRELOAD"] = str(candidates[0])
+    if sys.platform == "win32":
+        libpython = find_libpython.find_libpython()
+        if libpython is not None:
+            env["PATH"] = f"{Path(libpython).parent};{os.environ.get('PATH', '')}"
 
     return env
 
@@ -70,6 +75,7 @@ class PyvoyServer:
     _lifespan: bool | None
     _additional_envoy_args: list[str] | None
 
+    _admin_address: str | None
     _started: bool
 
     def __init__(
@@ -115,6 +121,7 @@ class PyvoyServer:
 
         self._listener_port_tls = None
         self._started = False
+        self._admin_address = None
 
     async def __aenter__(self) -> PyvoyServer:
         await self.start()
@@ -138,6 +145,8 @@ class PyvoyServer:
         env = {**os.environ, **get_envoy_environ()}
 
         with NamedTemporaryFile("r") as admin_address_file:
+            if sys.platform == "win32":
+                admin_address_file.close()
             args = [
                 "--config-yaml",
                 json.dumps(config),
@@ -150,7 +159,11 @@ class PyvoyServer:
             if self._additional_envoy_args:
                 args.extend(self._additional_envoy_args)
             self._process = await asyncio.create_subprocess_exec(
-                "envoy", *args, stdout=self._stdout, stderr=self._stderr, env=env
+                get_envoy_path(),
+                *args,
+                stdout=self._stdout,
+                stderr=self._stderr,
+                env=env,
             )
             for _ in range(100):
                 if self._process.returncode is not None:
@@ -158,6 +171,7 @@ class PyvoyServer:
                 with contextlib.suppress(Exception):
                     admin_address = Path(admin_address_file.name).read_text()
                     if admin_address:
+                        self._admin_address = admin_address
                         response = await asyncio.to_thread(
                             urllib.request.urlopen,
                             f"http://{admin_address}/listeners?format=json",
@@ -186,7 +200,18 @@ class PyvoyServer:
             return
         self._started = False
         try:
-            self._process.terminate()
+            if sys.platform == "win32":
+                # Easiest way to gracefully shutdown Envoy on Windows is to use admin API
+                if self._admin_address is not None:
+                    req = urllib.request.Request(
+                        f"http://{self._admin_address}/quitquitquit", method="POST"
+                    )
+                    await asyncio.to_thread(urllib.request.urlopen, req)
+                else:
+                    # Shouldn't be running even but send terminate just in case
+                    self._process.terminate()
+            else:
+                self._process.terminate()
             await self._process.wait()
         except ProcessLookupError:
             # Envoy likely crashed, no need to look like multiple errors.
