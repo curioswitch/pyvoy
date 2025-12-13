@@ -75,6 +75,7 @@ class PyvoyServer:
     _lifespan: bool | None
     _additional_envoy_args: list[str] | None
 
+    _admin_address: str | None
     _started: bool
 
     def __init__(
@@ -120,6 +121,7 @@ class PyvoyServer:
 
         self._listener_port_tls = None
         self._started = False
+        self._admin_address = None
 
     async def __aenter__(self) -> PyvoyServer:
         await self.start()
@@ -169,6 +171,7 @@ class PyvoyServer:
                 with contextlib.suppress(Exception):
                     admin_address = Path(admin_address_file.name).read_text()
                     if admin_address:
+                        self._admin_address = admin_address
                         response = await asyncio.to_thread(
                             urllib.request.urlopen,
                             f"http://{admin_address}/listeners?format=json",
@@ -197,7 +200,18 @@ class PyvoyServer:
             return
         self._started = False
         try:
-            self._process.terminate()
+            if sys.platform == "win32":
+                # Easiest way to gracefully shutdown Envoy on Windows is to use admin API
+                if self._admin_address is not None:
+                    req = urllib.request.Request(
+                        f"http://{self._admin_address}/quitquitquit", method="POST"
+                    )
+                    await asyncio.to_thread(urllib.request.urlopen, req)
+                else:
+                    # Shouldn't be running even but send terminate just in case
+                    self._process.terminate()
+            else:
+                self._process.terminate()
             await self._process.wait()
         except ProcessLookupError:
             # Envoy likely crashed, no need to look like multiple errors.
