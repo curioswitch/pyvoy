@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,9 +17,10 @@ func TestHTTP2(t *testing.T) {
 	for _, pyinterface := range []string{"asgi", "wsgi"} {
 		t.Run(pyinterface, func(t *testing.T) {
 			stdoutR, stdoutW := io.Pipe()
-			cmd := exec.Command("pyvoy", fmt.Sprintf("tests.apps.%s.kitchensink", pyinterface), "--port", "0", "--interface", pyinterface)
+			cmd := exec.CommandContext(t.Context(), "pyvoy", fmt.Sprintf("tests.apps.%s.kitchensink", pyinterface), "--port", "0", "--interface", pyinterface)
 			cmd.Stdout = stdoutW
 			cmd.Stderr = stdoutW
+			prepareCmd(cmd)
 
 			stdout := bufio.NewScanner(stdoutR)
 
@@ -30,8 +30,7 @@ func TestHTTP2(t *testing.T) {
 			defer func() {
 				_ = stdoutR.Close()
 				_ = stdoutW.Close()
-				p, _ := process.NewProcessWithContext(t.Context(), int32(cmd.Process.Pid))
-				_ = p.TerminateWithContext(t.Context())
+				_ = interruptProcess(cmd.Process)
 				_ = cmd.Wait()
 			}()
 
