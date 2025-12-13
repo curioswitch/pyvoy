@@ -31,6 +31,7 @@ dependencies = [
     "find-libpython",
     "pyyaml",
     "uvloop; sys_platform != 'win32'",
+    "winloop; sys_platform == 'win32'",
 ]
 
 [dependency-groups]
