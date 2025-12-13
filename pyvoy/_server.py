@@ -14,6 +14,7 @@ from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
 import yaml
+from envoy import get_envoy_path
 
 from ._bin import get_pyvoy_dir_path
 
@@ -143,14 +144,10 @@ class PyvoyServer:
 
         with NamedTemporaryFile("r") as admin_address_file:
             if sys.platform == "win32":
-                # config-yaml doesn't seem to work on Windows
-                config_file = NamedTemporaryFile("w", suffix=".yaml", delete=False)
-                yaml.dump(config, config_file)
-                config_file.close()
-                args = ["--config-path", config_file.name]
-            else:
-                args = ["--config-yaml", json.dumps(config)]
-            args += [
+                admin_address_file.close()
+            args = [
+                "--config-yaml",
+                json.dumps(config),
                 "--admin-address-path",
                 admin_address_file.name,
                 "--use-dynamic-base-id",
@@ -160,7 +157,11 @@ class PyvoyServer:
             if self._additional_envoy_args:
                 args.extend(self._additional_envoy_args)
             self._process = await asyncio.create_subprocess_exec(
-                "envoy", *args, stdout=self._stdout, stderr=self._stderr, env=env
+                get_envoy_path(),
+                *args,
+                stdout=self._stdout,
+                stderr=self._stderr,
+                env=env,
             )
             for _ in range(100):
                 if self._process.returncode is not None:
