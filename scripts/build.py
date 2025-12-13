@@ -11,7 +11,7 @@ bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 def main() -> None:
     print("Building libpyvoy...")  # noqa: T201
     if sys.platform == "win32":
-        pyvoy_path = bin_dir / "libpyvoy.dll"
+        pyvoy_path = bin_dir / "pyvoy.dll"
     else:
         pyvoy_path = bin_dir / "libpyvoy.so"
     pyvoy_path.unlink(missing_ok=True)
@@ -54,9 +54,6 @@ def main() -> None:
 
     with libpyvoy_path.open("rb") as src, pyvoy_path.open("wb") as dst:
         copyfileobj(src, dst)
-    print(pyvoy_path)
-    for root, dirs, files in bin_dir.walk():
-        print(root, dirs, files)
 
 
 if __name__ == "__main__":
