@@ -75,7 +75,7 @@ jobs:
         run: uv run poe lint
 
       - name: run tests
-        run: uv run poe test -k 'test_asgi2_compat'
+        run: uv run poe test
 
       - name: run connect integration tests on push
         # TODO: Enable on free-threaded Python after publishing a wheel for it.
