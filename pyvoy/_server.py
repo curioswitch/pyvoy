@@ -50,6 +50,10 @@ def get_envoy_environ() -> dict[str, str]:
                 env["DYLD_LIBRARY_PATH"] = libpython_dir
             else:
                 env["LD_PRELOAD"] = str(candidates[0])
+    if sys.platform == "win32":
+        libpython = find_libpython.find_python()
+        if libpython is not None:
+            env["PATH"] = f"{libpython.parent};{os.environ.get('PATH', '')}"
 
     return env
 
