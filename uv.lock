@@ -530,7 +530,7 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform == 'win32'",
 ]
 wheels = [
-    { filename = "envoy_server-1.36.3-py3-none-any.whl", hash = "sha256:955fe167a3da13703e43aca3bb78388537d2fc0d529261aa8ddd7e353e04b65e" },
+    { filename = "envoy_server-1.36.3-py3-none-any.whl", hash = "sha256:5c594bfe207865126be5fc299c6e87093cab7352d96d4dbdd6810941395e80ff" },
 ]
 
 [[package]]
