@@ -8,7 +8,6 @@ import (
 )
 
 func prepareCmd(cmd *exec.Cmd) {
-	// No special preparation needed
 }
 
 func interruptProcess(p *os.Process) error {

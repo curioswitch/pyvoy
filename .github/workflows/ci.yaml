@@ -23,27 +23,27 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          #- macos-15
-          #- ubuntu-24.04
+          - macos-15
+          - ubuntu-24.04
           - windows-2025
         python:
-          # - "3.10"
+          - "3.10"
           - "3.14"
         # Test oldest and newest on all OS's, but others only on one
         # to save CI load.
-        # include:
-        #- os: ubuntu-24.04
-        #  python: "3.11"
-        #- os: ubuntu-24.04
-        #  python: "3.12"
-        #- os: ubuntu-24.04
-        #  python: "3.13"
-        #- os: ubuntu-24.04
-        #  python: "3.14t"
-        # Enable coverage on just one job
-        #- os: ubuntu-24.04
-        #  python: "3.14"
-        #  coverage: "cov"
+        include:
+          - os: ubuntu-24.04
+            python: "3.11"
+          - os: ubuntu-24.04
+            python: "3.12"
+          - os: ubuntu-24.04
+            python: "3.13"
+          - os: ubuntu-24.04
+            python: "3.14t"
+          # Enable coverage on just one job
+          - os: ubuntu-24.04
+            python: "3.14"
+            coverage: "cov"
 
     env:
       # Avoid multiple compile e.g. in lint and test by setting as a job env var

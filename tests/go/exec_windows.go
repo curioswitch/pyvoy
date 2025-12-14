@@ -8,6 +8,12 @@ import (
 	"syscall"
 )
 
+// If we terminate the process normally on Windows, the pyvoy CLI will
+// close without closing envoy. We need to send a ctrl event instead
+// so it shuts down in the same way as receiving ctrl+c from the console.
+
+const CTRL_BREAK_EVENT = 1
+
 func prepareCmd(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
@@ -15,7 +21,6 @@ func prepareCmd(cmd *exec.Cmd) {
 }
 
 func interruptProcess(p *os.Process) error {
-	const CTRL_BREAK_EVENT = 1
 	dll, err := syscall.LoadDLL("kernel32.dll")
 	if err != nil {
 		return err
