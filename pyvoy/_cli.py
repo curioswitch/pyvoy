@@ -261,13 +261,15 @@ async def _run_server(server: PyvoyServer) -> None:
             print("Shutting down pyvoy...")  # noqa: T201
             await server.stop()
 
-        asyncio.get_event_loop().add_signal_handler(
-            signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
-        )
+        if sys.platform != "win32":
+            asyncio.get_event_loop().add_signal_handler(
+                signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
+            )
         try:
             await server.wait()
         except asyncio.CancelledError:
-            asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
+            if sys.platform != "win32":
+                asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
             await shutdown()
 
 

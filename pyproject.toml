@@ -26,7 +26,13 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
 ]
 
-dependencies = ["envoy-server==1.36.3", "find-libpython", "pyyaml", "uvloop"]
+dependencies = [
+    "envoy-server==1.36.4",
+    "find-libpython",
+    "pyyaml",
+    "uvloop; sys_platform != 'win32'",
+    "winloop; sys_platform == 'win32'",
+]
 
 [dependency-groups]
 dev = [

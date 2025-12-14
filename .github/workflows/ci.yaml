@@ -25,6 +25,7 @@ jobs:
         os:
           - macos-15
           - ubuntu-24.04
+          - windows-2025
         python:
           - "3.10"
           - "3.14"
@@ -80,7 +81,7 @@ jobs:
         # TODO: Enable on free-threaded Python after publishing a wheel for it.
         # The integration test first installs pyvoy from PyPi before we reinstall from local
         # and it's tricky to avoid that.
-        if: github.event_name == 'push' && matrix.python != '3.14t'
+        if: github.event_name == 'push' && matrix.python != '3.14t' && !startsWith(matrix.os, 'windows-')
         run: uv run poe integration-test-connect
 
       - name: prepare coverage
