@@ -40,7 +40,7 @@ HYPERCORN = AppServer(
     ["hypercorn", "--worker-class", "uvloop"],
     [ASGI_APP],
     ["--workers", "8"],
-    [WSGI_APP],
+    None,
 )
 GRANIAN = AppServer(
     "granian",
