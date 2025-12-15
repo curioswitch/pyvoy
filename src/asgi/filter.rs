@@ -102,7 +102,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.send_bridge.clone(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
         );
-        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
 
     fn on_request_body(
@@ -127,7 +127,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.handle_read(envoy_filter);
 
-        abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::StopIteration
     }
 
     fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
