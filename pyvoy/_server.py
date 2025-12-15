@@ -286,7 +286,7 @@ class PyvoyServer:
                 }
             ]
         else:
-            matchers: list[dict] = []
+            matcher_map = {}
             for mount in self._app:
                 pyvoy_config = {
                     "app": mount.app,
@@ -294,10 +294,34 @@ class PyvoyServer:
                     "root_path": mount.path,
                     **base_pyvoy_config,
                 }
-                matchers.append(
-                    {
-                        "predicate": {
-                            "single_predicate": {
+                matcher_map[mount.path] = {
+                    "action": {
+                        "name": "composite_action",
+                        "typed_config": {
+                            "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
+                            "typed_config": {
+                                "name": "pyvoy",
+                                "typed_config": {
+                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
+                                    "dynamic_module_config": {"name": "pyvoy"},
+                                    "filter_name": "pyvoy",
+                                    "terminal_filter": True,
+                                    "filter_config": {
+                                        "@type": "type.googleapis.com/google.protobuf.StringValue",
+                                        "value": json.dumps(pyvoy_config),
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            http_filters = [
+                {
+                    "name": "envoy.filters.http.composite",
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.common.matching.v3.ExtensionWithMatcher",
+                        "xds_matcher": {
+                            "matcher_tree": {
                                 "input": {
                                     "name": "request-headers",
                                     "typed_config": {
@@ -305,38 +329,9 @@ class PyvoyServer:
                                         "header_name": ":path",
                                     },
                                 },
-                                "value_match": {"prefix": mount.path},
+                                "prefix_match_map": {"map": matcher_map},
                             }
                         },
-                        "on_match": {
-                            "action": {
-                                "name": "composite_action",
-                                "typed_config": {
-                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
-                                    "typed_config": {
-                                        "name": "pyvoy",
-                                        "typed_config": {
-                                            "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
-                                            "dynamic_module_config": {"name": "pyvoy"},
-                                            "filter_name": "pyvoy",
-                                            "terminal_filter": True,
-                                            "filter_config": {
-                                                "@type": "type.googleapis.com/google.protobuf.StringValue",
-                                                "value": json.dumps(pyvoy_config),
-                                            },
-                                        },
-                                    },
-                                },
-                            }
-                        },
-                    }
-                )
-            http_filters = [
-                {
-                    "name": "envoy.filters.http.composite",
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.common.matching.v3.ExtensionWithMatcher",
-                        "xds_matcher": {"matcher_list": {"matchers": matchers}},
                         "extension_config": {
                             "name": "envoy.filters.http.composite",
                             "typed_config": {
