@@ -36,6 +36,10 @@ def setup(name: str, repo: str, revision: str) -> None:
                 dest.write_bytes(zf.read(member))
 
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if sys._is_gil_enabled():  # noqa: SLF001
+        py += "+gil"
+    else:
+        py += "t"
     subprocess.run(
         ["uv", "sync", "--python", py, "--directory", str(dest_path)], check=True
     )
