@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import urllib.request
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -21,6 +20,7 @@ from envoy import get_envoy_path
 from ._bin import get_pyvoy_dir_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from types import TracebackType
 
 Interface = Literal["asgi", "wsgi"]
