@@ -11,7 +11,7 @@ from typing import get_args
 import yaml
 from envoy import get_envoy_path
 
-from ._server import Interface, LogLevel, PyvoyServer, get_envoy_environ
+from ._server import Interface, LogLevel, Mount, PyvoyServer, get_envoy_environ
 from ._watcher import watch
 
 
@@ -29,6 +29,7 @@ class CLIArgs:
     tls_require_client_certificate: bool
     interface: Interface
     root_path: str
+    additional_mount: list[str]
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
@@ -110,6 +111,14 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--additional-mount",
+        help="additional application mounts in the form 'app=path=interface'",
+        type=str,
+        nargs="+",
+        default=[],
+    )
+
+    parser.add_argument(
         "--log-level",
         help="the Envoy log level",
         choices=get_args(LogLevel),
@@ -187,8 +196,24 @@ async def amain() -> None:
 
     args = parser.parse_args(argv, namespace=CLIArgs())
 
+    if args.additional_mount:
+        mounts = [Mount(app=args.app, path=args.root_path, interface=args.interface)]
+        for mount_str in args.additional_mount:
+            try:
+                app, path, interface = mount_str.split("=", 2)
+            except ValueError:
+                print(  # noqa: T201
+                    f"Invalid additional mount format: {mount_str}, expected 'app=path=interface'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            mounts.append(Mount(app=app, path=path, interface=interface))
+        app = mounts
+    else:
+        app = args.app
+
     server = PyvoyServer(
-        args.app,
+        app,
         address=args.address,
         port=args.port,
         stdout=None,

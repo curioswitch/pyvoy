@@ -88,9 +88,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         );
         if end_of_stream {
             self.request_closed = true;
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::ContinueAndDontEndStream
+            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
         } else {
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
         }
     }
 
@@ -116,7 +116,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.process_read(envoy_filter);
 
-        abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::StopIteration
     }
 
     fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
