@@ -256,28 +256,20 @@ class PyvoyServer:
         return not self._started
 
     def get_envoy_config(self) -> dict:
+        base_pyvoy_config = {}
+        if self._worker_threads is not None:
+            base_pyvoy_config["worker_threads"] = self._worker_threads
+        if self._lifespan is not None:
+            base_pyvoy_config["lifespan"] = self._lifespan
+        virtual_host_config = {"name": "local_service", "domains": ["*"]}
         if isinstance(self._app, str):
-            mounts = [
-                Mount(app=self._app, path=self._root_path, interface=self._interface)
-            ]
-        else:
-            mounts = list(self._app)
-
-        filters = []
-        for mount in mounts:
             pyvoy_config: dict[str, str | int | bool] = {
-                "app": mount.app,
-                "interface": mount.interface,
-                "root_path": mount.path,
+                "app": self._app,
+                "interface": self._interface,
+                "root_path": self._root_path,
+                **base_pyvoy_config,
             }
-            if self._worker_threads is not None:
-                pyvoy_config["worker_threads"] = self._worker_threads
-            if self._lifespan is not None:
-                pyvoy_config["lifespan"] = self._lifespan
 
-            enable_http3 = self._tls_enable_http3 and (
-                self._tls_key or self._tls_cert or self._tls_ca_cert
-            )
             http_filters = [
                 {
                     "name": "pyvoy",
@@ -293,25 +285,103 @@ class PyvoyServer:
                     },
                 }
             ]
-            virtual_host_config = {"name": "local_service", "domains": ["*"]}
-            if mount.path:
-                virtual_host_config["routes"] = [{"match": {"prefix": mount.path}}]
-            http_config = {
-                "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
-                "stat_prefix": "ingress_http",
-                "route_config": {"virtual_hosts": [virtual_host_config]},
-                "http_filters": http_filters,
-                "generate_request_id": False,
-            }
-            if enable_http3:
-                http_config["http3_protocol_options"] = {}
-            filters.append(
+        else:
+            matchers: list[dict] = []
+            for mount in self._app:
+                pyvoy_config = {
+                    "app": mount.app,
+                    "interface": mount.interface,
+                    "root_path": mount.path,
+                    **base_pyvoy_config,
+                }
+                matchers.append(
+                    {
+                        "predicate": {
+                            "single_predicate": {
+                                "input": {
+                                    "name": "request-headers",
+                                    "typed_config": {
+                                        "@type": "type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput",
+                                        "header_name": ":path",
+                                    },
+                                },
+                                "value_match": {"prefix": mount.path},
+                            }
+                        },
+                        "on_match": {
+                            "action": {
+                                "name": "composite_action",
+                                "typed_config": {
+                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
+                                    "typed_config": {
+                                        "name": "pyvoy",
+                                        "typed_config": {
+                                            "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
+                                            "dynamic_module_config": {"name": "pyvoy"},
+                                            "filter_name": "pyvoy",
+                                            "terminal_filter": True,
+                                            "filter_config": {
+                                                "@type": "type.googleapis.com/google.protobuf.StringValue",
+                                                "value": json.dumps(pyvoy_config),
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        },
+                    }
+                )
+            http_filters = [
+                {
+                    "name": "envoy.filters.http.composite",
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.common.matching.v3.ExtensionWithMatcher",
+                        "xds_matcher": {"matcher_list": {"matchers": matchers}},
+                        "extension_config": {
+                            "name": "envoy.filters.http.composite",
+                            "typed_config": {
+                                "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.Composite"
+                            },
+                        },
+                    },
+                },
+                {
+                    "name": "envoy.filters.http.router",
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
+                    },
+                },
+            ]
+            virtual_host_config["routes"] = [
+                {
+                    "match": {"prefix": "/"},
+                    "direct_response": {
+                        "status": 404,
+                        "body": {"inline_string": "Not Found"},
+                    },
+                }
+            ]
+        http_config = {
+            "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+            "stat_prefix": "ingress_http",
+            "route_config": {"virtual_hosts": [virtual_host_config]},
+            "http_filters": http_filters,
+            "generate_request_id": False,
+        }
+
+        enable_http3 = self._tls_enable_http3 and (
+            self._tls_key or self._tls_cert or self._tls_ca_cert
+        )
+        if enable_http3:
+            http_config["http3_protocol_options"] = {}
+        filter_chain: dict = {
+            "filters": [
                 {
                     "name": "envoy.filters.network.http_connection_manager",
                     "typed_config": http_config,
                 }
-            )
-        filter_chain: dict = {"filters": filters}
+            ]
+        }
 
         common_tls_context = {}
         tls_filter_chain = None
