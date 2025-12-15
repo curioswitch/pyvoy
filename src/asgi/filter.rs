@@ -102,7 +102,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.send_bridge.clone(),
             SyncScheduler::new(envoy_filter.new_scheduler()),
         );
-        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::Continue
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
 
     fn on_request_body(
