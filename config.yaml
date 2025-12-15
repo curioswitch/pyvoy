@@ -41,7 +41,7 @@ static_resources:
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction
                                     typed_config:
-                                      name: pyvoy-asgi
+                                      name: pyvoy
                                       typed_config:
                                         "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
                                         dynamic_module_config:
@@ -66,7 +66,7 @@ static_resources:
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction
                                     typed_config:
-                                      name: pyvoy-wsgi
+                                      name: pyvoy
                                       typed_config:
                                         "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
                                         dynamic_module_config:
@@ -90,6 +90,6 @@ static_resources:
                           direct_response:
                             status: 404
                             body:
-                              inline_string: "Envoy Not Found"
+                              inline_string: Not Found
                 stat_prefix: ingress_http
       name: listener
