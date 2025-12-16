@@ -51,19 +51,20 @@ jobs:
         run: uv sync --python ${{ matrix.python }} --managed-python
 
       - name: Build wheel
-        run: |
-          uv run python scripts/build.py
-          uv run python scripts/wheel.py
+        run: uv run poe wheel
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: pyvoy-linux-${{ matrix.python }}-${{ matrix.arch }}
           path: dist/*.whl
 
-  build-macos:
+  build-macos-windows:
     runs-on: macos-15
     strategy:
       matrix:
+        os:
+          - macos-15
+          - windows-2025
         python:
           - "3.10"
           - "3.11"
@@ -83,19 +84,17 @@ jobs:
         run: uv sync --python ${{ matrix.python }} --managed-python
 
       - name: Build wheel
-        run: |
-          uv run python scripts/build.py
-          uv run python scripts/wheel.py
+        run: uv run poe wheel
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
-          name: pyvoy-macos-${{ matrix.python }}-arm64
+          name: pyvoy-${{ matrix.os}}-${{ matrix.python }}-arm64
           path: dist/*.whl
 
   publish:
     needs:
       - build-linux
-      - build-macos
+      - build-macos-windows
     runs-on: ubuntu-24.04
     environment: ${{ github.event_name == 'push' && 'prod' || 'dev' }}
     steps:
