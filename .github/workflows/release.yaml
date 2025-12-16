@@ -59,7 +59,7 @@ jobs:
           path: dist/*.whl
 
   build-macos-windows:
-    runs-on: macos-15
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os:
