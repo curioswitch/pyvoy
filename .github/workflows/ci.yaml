@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
 
       - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
@@ -93,5 +93,5 @@ jobs:
           $(rustc --print=target-libdir)/../bin/llvm-profdata merge -sparse default_*.profraw tests/go/default_*.profraw -o tests.profdata
           $(rustc --print=target-libdir)/../bin/llvm-cov export -format=lcov --ignore-filename-regex='/.cargo/registry' --ignore-filename-regex='.cargo/git/checkouts' --ignore-filename-regex='.rustup/toolchains' -instr-profile tests.profdata pyvoy/_bin/libpyvoy.so > tests.lcov
 
-      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+      - uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         if: ${{ matrix.coverage == 'cov' }}
