@@ -84,6 +84,9 @@ jobs:
         if: github.event_name == 'push' && matrix.python != '3.14t' && !startsWith(matrix.os, 'windows-')
         run: uv run poe integration-test-connect
 
+      - name: verify wheel build
+        run: uv run poe wheel
+
       - name: prepare coverage
         if: ${{ matrix.coverage == 'cov' }}
         run: |
@@ -92,27 +95,3 @@ jobs:
 
       - uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         if: ${{ matrix.coverage == 'cov' }}
-
-  publish:
-    runs-on: ubuntu-24.04
-    environment: ${{ github.event_name != 'pull_request' && 'dev' || null }}
-    needs: build
-    steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
-
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
-        with:
-          python-version-file: pyproject.toml
-
-      - name: Setup rust
-        run: rustup update
-
-      - run: uv run poe wheel
-
-      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
-        if: github.event_name != 'pull_request'
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
