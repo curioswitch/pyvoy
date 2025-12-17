@@ -17,6 +17,8 @@ def main() -> None:
     built_wheel = next(dist_dir.glob("*-py3-none-any.whl"))
 
     python_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    if hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled():  # noqa: SLF001
+        python_tag += "t"
 
     match sys.platform:
         case "darwin":
