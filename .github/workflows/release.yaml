@@ -110,4 +110,3 @@ jobs:
         with:
           repository-url: ${{ github.event_name != 'push' && 'https://test.pypi.org/legacy/' || null }}
           skip-existing: ${{ github.event_name != 'push' }}
-          verbose: true
