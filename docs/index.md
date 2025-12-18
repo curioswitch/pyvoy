@@ -27,9 +27,10 @@ to bring you all features of HTTP/2 and 3, with great performance and stability.
 
 ## Limitations
 
-- Platforms limited to those supported by Envoy, which generally means glibc-based Linux on amd64/arm64 or MacOS on arm64
-- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead and use a health
-  endpoint wired to RSS for automatic restarts if needed
+- Platforms limited to those supported by Envoy, which generally means glibc-based Linux on amd64/arm64, MacOS on arm64,
+  and unofficial support for Windows on amd64
+- No support for multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead and
+  use a health endpoint wired to RSS for automatic restarts if needed
 - Certain non-compliant requests like non-ascii query strings are prevented by Envoy itself
 
 ## Quickstart
