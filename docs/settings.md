@@ -15,6 +15,9 @@ pyvoy for even further customization.
 - `--[no-]lifespan` - Whether to require or disable ASGI lifespan support. By default, we try to run the application
   with lifespan and ignore any exception that is raised. If enabled explicitly, an exception will cause the server to
   fail to start. If disabled, lifespan will not be run at all.
+- `--additional-mount` - Can be specified any number of times to mount additional applications in the server. Takes
+  a value in the format `app=path=interface`, with the path being where the application is mounted. For more
+  complicated routing, it is recommended to invoke Envoy [directly](#envoy) wth a full config.
 
 ## Server
 
