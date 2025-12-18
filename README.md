@@ -20,9 +20,10 @@ Python interpreter into a module that can be loaded by a stock Envoy binary.
 
 ## Limitations
 
-- Platforms limited to those supported by Envoy, which generally means glibc-based Linux on amd64/arm64 or MacOS on arm64
-- Multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead and use a health
-  endpoint wired to RSS for automatic restarts if needed
+- Platforms limited to those supported by Envoy, which generally means glibc-based Linux on amd64/arm64, MacOS on arm64
+  and unofficial support for Windows on amd64
+- No support for multiple worker processes. It is recommended to scale up with a higher-level orchestrator instead and
+  use a health endpoint wired to RSS for automatic restarts if needed
 - Certain non-compliant requests are prevented by Envoy itself
   - The full URL path, including query string, must be ASCII percent-encoded
 
