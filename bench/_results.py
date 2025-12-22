@@ -8,11 +8,14 @@ from dataclasses import dataclass
 class ChartKey:
     protocol: str
     interface: str
+    tls_mode: str
     sleep: int
 
     def filename(self, key: str) -> str:
         sleep = "high" if self.sleep == 200 else f"{self.sleep:04d}"
-        return f"{self.interface}_{self.protocol}_{sleep}ms_{key}.png"
+        return (
+            f"{self.interface}_{self.protocol}_{self.tls_mode}_{sleep}ms_{key}.png"
+        )
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,7 @@ class BenchmarkResults:
         self,
         protocol: str,
         interface: str,
+        tls_mode: str,
         app_server: str,
         sleep: int,
         request_size: int,
@@ -46,7 +50,7 @@ class BenchmarkResults:
         avg_cpu: float,
         avg_ram: int,
     ) -> None:
-        key = ChartKey(protocol, interface, min(sleep, 200))
+        key = ChartKey(protocol, interface, tls_mode, min(sleep, 200))
         label, label_value = (
             ("sleep", str(sleep))
             if sleep >= 200
