@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import subprocess
 import sys
@@ -14,6 +13,87 @@ from enum import Enum
 import psutil
 
 from ._results import BenchmarkResults
+
+
+def _format_bytes(value: float) -> str:
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            return f"{size:.2f}{unit}"
+        size /= 1024
+    return f"{size:.2f}TB"
+
+
+def _format_ms(seconds: float) -> str:
+    return f"{float(seconds) * 1000:.2f}ms"
+
+
+def _num(value: object, default: float = 0.0) -> float:
+    return value if isinstance(value, (int, float)) else default
+
+
+def _print_oha_report(oha_json: dict) -> None:
+    summary = oha_json.get("summary", {})
+    rps = oha_json.get("rps", {})
+    latency = oha_json.get("latencyPercentiles", {})
+    status_codes = oha_json.get("statusCodeDistribution", {})
+    errors = oha_json.get("errorDistribution", {})
+
+    total_requests = 0
+    if isinstance(status_codes, dict):
+        total_requests += sum(status_codes.values())
+    if isinstance(errors, dict):
+        total_requests += sum(errors.values())
+
+    success_rate = summary.get("successRate")
+    success_rate_str = (
+        f"{success_rate * 100:.2f}%"
+        if isinstance(success_rate, (int, float))
+        else "n/a"
+    )
+
+    print("Summary")  # noqa: T201
+    print(  # noqa: T201
+        f"  Total requests:\t{total_requests}\n"
+        f"  Success rate:\t\t{success_rate_str}\n"
+        f"  Requests/sec:\t\t{_num(summary.get('requestsPerSec')):.2f}\n"
+    )
+
+    if isinstance(rps, dict):
+        stddev = rps.get("stddev")
+        stddev_str = f"{stddev:.2f}" if isinstance(stddev, (int, float)) else "n/a"
+        print(  # noqa: T201
+            "\nRPS [mean, stddev, max, min]\n"
+            f"  {_num(rps.get('mean')):.2f}, {stddev_str},"
+            f" {_num(rps.get('max')):.2f}, {_num(rps.get('min')):.2f}"
+        )
+
+    if isinstance(latency, dict) and latency:
+        percentile_keys = ("p50", "p75", "p90", "p95", "p99")
+        percentiles = ", ".join(
+            f"{key}={_format_ms(_num(latency.get(key)))}"
+            for key in percentile_keys
+            if key in latency
+        )
+        if percentiles:
+            print(f"\nLatency percentiles\t{percentiles}")  # noqa: T201
+
+    if isinstance(status_codes, dict) and status_codes:
+        codes = ", ".join(
+            f"{code}={count}"
+            for code, count in sorted(
+                status_codes.items(), key=lambda item: int(item[0])
+            )
+        )
+        print(f"\nStatus codes\t\t{codes}")  # noqa: T201
+
+    if isinstance(errors, dict) and errors:
+        error_lines = "\n".join(
+            f"  {error}: {count}" for error, count in errors.items()
+        )
+        print(f"\nErrors\n{error_lines}")  # noqa: T201
 
 
 @dataclass
@@ -254,14 +334,6 @@ def main() -> None:
 
     benchmark_results = BenchmarkResults()
 
-    # Run vegeta once at start to avoid go downloading messages during benchmarks
-    subprocess.run(
-        ["go", "run", "github.com/tsenart/vegeta/v12@v12.12.0", "--version"],  # noqa: S607
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
     for app_server in app_servers(args.server):
         for interface in interfaces(args.interface):
             if not sys._is_gil_enabled() and app_server == GRANIAN:  # noqa: SLF001
@@ -329,71 +401,38 @@ def main() -> None:
                                     f"Running benchmark for {app_server.name} with interface={interface} protocol={protocol.value} sleep={sleep}ms request_size={request_size} response_size={response_size}\n",
                                     flush=True,
                                 )
-                                target = {
-                                    "method": "GET",
-                                    "url": "http://localhost:8000/controlled",
-                                    "header": {
-                                        "X-Sleep-Ms": [str(sleep)],
-                                        "X-Response-Bytes": [str(response_size)],
-                                    },
-                                }
-                                if request_size > 0:
-                                    target["body"] = base64.b64encode(
-                                        b"a" * request_size
-                                    ).decode()
-                                vegeta_args = [
-                                    "go",
-                                    "run",
-                                    "github.com/tsenart/vegeta/v12@v12.12.0",
-                                    "attack",
-                                    "-format=json",
-                                    "-rate=0",
-                                    "-max-workers=30",
-                                    "-duration=5s",
+                                oha_args = [
+                                    "oha",
+                                    "-z",
+                                    "5s",
+                                    "-c",
+                                    "10",
+                                    "--no-tui",
+                                    "--output-format",
+                                    "json",
+                                    "-m",
+                                    "GET",
+                                    "-H",
+                                    f"X-Sleep-Ms: {sleep}",
+                                    "-H",
+                                    f"X-Response-Bytes: {response_size}",
                                 ]
                                 if protocol == Protocol.HTTP2:
-                                    vegeta_args.append("-h2c")
+                                    oha_args.extend(["--http-version", "2"])
+                                if request_size > 0:
+                                    oha_args.extend(["-d", "a" * request_size])
+                                oha_args.append("http://localhost:8000/controlled")
 
                                 monitor.clear()
-                                vegeta = subprocess.Popen(  # noqa: S603
-                                    vegeta_args,
-                                    stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE,
-                                    stderr=sys.stderr,
-                                )
-
-                                vegeta_result, _ = vegeta.communicate(
-                                    f"{json.dumps(target)}\n".encode()
+                                oha_run = subprocess.run(  # noqa: S603
+                                    oha_args, check=True, capture_output=True, text=True
                                 )
 
                                 resource = monitor.aggregate()
 
                                 # Print text report to console
-                                subprocess.run(
-                                    [  # noqa: S607
-                                        "go",
-                                        "run",
-                                        "github.com/tsenart/vegeta/v12@v12.12.0",
-                                        "report",
-                                    ],
-                                    check=True,
-                                    input=vegeta_result,
-                                )
-
-                                # Get JSON report for parsing
-                                json_report = subprocess.run(
-                                    [  # noqa: S607
-                                        "go",
-                                        "run",
-                                        "github.com/tsenart/vegeta/v12@v12.12.0",
-                                        "report",
-                                        "-type=json",
-                                    ],
-                                    check=True,
-                                    input=vegeta_result,
-                                    capture_output=True,
-                                )
-                                vegeta_json = json.loads(json_report.stdout)
+                                oha_json = json.loads(oha_run.stdout)
+                                _print_oha_report(oha_json)
 
                                 benchmark_results.store_result(
                                     protocol.value,
@@ -402,7 +441,7 @@ def main() -> None:
                                     sleep,
                                     request_size,
                                     response_size,
-                                    vegeta_json,
+                                    oha_json,
                                     resource.avg.cpu_percent,
                                     resource.avg.rss,
                                 )
