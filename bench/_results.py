@@ -20,7 +20,7 @@ class ChartValue:
     label: str
     label_value: str
     app_server: str
-    vegeta_result: dict
+    load_result: dict
     avg_cpu: float
     avg_ram: int
 
@@ -42,7 +42,7 @@ class BenchmarkResults:
         sleep: int,
         request_size: int,
         response_size: int,
-        vegeta_result: dict,
+        load_result: dict,
         avg_cpu: float,
         avg_ram: int,
     ) -> None:
@@ -53,6 +53,6 @@ class BenchmarkResults:
             else ("request/response_size", f"{request_size}/{response_size}")
         )
         value = ChartValue(
-            label, label_value, app_server, vegeta_result, avg_cpu, avg_ram
+            label, label_value, app_server, load_result, avg_cpu, avg_ram
         )
         self._results[key].append(value)

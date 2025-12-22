@@ -21,12 +21,12 @@ def _generate_chart(key: ChartKey, values: list[ChartValue]) -> None:
     label = ""
     for value in values:
         label = value.label
-        vegeta = value.vegeta_result
+        oha = value.load_result
         data.append(
             {
                 "app_server": value.app_server,
                 label: f"{value.label_value}{'B' if label == 'request/response_size' else 'ms'}",
-                "throughput": vegeta["throughput"],
+                "throughput": oha["summary"]["requestsPerSec"],
             }
         )
 
