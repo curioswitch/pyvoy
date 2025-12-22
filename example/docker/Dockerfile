@@ -12,9 +12,11 @@ FROM python:3.14-slim-trixie
 COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 
+WORKDIR /pyvoy
+
+RUN pyvoy server:app --address=0.0.0.0 --print-envoy-config > envoy-config.yaml
+RUN pyvoy server:app --address=0.0.0.0 --print-envoy-entrypoint > entrypoint.sh && chmod +x entrypoint.sh
+
 WORKDIR /app
 
-RUN mkdir /pyvoy && pyvoy server:app --address=0.0.0.0 --print-envoy-config > /pyvoy/envoy-config.yaml
-
-ENV ENVOY_DYNAMIC_MODULES_SEARCH_PATH=/app/.venv/lib/python3.14/site-packages/pyvoy/_bin LD_PRELOAD=/usr/local/lib/libpython3.14.so
-CMD ["/app/.venv/lib/python3.14/site-packages/pyvoy/_bin/envoy", "--config-path", "/pyvoy/envoy-config.yaml"]
+CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml"]

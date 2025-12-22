@@ -55,10 +55,6 @@ uv run pyvoy -h
 
 ### Docker
 
-> [!NOTE]
-> This is an initial pattern and we will iterate on it, notably it will be good to remove the python version
-> from the environment variables.
-
 For production deployments to containers, we recommend running Envoy directly without the pyvoy CLI to avoid potential
 issues with subprocess spawning. The pyvoy CLI simply spawns Envoy with an appropriate YAML config and environment
 variables for loading the dynamic module. You can see the example [Dockerfile](./example/docker/) for how to set up

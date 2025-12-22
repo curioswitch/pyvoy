@@ -4,15 +4,25 @@ requires-python = ">=3.14"
 
 [[package]]
 name = "anyio"
-version = "4.11.0"
+version = "4.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "idna" },
-    { name = "sniffio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c6/78/7d432127c41b50bccba979505f272c16cbcadcc33645d5fa3a738110ae75/anyio-4.11.0.tar.gz", hash = "sha256:82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4", size = 219094, upload-time = "2025-09-23T09:19:12.58Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/ce/8a777047513153587e5434fd752e89334ac33e379aa3497db860eeb60377/anyio-4.12.0.tar.gz", hash = "sha256:73c693b567b0c55130c104d0b43a9baf3aa6a31fc6110116509f27bf75e21ec0", size = 228266, upload-time = "2025-11-28T23:37:38.911Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/b3/9b1a8074496371342ec1e796a96f99c82c945a339cd81a8e73de28b4cf9e/anyio-4.11.0-py3-none-any.whl", hash = "sha256:0287e96f4d26d4149305414d4e3bc32f0dcd0862365a4bddea19d7a1ec38c4fc", size = 109097, upload-time = "2025-09-23T09:19:10.601Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/9c/36c5c37947ebfb8c7f22e0eb6e4d188ee2d53aa3880f3f2744fb894f0cb1/anyio-4.12.0-py3-none-any.whl", hash = "sha256:dad2376a628f98eeca4881fc56cd06affd18f659b17a747d3ff0307ced94b1bb", size = 113362, upload-time = "2025-11-28T23:36:57.897Z" },
+]
+
+[[package]]
+name = "envoy-server"
+version = "1.36.4"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/87/7f15cea22d2f41f44306078ccbdf814c63900ac381283820644ce817f698/envoy_server-1.36.4-py3-none-macosx_15_0_arm64.whl", hash = "sha256:c2db4ce7214ac9a32e45127c419f4db30a0ab0039885ba4e111d581e6edff9aa", size = 31980431, upload-time = "2025-12-14T14:27:24.746Z" },
+    { url = "https://files.pythonhosted.org/packages/97/7c/541016a73f4d6329a5af9390b956adfebbf97e0023d3b96eeed2803fcd59/envoy_server-1.36.4-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:05b06a19c4f6499c752f1a5a034a02752f0cdbd0422c3d8eb515237a36e82cd2", size = 27888994, upload-time = "2025-12-14T14:27:27.318Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/e0/875225f5bf2ef9da9de0de1936969205b7d873823d7cdefa4bad2c0e413a/envoy_server-1.36.4-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:86dfc14ae7fad32de3b3ace54fbd400187c3b4fd6731781ff5bc633fa133f3f9", size = 29512446, upload-time = "2025-12-14T14:27:30.462Z" },
+    { url = "https://files.pythonhosted.org/packages/92/48/7e4ccb57cea7c945775147f0f47ffb068f828abafe2d185f435cbd02ea70/envoy_server-1.36.4-py3-none-win_amd64.whl", hash = "sha256:527a5cdcb30760d0f978bff3bb6999e204fcfee439932255d6f84b6d504ab25c", size = 18345267, upload-time = "2025-12-14T14:38:00.486Z" },
 ]
 
 [[package]]
@@ -35,17 +45,24 @@ wheels = [
 
 [[package]]
 name = "pyvoy"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "envoy-server" },
     { name = "find-libpython" },
     { name = "pyyaml" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
+    { name = "winloop", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/66/881bd76fd2991814496ff65ca781cd09fc5280b7465d3d386403a968fc8b/pyvoy-0.1.0-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:4782293b5e6600df0795d677b89df3b1cbc7dc3a25fcd9e953f0882cb21a1ede", size = 32559790, upload-time = "2025-11-14T06:10:29.141Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/c3/5b0766cb5c6154590b2f31ef5f8f5f2e96901e3fdc0444f9fcfe648cd154/pyvoy-0.1.0-cp314-cp314-manylinux_2_31_aarch64.whl", hash = "sha256:4ff21750a094db8e575173252ac3ac8bb6f218d0f2965786a247e7df920e5f61", size = 28517553, upload-time = "2025-11-14T06:10:32.107Z" },
-    { url = "https://files.pythonhosted.org/packages/05/96/6de34a4632df7bef172b9475f2cf54189ce681892ee4170e0c2851102870/pyvoy-0.1.0-cp314-cp314-manylinux_2_31_x86_64.whl", hash = "sha256:af6eb90cb0ccca1ff1d28262d1834b700217fc26df59f094cf3f8ec16d0bdedd", size = 30165730, upload-time = "2025-11-14T06:10:35.146Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/77/4fa07a8c560cb55cfd80a8414828f8cbbf0cae041fca58885ea8c4eb45b2/pyvoy-0.2.0-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:6ce897b68c65a9e512df11ed0d41d49e85dd0e6bf7317229dd38e487ab0f96bb", size = 608259, upload-time = "2025-12-17T04:14:23.28Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/d5/9686cad0b8205e6741da4e6bed3a102fe1ac7514544d62d311f8d40cbbae/pyvoy-0.2.0-cp314-cp314-manylinux_2_31_aarch64.whl", hash = "sha256:e06f74e67152a194e385ca9afd09e1aa9992b73d7476d5b8f522631332b39faf", size = 657946, upload-time = "2025-12-17T04:14:24.755Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/34/b86345c8949ab5975ad8f20697720ad20b0d0730e0d0257acd5cb54616bd/pyvoy-0.2.0-cp314-cp314-manylinux_2_31_x86_64.whl", hash = "sha256:724e3b7ee7b9b12e19d2928818d492a19d394091c28fcb07901bf3e0e60a0e45", size = 678112, upload-time = "2025-12-17T04:14:26.097Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/8d/eba6f0eb9a67cd19787caad699be76cd1db2782edc50517ceb7b30fb16e1/pyvoy-0.2.0-cp314-cp314-win_amd64.whl", hash = "sha256:8d0b7a3ed2d125154c48e41eb841836f3d2a319f16588f3f2bff220e22c68e92", size = 502813, upload-time = "2025-12-17T04:14:27.629Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/8c/fb65edbb853cd9d1363d7fb6f8c1b6e5268d6cd9b536bbae00b47d0e60be/pyvoy-0.2.0-cp314t-cp314t-macosx_15_0_arm64.whl", hash = "sha256:2a7d1272323e5e7d9bfba2e6f612857de742a475f379c785d4f98274c047ac26", size = 603789, upload-time = "2025-12-17T04:14:28.832Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/55/af525ab5f07a81baae412178716a40d509f52e10655086d55b9742d2b260/pyvoy-0.2.0-cp314t-cp314t-manylinux_2_31_aarch64.whl", hash = "sha256:6a5e6d57282f116f2660b78a08724ec46dd04d0963ce6e51f560e9bcd38545d4", size = 656164, upload-time = "2025-12-17T04:14:30.092Z" },
+    { url = "https://files.pythonhosted.org/packages/16/77/2e8cbde5b25b4c6cff4b3c98f1e2d266a14dea6d6c35d9fff01a637637af/pyvoy-0.2.0-cp314t-cp314t-manylinux_2_31_x86_64.whl", hash = "sha256:2b566f039f606ff580b0d679285b1a583210f5e88178afd8fcf3e45f8ebe1948", size = 673419, upload-time = "2025-12-17T04:14:31.338Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/49/5b8f20da5ffb3b1e78cadab5aa99604e0c2fd2571a08805f0d63f74a2519/pyvoy-0.2.0-cp314t-cp314t-win_amd64.whl", hash = "sha256:66dae617d8b81fe1cee62257dc3ea0d12ef79de325f5c716239215611937e636", size = 504595, upload-time = "2025-12-17T04:14:33.048Z" },
 ]
 
 [[package]]
@@ -90,15 +107,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sniffio"
-version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
-]
-
-[[package]]
 name = "starlette"
 version = "0.50.0"
 source = { registry = "https://pypi.org/simple" }
@@ -128,4 +136,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/37/945b4ca0ac27e3dc4952642d4c900edd030b3da6c9634875af6e13ae80e5/uvloop-0.22.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b91328c72635f6f9e0282e4a57da7470c7350ab1c9f48546c0f2866205349d21", size = 4467065, upload-time = "2025-10-16T22:16:58.206Z" },
     { url = "https://files.pythonhosted.org/packages/97/cc/48d232f33d60e2e2e0b42f4e73455b146b76ebe216487e862700457fbf3c/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:daf620c2995d193449393d6c62131b3fbd40a63bf7b307a1527856ace637fe88", size = 4328384, upload-time = "2025-10-16T22:16:59.36Z" },
     { url = "https://files.pythonhosted.org/packages/e4/16/c1fd27e9549f3c4baf1dc9c20c456cd2f822dbf8de9f463824b0c0357e06/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:6cde23eeda1a25c75b2e07d39970f3374105d5eafbaab2a4482be82f272d5a5e", size = 4296730, upload-time = "2025-10-16T22:17:00.744Z" },
+]
+
+[[package]]
+name = "winloop"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/2d/766e561acbc9c86cb868fcf1fef469647dea5a9f3cdbdc837afc2bd30346/winloop-0.4.1.tar.gz", hash = "sha256:fcfae3c81d1277fb4e61dcb0c746223d9f1d0e4ee2d2e63211023f82e9c01158", size = 2601321, upload-time = "2025-12-20T05:04:56.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/0a/700a5151a5bcda3153cbaf7a5d68851ce40b1d33172868a1ae59fbb98e01/winloop-0.4.1-cp314-cp314-win32.whl", hash = "sha256:513134af86b9148d640f45501ffda971852d0de8a21f6395abfb505d59f45e7c", size = 564058, upload-time = "2025-12-20T05:04:43.159Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/80/6d08888f4dd56b34ee03f10836d8c23965c58489806a6e1572ace242f4a3/winloop-0.4.1-cp314-cp314-win_amd64.whl", hash = "sha256:3d3d432a7a73ea738bcf833af050ab7883bbc81c654b7723283b109200c4c077", size = 684108, upload-time = "2025-12-20T05:04:44.968Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/da/f870fdb1e4c539af9bd7ef8b8163de3d303c83da3752ba16f1f15a8ea8f6/winloop-0.4.1-cp314-cp314-win_arm64.whl", hash = "sha256:5f878e87925bb7d95641a5ad92e7348d792b2adcfe25f0ca90d684b2fefa1073", size = 570637, upload-time = "2025-12-20T05:04:46.508Z" },
+    { url = "https://files.pythonhosted.org/packages/14/1c/c2ea5cce137457f4ca13fcb0d88192b8c1b83e7dac6bb971e32e26ebcb5e/winloop-0.4.1-cp314-cp314t-win32.whl", hash = "sha256:77531731bb136e6e877521446bdf1656f7061d68971ad00d289469618240c748", size = 673191, upload-time = "2025-12-20T05:04:47.573Z" },
+    { url = "https://files.pythonhosted.org/packages/28/21/8803e10ce7f4a89a151fb0fd60810573b49d77915a6229f7d12ebccde654/winloop-0.4.1-cp314-cp314t-win_amd64.whl", hash = "sha256:1875fa951363e5ec34523e55a91b8451d532796e1ce0820ef1210cd8bbd922b7", size = 836929, upload-time = "2025-12-20T05:04:48.804Z" },
+    { url = "https://files.pythonhosted.org/packages/18/7f/ebc0bf04271491d5e81c3545b389fcd434202892d6803df5dd3d09850116/winloop-0.4.1-cp314-cp314t-win_arm64.whl", hash = "sha256:1dc71350a4f380bfa8fec2253d7d1f222826423ed13614577e7d5725edeff590", size = 601172, upload-time = "2025-12-20T05:04:50.46Z" },
 ]
