@@ -40,7 +40,7 @@ def _generate_chart(key: ChartKey, values: list[ChartValue]) -> None:
     ax.set_xlabel(label.replace("_", " ").title(), fontsize=12)
     ax.set_ylabel("throughput (req/s)", fontsize=12)
     ax.set_title(
-        f"{key.interface}+{key.protocol} throughput {f'(sleep: {key.sleep}ms)' if label == 'request/response_size' else '(response size: 10KB)'}",
+        f"{key.interface}+{key.protocol}+{key.tls_mode} throughput {f'(sleep: {key.sleep}ms)' if label == 'request/response_size' else '(response size: 10KB)'}",
         fontsize=14,
         fontweight="bold",
     )
