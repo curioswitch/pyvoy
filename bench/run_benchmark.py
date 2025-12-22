@@ -19,17 +19,6 @@ import trustme
 from ._results import BenchmarkResults
 
 
-def _format_bytes(value: float) -> str:
-    size = float(value)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            if unit == "B":
-                return f"{int(size)}{unit}"
-            return f"{size:.2f}{unit}"
-        size /= 1024
-    return f"{size:.2f}TB"
-
-
 def _format_ms(seconds: float) -> str:
     return f"{float(seconds) * 1000:.2f}ms"
 
