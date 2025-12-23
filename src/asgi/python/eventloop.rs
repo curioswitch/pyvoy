@@ -118,6 +118,11 @@ impl EventLoops {
     }
 }
 
+/// Timeout for joining event loop threads during shutdown, in seconds.
+/// Recent Python includes asyncio.constants.THREAD_JOIN_TIMEOUT set
+/// to this value but not older ones so we avoid reading it.
+const THREAD_JOIN_TIMEOUT: usize = 300;
+
 struct EventLoop {
     loop_: Py<PyAny>,
     handle: Mutex<Option<JoinHandle<()>>>,
@@ -151,11 +156,8 @@ impl EventLoop {
                 loop_.call_method0("run_forever")?;
                 let shutdown_asyncgens_coro = loop_.call_method0("shutdown_asyncgens")?;
                 loop_.call_method1("run_until_complete", (shutdown_asyncgens_coro,))?;
-                let thread_join_timeout = py
-                    .import("asyncio.constants")?
-                    .getattr("THREAD_JOIN_TIMEOUT")?;
                 let shutdown_default_executor_coro =
-                    loop_.call_method1("shutdown_default_executor", (thread_join_timeout,))?;
+                    loop_.call_method1("shutdown_default_executor", (THREAD_JOIN_TIMEOUT,))?;
                 loop_.call_method1("run_until_complete", (shutdown_default_executor_coro,))?;
                 loop_.call_method0("close")?;
                 Ok(())
