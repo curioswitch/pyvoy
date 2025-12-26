@@ -1613,6 +1613,8 @@ dev = [
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
     { name = "wheel" },
+]
+docs = [
     { name = "zensical" },
 ]
 
@@ -1645,8 +1647,8 @@ dev = [
     { name = "uvicorn", extras = ["standard"] },
     { name = "watchfiles" },
     { name = "wheel" },
-    { name = "zensical" },
 ]
+docs = [{ name = "zensical" }]
 
 [[package]]
 name = "pyyaml"
