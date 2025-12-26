@@ -54,8 +54,9 @@ dev = [
     "uvicorn[standard]",
     "watchfiles",
     "wheel",
-    "zensical",
 ]
+
+docs = ["zensical"]
 
 [project.urls]
 Homepage = "https://github.com/curioswitch/pyvoy"
