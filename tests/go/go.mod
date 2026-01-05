@@ -3,7 +3,7 @@ module pyvoy-tests
 go 1.25.1
 
 require (
-	github.com/shirou/gopsutil/v4 v4.25.11
+	github.com/shirou/gopsutil/v4 v4.25.12
 	github.com/stretchr/testify v1.11.1
 )
 
