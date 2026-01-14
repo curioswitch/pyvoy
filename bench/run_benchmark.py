@@ -240,7 +240,7 @@ class TlsAssets:
 
 def create_tls_assets(tmp_dir: Path) -> TlsAssets:
     ca = trustme.CA()
-    server = ca.issue_cert("localhost")
+    server = ca.issue_cert("127.0.0.1")
     ca_path = tmp_dir / "ca.pem"
     cert_path = tmp_dir / "server.pem"
     key_path = tmp_dir / "server.key"
@@ -418,7 +418,7 @@ def main() -> None:
                     # Wait for server to start
                     started = False
                     scheme = "https" if use_tls else "http"
-                    url = f"{scheme}://localhost:8000/controlled"
+                    url = f"{scheme}://127.0.0.1:8000/controlled"
                     for _ in range(100):
                         try:
                             context = tls_assets.ssl_context if use_tls else None
