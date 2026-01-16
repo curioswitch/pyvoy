@@ -1,16 +1,17 @@
+use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue};
 use pyo3::{exceptions::PyRuntimeError, prelude::*, types::PyTuple};
 
 use super::types::*;
+use crate::eventbridge::EventBridge;
 use crate::types::*;
-use crate::{envoy::SyncScheduler, eventbridge::EventBridge};
 use std::sync::{Arc, Mutex};
 
 struct ResponseSenderInner {
     /// The event bridge to send response events.
     response_bridge: EventBridge<ResponseEvent>,
     /// The scheduler to wake up the filter to process response events.
-    scheduler: Arc<SyncScheduler>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
 
     /// The start event created in start_response if not sent yet.
     start_event: Option<ResponseStartEvent>,
@@ -46,7 +47,7 @@ impl ResponseSender {
     /// Creates a new [`ResponseSender`].
     pub(crate) fn new(
         response_bridge: EventBridge<ResponseEvent>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
         constants: Arc<Constants>,
     ) -> Self {
         Self {

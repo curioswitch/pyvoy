@@ -53,7 +53,7 @@ impl Drop for Config {
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
-    fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
+    fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
@@ -100,7 +100,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.response_closed.clone(),
             self.recv_bridge.clone(),
             self.send_bridge.clone(),
-            SyncScheduler::new(envoy_filter.new_scheduler()),
+            Box::from(envoy_filter.new_scheduler()),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
@@ -199,6 +199,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             ("connection", b"close"),
                         ],
                         Some(b"Internal Server Error"),
+                        None,
                     );
                 }
             }

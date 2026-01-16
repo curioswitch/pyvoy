@@ -1,6 +1,4 @@
-use envoy_proxy_dynamic_modules_rust_sdk::{
-    EnvoyHttpFilter, EnvoyHttpFilterScheduler, EnvoyMutBuffer,
-};
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyMutBuffer};
 use http::{HeaderName, HeaderValue, uri};
 
 pub(crate) struct HeadersInfo {
@@ -166,24 +164,3 @@ pub(crate) fn extend_from_buffers(
     }
     read
 }
-
-/// A Sync wrapper around EnvoyHttpFilterScheduler.
-///
-/// TODO: Remove after https://github.com/envoyproxy/envoy/commit/c561059a04f496eda1e664a8d45bf9b64deef100 is released.
-pub(crate) struct SyncScheduler(Box<dyn EnvoyHttpFilterScheduler>);
-
-impl SyncScheduler {
-    pub fn new(scheduler: Box<dyn EnvoyHttpFilterScheduler>) -> Self {
-        Self(scheduler)
-    }
-}
-
-impl std::ops::Deref for SyncScheduler {
-    type Target = Box<dyn EnvoyHttpFilterScheduler>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-unsafe impl Sync for SyncScheduler {}

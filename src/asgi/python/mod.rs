@@ -8,11 +8,11 @@ use crate::{
         awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
         eventloop::EventLoops,
     },
-    envoy::SyncScheduler,
     eventbridge::EventBridge,
     headernames::HeaderNameExt as _,
     types::{ClientDisconnectedError, Constants, PyDictExt as _, Scope, SyncReceiver},
 };
+use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     IntoPyObjectExt,
@@ -164,7 +164,7 @@ impl Executor {
         response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
-        scheduler: SyncScheduler,
+        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         self.tx
             .send(Event::ExecuteApp(ExecuteAppEvent {
@@ -494,7 +494,7 @@ struct ExecuteAppEvent {
     response_closed: Arc<AtomicBool>,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: SyncScheduler,
+    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
 enum Event {
@@ -514,7 +514,7 @@ enum Event {
 #[pyclass(module = "_pyvoy.asgi")]
 struct RecvCallable {
     recv_bridge: EventBridge<RecvFuture>,
-    scheduler: Arc<SyncScheduler>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
     executor: Executor,
     constants: Arc<Constants>,
@@ -570,7 +570,7 @@ impl EmptyRecvCallable {
 #[pyclass(module = "_pyvoy.asgi")]
 struct AppFutureHandler {
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<SyncScheduler>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     constants: Arc<Constants>,
 }
 
@@ -608,7 +608,7 @@ struct SendCallable {
     trailers_accepted: bool,
     closed: bool,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<SyncScheduler>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
     executor: Executor,
     constants: Arc<Constants>,
