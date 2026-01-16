@@ -20,8 +20,9 @@ from ._util import assert_logs_contains, find_logs_lines
 @pytest_asyncio.fixture(scope="module")
 async def server_asgi() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
-        "tests.apps.asgi.kitchensink", stderr=subprocess.STDOUT, stdout=subprocess.PIPE
+        "tests.apps.asgi.kitchensink", stderr=None, stdout=None
     ) as server:
+        assert not server.stopped
         yield server
 
 
