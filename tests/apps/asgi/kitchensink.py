@@ -243,6 +243,30 @@ async def _large_bodies(recv: ASGIReceiveCallable, send: ASGISendCallable) -> No
         )
 
 
+async def _generate_large_body(
+    recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+
+    for _ in range(10):
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"A" * 1024 * 1024,
+                "more_body": True,
+            }
+        )
+
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
 async def _trailers_only(send: ASGISendCallable) -> None:
     await send(
         {
