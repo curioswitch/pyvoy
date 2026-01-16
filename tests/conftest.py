@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import pytest_asyncio
 from pyqwest import Client, HTTPTransport, HTTPVersion
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @pytest_asyncio.fixture

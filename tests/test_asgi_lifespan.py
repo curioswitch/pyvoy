@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
-from pyqwest import Client
 
 from pyvoy import PyvoyServer
+
+if TYPE_CHECKING:
+    from pyqwest import Client
 
 
 async def _read_logs(stream: asyncio.StreamReader, logs: list[str]):

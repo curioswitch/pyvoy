@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
-from pyqwest import Client
 
 from pyvoy import PyvoyServer
+
+if TYPE_CHECKING:
+    from pyqwest import Client
 
 
 @pytest.mark.asyncio
