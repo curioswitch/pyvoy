@@ -11,7 +11,7 @@ from pyvoy import Interface, Mount, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    import httpx
+    from pyqwest import Client
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -52,8 +52,8 @@ def url(interface: Interface, url_asgi: str, url_wsgi: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_controlled(url: str, client: httpx.AsyncClient) -> None:
+async def test_controlled(url: str, client: Client) -> None:
     response = await client.get(f"{url}/controlled")
-    assert response.status_code == 200, response.text
+    assert response.status == 200, response.text()
     assert response.headers["content-type"] == "text/plain"
-    assert response.text == ""
+    assert response.text() == ""

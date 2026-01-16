@@ -13,9 +13,7 @@ class ChartKey:
 
     def filename(self, key: str) -> str:
         sleep = "high" if self.sleep == 200 else f"{self.sleep:04d}"
-        return (
-            f"{self.interface}_{self.protocol}_{self.tls_mode}_{sleep}ms_{key}.png"
-        )
+        return f"{self.interface}_{self.protocol}_{self.tls_mode}_{sleep}ms_{key}.png"
 
 
 @dataclass(frozen=True)
