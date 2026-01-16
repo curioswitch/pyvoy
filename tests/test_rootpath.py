@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from asyncio import StreamReader
     from collections.abc import AsyncIterator
 
-    import httpx
+    from pyqwest import Client
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -57,9 +57,9 @@ def logs_wsgi(server_wsgi: PyvoyServer) -> StreamReader:
 
 
 @pytest.mark.asyncio
-async def test_asgi_root_path(url_asgi: str, client: httpx.AsyncClient) -> None:
+async def test_asgi_root_path(url_asgi: str, client: Client) -> None:
     response = await client.get(f"{url_asgi}/root/echo-scope")
-    assert response.status_code == 200, response.text
+    assert response.status == 200, response.text()
     assert response.headers["x-scope-root-path"] == "/root"
     assert response.headers["x-scope-path"] == "/root/echo-scope"
 
@@ -67,29 +67,27 @@ async def test_asgi_root_path(url_asgi: str, client: httpx.AsyncClient) -> None:
 # ASGI servers don't really validate or process root_path, it's just a hint to the app
 # or middleware.
 @pytest.mark.asyncio
-async def test_asgi_root_path_not_match(
-    url_asgi: str, client: httpx.AsyncClient
-) -> None:
+async def test_asgi_root_path_not_match(url_asgi: str, client: Client) -> None:
     response = await client.get(f"{url_asgi}/echo-scope")
-    assert response.status_code == 200, response.text
+    assert response.status == 200, response.text()
     assert response.headers["x-scope-root-path"] == "/root"
     assert response.headers["x-scope-path"] == "/echo-scope"
 
 
 @pytest.mark.asyncio
-async def test_wsgi_root_path(url_wsgi: str, client: httpx.AsyncClient) -> None:
+async def test_wsgi_root_path(url_wsgi: str, client: Client) -> None:
     response = await client.get(f"{url_wsgi}/root/echo-scope")
-    assert response.status_code == 200, response.text
+    assert response.status == 200, response.text()
     assert response.headers["x-scope-root-path"] == "/root"
     assert response.headers["x-scope-path"] == "/echo-scope"
 
 
 @pytest.mark.asyncio
 async def test_wsgi_root_path_not_match(
-    url_wsgi: str, client: httpx.AsyncClient, logs_wsgi: StreamReader
+    url_wsgi: str, client: Client, logs_wsgi: StreamReader
 ) -> None:
     response = await client.get(f"{url_wsgi}/echo-scope")
-    assert response.status_code == 500, response.text
+    assert response.status == 500, response.text()
     await assert_logs_contains(
         logs_wsgi, ["Request path '/echo-scope' does not start with root path '/root'"]
     )

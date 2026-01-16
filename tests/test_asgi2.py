@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-import httpx
+from typing import TYPE_CHECKING
+
 import pytest
 
 from pyvoy import PyvoyServer
+
+if TYPE_CHECKING:
+    from pyqwest import Client
 
 
 @pytest.mark.asyncio
@@ -18,12 +22,11 @@ from pyvoy import PyvoyServer
         "asgi3_callable",
     ],
 )
-async def test_asgi2_compat(app: str):
-    async with (
-        PyvoyServer(f"tests.apps.asgi.asgi2:{app}", stdout=None, stderr=None) as server,
-        httpx.AsyncClient() as client,
-    ):
+async def test_asgi2_compat(app: str, client: Client):
+    async with PyvoyServer(
+        f"tests.apps.asgi.asgi2:{app}", stdout=None, stderr=None
+    ) as server:
         url = f"http://{server.listener_address}:{server.listener_port}"
         response = await client.get(url)
-        assert response.status_code == 200
-        assert response.text == "Ok"
+        assert response.status == 200
+        assert response.text() == "Ok"

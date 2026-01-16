@@ -39,10 +39,10 @@ dev = [
     "asgiref",
     "granian",
     "gunicorn",
-    "httpx",
     "hypercorn",
     "poethepoet",
     "psutil",
+    "pyqwest",
     "pyright[nodejs]",
     "pytest",
     "pytest-asyncio",
@@ -110,7 +110,7 @@ extend-select = [
     "RET",
     # This rule is a bit strict since accessing private members within this package can be
     # useful to reduce public API exposure. But it is important to not access private members
-    # of dependencies like httpx so we enable it and ignore the locations where we need to.
+    # of dependencies like pyqwest so we enable it and ignore the locations where we need to.
     "SLF",
     "SIM",
     "SLOT",
