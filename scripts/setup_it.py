@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
-import httpx
+from pyqwest import SyncClient
 
 
 def setup(name: str, repo: str, revision: str) -> None:
@@ -22,8 +22,10 @@ def setup(name: str, repo: str, revision: str) -> None:
 
     url = f"https://github.com/{repo}/archive/{revision}.zip"
 
-    response = httpx.get(url, follow_redirects=True)
-    response.raise_for_status()
+    response = SyncClient().get(url)
+    if response.status != 200:
+        msg = f"Failed to download {url}: {response.status} {response.text()}"
+        raise RuntimeError(msg)
 
     with ZipFile(BytesIO(response.content)) as zf:
         for member in zf.infolist():

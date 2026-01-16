@@ -13,7 +13,7 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    import httpx
+    from pyqwest import Client
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -64,7 +64,7 @@ def url(interface: Interface, url_asgi: str, url_wsgi: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_many_requests(url: str, client: httpx.AsyncClient) -> None:
+async def test_many_requests(url: str, client: Client) -> None:
     if not sys.version_info >= (3, 11):
         pytest.skip(
             "asyncio.TaskGroup requires Python 3.11+ and it's not important enough to make this test work on 3.10"
@@ -75,7 +75,7 @@ async def test_many_requests(url: str, client: httpx.AsyncClient) -> None:
             f"{url}/headers-only",
             headers=(("Accept", "text/plain"), ("Multiple", "v1"), ("Multiple", "v2")),
         )
-        assert response.status_code == 200, response.text
+        assert response.status == 200, response.text()
         assert response.headers["x-animal"] == "bear"
         assert response.headers["content-type"] == "text/plain"
         assert response.content == b""
