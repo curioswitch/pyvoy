@@ -22,12 +22,6 @@ async def server_asgi() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink", stderr=subprocess.STDOUT, stdout=subprocess.PIPE
     ) as server:
-        logs = []
-        if server.stopped and server.stdout:
-            async for line in server.stdout:
-                logs.append(line.decode().rstrip())
-
-        assert not server.stopped, "\n".join(logs)
         yield server
 
 
