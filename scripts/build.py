@@ -25,9 +25,9 @@ def main() -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
         pyversion_file.write_text(sys.version)
 
-    subprocess.run(["cargo", "build", "--release"], check=True)
+    subprocess.run(["cargo", "build"], check=True)
 
-    release_dir = target_dir / "release"
+    release_dir = target_dir / "debug"
     if sys.platform == "darwin":
         libpyvoy_path = release_dir / "libpyvoy.dylib"
         proc = subprocess.run(
