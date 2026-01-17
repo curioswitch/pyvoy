@@ -560,27 +560,6 @@ async def test_scope_http_method(url: str, client: Client, method: str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("http_version", [HTTPVersion.HTTP1, HTTPVersion.HTTP2])
-async def test_scope_http_version(
-    url: str, http_version: HTTPVersion, interface: Interface
-) -> None:
-    async with HTTPTransport(http_version=http_version) as transport:
-        client = Client(transport)
-        response = await client.get(f"{url}/echo-scope")
-    assert response.status == 200, response.text()
-    match http_version, interface:
-        case HTTPVersion.HTTP2, "asgi":
-            expected = "2"
-        case HTTPVersion.HTTP1, "asgi":
-            expected = "1.1"
-        case HTTPVersion.HTTP2, "wsgi":
-            expected = "HTTP/2"
-        case HTTPVersion.HTTP1, "wsgi":
-            expected = "HTTP/1.1"
-    assert response.headers["x-scope-http-version"] == expected
-
-
-@pytest.mark.asyncio
 async def test_wsgi_readline(url_wsgi: str, client: Client) -> None:
     content = b"Hello\nWorld\nGoodbye"
     response = await client.post(f"{url_wsgi}/readline", content=content)

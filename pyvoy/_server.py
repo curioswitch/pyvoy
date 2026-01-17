@@ -77,6 +77,7 @@ class PyvoyServer:
     _listener_address: str
     _listener_port: int
     _listener_port_tls: int | None
+    _listener_port_quic: int | None
     _stdout: int | IO[bytes] | None
     _stderr: int | IO[bytes] | None
     _print_startup_logs: bool
@@ -134,6 +135,7 @@ class PyvoyServer:
         self._additional_envoy_args = additional_envoy_args
 
         self._listener_port_tls = None
+        self._listener_port_quic = None
         self._started = False
         self._admin_address = None
 
@@ -201,6 +203,13 @@ class PyvoyServer:
                                 "local_address"
                             ]["socket_address"]
                             self._listener_port_tls = socket_address_tls["port_value"]
+                            if self._tls_enable_http3:
+                                socket_address_quic = response_data[
+                                    "listener_statuses"
+                                ][2]["local_address"]["socket_address"]
+                                self._listener_port_quic = socket_address_quic[
+                                    "port_value"
+                                ]
                         break
                 await asyncio.sleep(0.1)
 
@@ -242,6 +251,10 @@ class PyvoyServer:
     @property
     def listener_port_tls(self) -> int | None:
         return self._listener_port_tls
+
+    @property
+    def listener_port_quic(self) -> int | None:
+        return self._listener_port_quic
 
     @property
     def stdout(self) -> asyncio.StreamReader | None:
