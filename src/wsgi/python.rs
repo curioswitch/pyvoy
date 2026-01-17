@@ -1,5 +1,5 @@
 use encoding_rs::mem::decode_latin1;
-use envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error;
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilterScheduler, envoy_log_error};
 use http::{HeaderName, HeaderValue, StatusCode, header};
 use pyo3::{
     IntoPyObjectExt,
@@ -10,7 +10,7 @@ use pyo3::{
 };
 
 use super::types::*;
-use crate::{envoy::SyncScheduler, eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
+use crate::{eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
 use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
 use std::thread::JoinHandle;
 use std::{
@@ -25,7 +25,7 @@ struct ExecuteAppEvent {
     request_body_rx: Receiver<RequestBody>,
     response_bridge: EventBridge<ResponseEvent>,
     response_written_rx: Receiver<()>,
-    scheduler: SyncScheduler,
+    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
 #[derive(Clone)]
@@ -114,7 +114,7 @@ impl Executor {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        scheduler: SyncScheduler,
+        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         // The channel would only be closed during shutdown, when there
         // are no requests being handled, so we unwrap here.
@@ -153,7 +153,7 @@ impl ExecutorInner {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        scheduler: Arc<SyncScheduler>,
+        scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     ) -> PyResult<()> {
         let response_written_rx = SyncReceiver::new(response_written_rx);
 
@@ -418,7 +418,7 @@ struct RequestInput {
     /// The channel receiver to receive body chunks.
     request_body_rx: SyncReceiver<RequestBody>,
     /// The scheduler to wake up the filter to process read events.
-    scheduler: Arc<SyncScheduler>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     /// Whether the request body is closed.
     closed: bool,
     /// Memoized constants.

@@ -5,10 +5,10 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import httpx
 import pytest
 import pytest_asyncio
 import trustme
+from pyqwest import Client, HTTPTransport
 
 from pyvoy import Interface, PyvoyServer
 
@@ -84,16 +84,16 @@ async def url_wsgi(server_wsgi: PyvoyServer) -> AsyncIterator[str]:
 
 
 @pytest_asyncio.fixture
-async def client(certs: Certs) -> AsyncIterator[httpx.AsyncClient]:
+async def client(certs: Certs) -> AsyncIterator[Client]:
     ssl_ctx = ssl.create_default_context()
     ssl_ctx.load_verify_locations(cadata=certs.ca.decode())
-    async with httpx.AsyncClient(verify=ssl_ctx) as client:
-        yield client
+    async with HTTPTransport(tls_ca_cert=certs.ca) as transport:
+        yield Client(transport)
 
 
 @pytest.mark.asyncio
-async def test_scope_content(url: str, client: httpx.AsyncClient) -> None:
+async def test_scope_content(url: str, client: Client) -> None:
     response = await client.get(f"{url}/echo-scope")
-    assert response.status_code == 200, response.text
+    assert response.status == 200, response.text()
     assert response.headers.get("x-scope-tls-version") == str(0x0304)
     assert response.headers.get("x-scope-tls-client-cert-name") == ""

@@ -1,4 +1,4 @@
-use crate::envoy::{SyncScheduler, buffers_len, extend_from_buffers, has_request_body};
+use crate::envoy::{buffers_len, extend_from_buffers, has_request_body};
 use crate::eventbridge::EventBridge;
 use crate::wsgi::python::Executor;
 use envoy_proxy_dynamic_modules_rust_sdk::*;
@@ -32,7 +32,7 @@ impl Drop for Config {
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
-    fn new_http_filter(&mut self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
+    fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         let (request_body_tx, request_body_rx) = mpsc::channel::<RequestBody>();
         let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
         Box::new(Filter {
@@ -84,7 +84,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.request_body_rx.take().unwrap(),
             self.response_bridge.clone(),
             self.response_written_rx.take().unwrap(),
-            SyncScheduler::new(envoy_filter.new_scheduler()),
+            Box::from(envoy_filter.new_scheduler()),
         );
         if end_of_stream {
             self.request_closed = true;
@@ -187,6 +187,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                             ("connection", b"close"),
                         ],
                         Some(b"Internal Server Error"),
+                        None,
                     );
                 }
             }
