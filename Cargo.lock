@@ -32,7 +32,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "bindgen"
 version = "0.72.0"
-source = "git+https://github.com/rust-lang/rust-bindgen.git?rev=74a5f30c14769891e12de53ba275233ef2616819#74a5f30c14769891e12de53ba275233ef2616819"
+source = "git+https://github.com/rust-lang/rust-bindgen.git?rev=ccd563767ab1509f7c0eb68c6effc79eaf3684a9#ccd563767ab1509f7c0eb68c6effc79eaf3684a9"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -125,7 +125,7 @@ dependencies = [
 [[package]]
 name = "envoy-proxy-dynamic-modules-rust-sdk"
 version = "0.1.0"
-source = "git+https://github.com/anuraaga/envoy?rev=df56cc6714ae58f563a632620d42b9d5cf403bdc#df56cc6714ae58f563a632620d42b9d5cf403bdc"
+source = "git+https://github.com/anuraaga/envoy?rev=c900e5fc89b30d7999cbb4079f1b1e191dec53b8#c900e5fc89b30d7999cbb4079f1b1e191dec53b8"
 dependencies = [
  "bindgen",
  "mockall",
