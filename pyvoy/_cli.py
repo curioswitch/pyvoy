@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
@@ -219,9 +220,9 @@ async def amain() -> None:
         stdout=None,
         stderr=None,
         tls_port=args.tls_port,
-        tls_key=Path(args.tls_key) if args.tls_key else None,
-        tls_cert=Path(args.tls_cert) if args.tls_cert else None,
-        tls_ca_cert=Path(args.tls_ca_cert) if args.tls_ca_cert else None,
+        tls_key=_cert_path_or_content(args.tls_key),
+        tls_cert=_cert_path_or_content(args.tls_cert),
+        tls_ca_cert=_cert_path_or_content(args.tls_ca_cert),
         tls_enable_http3=not args.tls_disable_http3,
         tls_require_client_certificate=args.tls_require_client_certificate,
         interface=args.interface,
@@ -296,6 +297,16 @@ async def _run_server(server: PyvoyServer) -> None:
             if sys.platform != "win32":
                 asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
             await shutdown()
+
+
+def _cert_path_or_content(path_or_content: str | None) -> Path | bytes | None:
+    if path_or_content is None:
+        return None
+    with contextlib.suppress(Exception):
+        p = Path(path_or_content)
+        if p.exists():
+            return p
+    return path_or_content.encode()
 
 
 def main() -> None:
