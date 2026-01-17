@@ -496,13 +496,13 @@ wheels = [
 
 [[package]]
 name = "envoy-server"
-version = "1.36.4"
+version = "1.37.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/87/7f15cea22d2f41f44306078ccbdf814c63900ac381283820644ce817f698/envoy_server-1.36.4-py3-none-macosx_15_0_arm64.whl", hash = "sha256:c2db4ce7214ac9a32e45127c419f4db30a0ab0039885ba4e111d581e6edff9aa", size = 31980431, upload-time = "2025-12-14T14:27:24.746Z" },
-    { url = "https://files.pythonhosted.org/packages/97/7c/541016a73f4d6329a5af9390b956adfebbf97e0023d3b96eeed2803fcd59/envoy_server-1.36.4-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:05b06a19c4f6499c752f1a5a034a02752f0cdbd0422c3d8eb515237a36e82cd2", size = 27888994, upload-time = "2025-12-14T14:27:27.318Z" },
-    { url = "https://files.pythonhosted.org/packages/b3/e0/875225f5bf2ef9da9de0de1936969205b7d873823d7cdefa4bad2c0e413a/envoy_server-1.36.4-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:86dfc14ae7fad32de3b3ace54fbd400187c3b4fd6731781ff5bc633fa133f3f9", size = 29512446, upload-time = "2025-12-14T14:27:30.462Z" },
-    { url = "https://files.pythonhosted.org/packages/92/48/7e4ccb57cea7c945775147f0f47ffb068f828abafe2d185f435cbd02ea70/envoy_server-1.36.4-py3-none-win_amd64.whl", hash = "sha256:527a5cdcb30760d0f978bff3bb6999e204fcfee439932255d6f84b6d504ab25c", size = 18345267, upload-time = "2025-12-14T14:38:00.486Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/57/fdb2bb86a58b0d5f94fb4c68e723f14f6ff7d11c0f10c2e69952250abcd7/envoy_server-1.37.0-py3-none-macosx_15_0_arm64.whl", hash = "sha256:0a13ed54d40c199e920d3f8df59210a7c38eaed9009fd4e5d94fe2603576b94e", size = 38658615, upload-time = "2026-01-15T08:42:06.705Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/4f/a207c44635068353656033eb3290d11669cb22b9859ebc5242659412cf86/envoy_server-1.37.0-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:ee3e51fb44bb8f1a7053556b6e216ecd7a92cae07d092cd8315bd336586bd315", size = 29246305, upload-time = "2026-01-15T08:42:10.333Z" },
+    { url = "https://files.pythonhosted.org/packages/38/88/ce48192f428fa4a67859c404e62b42256ac2192e27b9a8febc07cbd297bc/envoy_server-1.37.0-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:bf7a89ecfa8133a77d066c3d3f9cd0b9b975ed26a5d5d9e508896e57b78cabfc", size = 30923603, upload-time = "2026-01-15T08:42:13.165Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/3f/8558d946394695b129122cc7c8446a7d8a44d19c8a642fb08de82fea814e/envoy_server-1.37.0-py3-none-win_amd64.whl", hash = "sha256:b6c16cc897fb1a3e5679b7746a4fadb24501329e4e92d3478f425fa70d9eb20c", size = 19660515, upload-time = "2026-01-15T08:42:16.221Z" },
 ]
 
 [[package]]
@@ -1633,7 +1633,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "envoy-server", specifier = "==1.36.4" },
+    { name = "envoy-server", specifier = "==1.37.0" },
     { name = "find-libpython" },
     { name = "pyyaml" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
