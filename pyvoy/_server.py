@@ -80,7 +80,6 @@ class PyvoyServer:
     _listener_port_quic: int | None
     _stdout: int | IO[bytes] | None
     _stderr: int | IO[bytes] | None
-    _print_startup_logs: bool
     _print_envoy_config: bool
     _interface: Interface
     _root_path: str
