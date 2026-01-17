@@ -20,7 +20,10 @@ from ._util import assert_logs_contains, find_logs_lines
 @pytest_asyncio.fixture(scope="module")
 async def server_asgi() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
-        "tests.apps.asgi.kitchensink", stderr=subprocess.STDOUT, stdout=subprocess.PIPE
+        "tests.apps.asgi.kitchensink",
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+        lifespan=False,
     ) as server:
         yield server
 
@@ -32,6 +35,7 @@ async def server_wsgi() -> AsyncIterator[PyvoyServer]:
         interface="wsgi",
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
+        lifespan=False,
     ) as server:
         yield server
 
@@ -185,6 +189,26 @@ async def test_large_bodies(url: str, client: Client) -> None:
     assert response.status == 200, response.text()
     assert response.headers["content-type"] == "text/plain"
     assert response.content == b"B" * 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_generate_large_body(url: str, client_http2: Client) -> None:
+    content = bytearray()
+    async with client_http2.stream(
+        "POST", f"{url}/generate-large-body", {"te": "trailers"}
+    ) as response:
+        async for chunk in response.content:
+            content.extend(chunk)
+    assert response.status == 200
+    assert response.headers["content-type"] == "text/plain"
+    assert content == b"A" * 100 * 1024 * 1024
+    waits = [int(x) for x in response.trailers["x-waits"].split(",")]
+    assert len(waits) == 100
+    # Backpressure pauses should be a few ms, we see if there are any
+    # such values. The effect of this test has been anecdotally verified
+    # by seeing it reliably fail when the backpressure logic is commented
+    # out.
+    assert any(w >= 3_000_000 for w in waits)
 
 
 @pytest.mark.asyncio

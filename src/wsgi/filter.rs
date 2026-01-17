@@ -47,6 +47,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             read_buffer: Vec::new(),
             response_written_tx,
             response_written_rx: Some(response_written_rx),
+            downstream_watermark_level: 0,
         })
     }
 }
@@ -67,6 +68,8 @@ struct Filter {
 
     response_written_tx: Sender<()>,
     response_written_rx: Option<Receiver<()>>,
+
+    downstream_watermark_level: usize,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -130,68 +133,20 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.process_read(envoy_filter);
             return;
         }
-        self.response_bridge.process(|event| match event {
-            ResponseEvent::Start(start_event, body_event) => {
-                let mut headers: Vec<(&str, &[u8])> =
-                    Vec::with_capacity(start_event.headers.len() + 1);
-                headers.push((":status", start_event.status.as_str().as_bytes()));
-                for (k, v) in start_event.headers.iter() {
-                    headers.push((k.as_str(), v.as_bytes()));
-                }
-                let end_stream = !body_event.more_body;
-                if !end_stream {
-                    send_or_log(&self.response_written_tx, ());
-                }
-                if end_stream {
-                    if body_event.body.is_empty() {
-                        envoy_filter.send_response_headers(headers, true);
-                    } else {
-                        envoy_filter.send_response_headers(headers, false);
-                        envoy_filter.send_response_data(&body_event.body, true);
-                    }
-                } else {
-                    envoy_filter.send_response_headers(headers, false);
-                    envoy_filter.send_response_data(&body_event.body, false);
-                }
-            }
-            ResponseEvent::Body(body_event) => {
-                let end_stream = !body_event.more_body;
-                if !end_stream {
-                    send_or_log(&self.response_written_tx, ());
-                }
-                envoy_filter.send_response_data(&body_event.body, end_stream);
-            }
-            ResponseEvent::Trailers(start_event, trailers) => {
-                if let Some(start_event) = start_event {
-                    let mut headers: Vec<(&str, &[u8])> =
-                        Vec::with_capacity(start_event.headers.len() + 1);
-                    headers.push((":status", start_event.status.as_str().as_bytes()));
-                    for (k, v) in start_event.headers.iter() {
-                        headers.push((k.as_str(), v.as_bytes()));
-                    }
-                    envoy_filter.send_response_headers(headers, false);
-                }
-                let trailers_ref: Vec<(&str, &[u8])> = trailers
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_bytes()))
-                    .collect();
-                envoy_filter.send_response_trailers(trailers_ref);
-            }
-            ResponseEvent::Exception => {
-                if !self.response_closed {
-                    self.response_closed = true;
-                    envoy_filter.send_response(
-                        500,
-                        vec![
-                            ("content-type", b"text/plain; charset=utf-8"),
-                            ("connection", b"close"),
-                        ],
-                        Some(b"Internal Server Error"),
-                        None,
-                    );
-                }
-            }
-        });
+        if self.downstream_watermark_level == 0 {
+            self.process_send_events(envoy_filter);
+        }
+    }
+
+    fn on_downstream_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut EHF) {
+        self.downstream_watermark_level += 1;
+    }
+
+    fn on_downstream_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut EHF) {
+        self.downstream_watermark_level -= 1;
+        if self.downstream_watermark_level == 0 {
+            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        }
     }
 }
 
@@ -320,6 +275,71 @@ impl Filter {
             }
         }
         (false, read)
+    }
+
+    fn process_send_events<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+        self.response_bridge.process(|event| match event {
+            ResponseEvent::Start(start_event, body_event) => {
+                let mut headers: Vec<(&str, &[u8])> =
+                    Vec::with_capacity(start_event.headers.len() + 1);
+                headers.push((":status", start_event.status.as_str().as_bytes()));
+                for (k, v) in start_event.headers.iter() {
+                    headers.push((k.as_str(), v.as_bytes()));
+                }
+                let end_stream = !body_event.more_body;
+                if !end_stream {
+                    send_or_log(&self.response_written_tx, ());
+                }
+                if end_stream {
+                    if body_event.body.is_empty() {
+                        envoy_filter.send_response_headers(headers, true);
+                    } else {
+                        envoy_filter.send_response_headers(headers, false);
+                        envoy_filter.send_response_data(&body_event.body, true);
+                    }
+                } else {
+                    envoy_filter.send_response_headers(headers, false);
+                    envoy_filter.send_response_data(&body_event.body, false);
+                }
+            }
+            ResponseEvent::Body(body_event) => {
+                let end_stream = !body_event.more_body;
+                if !end_stream {
+                    send_or_log(&self.response_written_tx, ());
+                }
+                envoy_filter.send_response_data(&body_event.body, end_stream);
+            }
+            ResponseEvent::Trailers(start_event, trailers) => {
+                if let Some(start_event) = start_event {
+                    let mut headers: Vec<(&str, &[u8])> =
+                        Vec::with_capacity(start_event.headers.len() + 1);
+                    headers.push((":status", start_event.status.as_str().as_bytes()));
+                    for (k, v) in start_event.headers.iter() {
+                        headers.push((k.as_str(), v.as_bytes()));
+                    }
+                    envoy_filter.send_response_headers(headers, false);
+                }
+                let trailers_ref: Vec<(&str, &[u8])> = trailers
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_bytes()))
+                    .collect();
+                envoy_filter.send_response_trailers(trailers_ref);
+            }
+            ResponseEvent::Exception => {
+                if !self.response_closed {
+                    self.response_closed = true;
+                    envoy_filter.send_response(
+                        500,
+                        vec![
+                            ("content-type", b"text/plain; charset=utf-8"),
+                            ("connection", b"close"),
+                        ],
+                        Some(b"Internal Server Error"),
+                        None,
+                    );
+                }
+            }
+        });
     }
 }
 
