@@ -158,6 +158,23 @@ def _large_bodies(
         yield b"B" * 1000
 
 
+def _generate_large_body(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    send_trailers: Callable[[list[tuple[str, str]]], None] = environ[
+        "wsgi.ext.http.send_trailers"
+    ]
+
+    start_response("200 OK", [("content-type", "text/plain")])
+
+    waits: list[int] = []
+    for _ in range(100):
+        start = time.perf_counter_ns()
+        yield b"A" * 1 * 1024 * 1024
+        waits.append(time.perf_counter_ns() - start)
+    send_trailers([("x-waits", ",".join(str(w) for w in waits))])
+
+
 def _trailers_only(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -718,6 +735,8 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _request_and_response_body(environ, start_response)
         case "/large-bodies":
             return _large_bodies(environ, start_response)
+        case "/generate-large-body":
+            return _generate_large_body(environ, start_response)
         case "/trailers-only":
             return _trailers_only(environ, start_response)
         case "/response-and-trailers":

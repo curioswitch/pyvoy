@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections import defaultdict
+from time import perf_counter_ns
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
@@ -241,6 +242,41 @@ async def _large_bodies(recv: ASGIReceiveCallable, send: ASGISendCallable) -> No
         await send(
             {"type": "http.response.body", "body": chunk, "more_body": more_body}
         )
+
+
+async def _generate_large_body(
+    _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": True,
+        }
+    )
+
+    waits: list[int] = []
+    for _ in range(100):
+        start = perf_counter_ns()
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"A" * 1 * 1024 * 1024,
+                "more_body": True,
+            }
+        )
+        end = perf_counter_ns()
+        waits.append(end - start)
+
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+    await send(
+        {
+            "type": "http.response.trailers",
+            "headers": [(b"x-waits", b",".join(str(w).encode() for w in waits))],
+            "more_trailers": False,
+        }
+    )
 
 
 async def _trailers_only(send: ASGISendCallable) -> None:
@@ -1059,6 +1095,8 @@ async def app(
             await _request_and_response_body(scope, recv, send)
         case "/large-bodies":
             await _large_bodies(recv, send)
+        case "/generate-large-body":
+            await _generate_large_body(recv, send)
         case "/trailers-only":
             await _trailers_only(send)
         case "/response-and-trailers":

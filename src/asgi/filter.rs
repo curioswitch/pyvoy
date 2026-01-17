@@ -61,6 +61,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_trailers: None,
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
+            downstream_watermark_level: 0,
         })
     }
 }
@@ -75,6 +76,8 @@ struct Filter {
 
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
+
+    downstream_watermark_level: usize,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -141,6 +144,37 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.handle_read(envoy_filter);
             return;
         }
+        if self.downstream_watermark_level == 0 {
+            self.process_send_events(envoy_filter);
+        }
+    }
+
+    fn on_downstream_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut EHF) {
+        self.downstream_watermark_level += 1;
+    }
+
+    fn on_downstream_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut EHF) {
+        self.downstream_watermark_level -= 1;
+        if self.downstream_watermark_level == 0 {
+            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        }
+    }
+}
+
+impl Filter {
+    fn handle_read(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.request_closed || has_request_body(envoy_filter) {
+            self.recv_bridge.process(|future| {
+                self.executor.handle_recv_future(
+                    read_request_body(envoy_filter),
+                    !self.request_closed,
+                    future,
+                );
+            });
+        }
+    }
+
+    fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
         self.send_bridge.process(|event| {
             match event {
                 SendEvent::Start(start_event, mut body_event) => {
@@ -204,19 +238,5 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 }
             }
         });
-    }
-}
-
-impl Filter {
-    fn handle_read(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
-        if self.request_closed || has_request_body(envoy_filter) {
-            self.recv_bridge.process(|future| {
-                self.executor.handle_recv_future(
-                    read_request_body(envoy_filter),
-                    !self.request_closed,
-                    future,
-                );
-            });
-        }
     }
 }
