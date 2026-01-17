@@ -1,6 +1,6 @@
 [package]
 name = "pyvoy"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/curioswitch/pyvoy"
@@ -16,7 +16,7 @@ urlencoding = "2.1.3"
 yaml-rust2 = "0.11.0"
 
 [build-dependencies]
-pyo3-build-config = { version = "0.27.1", features = ["resolve-config"] }
+pyo3-build-config = { version = "0.27.2", features = ["resolve-config"] }
 
 [lib]
 name = "pyvoy"
