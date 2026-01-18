@@ -4,12 +4,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from pyqwest import Client
 
 from pyvoy import Interface, PyvoyServer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from pyqwest import Client
 
 
 @pytest_asyncio.fixture(scope="module")
