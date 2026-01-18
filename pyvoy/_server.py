@@ -74,6 +74,7 @@ def get_envoy_environ() -> dict[str, str]:
 
 
 class PyvoyServer:
+    _process: asyncio.subprocess.Process | None
     _listener_address: str
     _listener_port: int
     _listener_port_tls: int | None
@@ -90,7 +91,6 @@ class PyvoyServer:
     _additional_envoy_args: list[str] | None
 
     _admin_address: str | None
-    _started: bool
 
     def __init__(
         self,
@@ -133,9 +133,9 @@ class PyvoyServer:
         self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
 
+        self._process = None
         self._listener_port_tls = None
         self._listener_port_quic = None
-        self._started = False
         self._admin_address = None
 
     async def __aenter__(self) -> PyvoyServer:
@@ -180,47 +180,56 @@ class PyvoyServer:
                 stderr=self._stderr,
                 env=env,
             )
-            for _ in range(100):
-                if self._process.returncode is not None:
-                    return
-                with contextlib.suppress(Exception):
-                    admin_address = Path(admin_address_file.name).read_text()
-                    if admin_address:
-                        self._admin_address = admin_address
-                        response = await asyncio.to_thread(
-                            urllib.request.urlopen,
-                            f"http://{admin_address}/listeners?format=json",
-                        )
-                        response_data = json.loads(response.read())
-                        socket_address = response_data["listener_statuses"][0][
-                            "local_address"
-                        ]["socket_address"]
-                        self._listener_address = socket_address["address"]
-                        self._listener_port = socket_address["port_value"]
-                        if self._tls_port is not None:
-                            socket_address_tls = response_data["listener_statuses"][1][
+            try:
+                for _ in range(100):
+                    if self._process.returncode is not None:
+                        msg = "Envoy server failed to start."
+                        raise StartupError(msg)  # noqa: TRY301
+                    with contextlib.suppress(Exception):
+                        admin_address = Path(admin_address_file.name).read_text()
+                        if admin_address:
+                            self._admin_address = admin_address
+                            response = await asyncio.to_thread(
+                                urllib.request.urlopen,
+                                f"http://{admin_address}/listeners?format=json",
+                            )
+                            response_data = json.loads(response.read())
+                            socket_address = response_data["listener_statuses"][0][
                                 "local_address"
                             ]["socket_address"]
-                            self._listener_port_tls = socket_address_tls["port_value"]
-                            if self._tls_enable_http3:
-                                socket_address_quic = response_data[
-                                    "listener_statuses"
-                                ][2]["local_address"]["socket_address"]
-                                self._listener_port_quic = socket_address_quic[
+                            self._listener_address = socket_address["address"]
+                            self._listener_port = socket_address["port_value"]
+                            if self._tls_port is not None:
+                                socket_address_tls = response_data["listener_statuses"][
+                                    1
+                                ]["local_address"]["socket_address"]
+                                self._listener_port_tls = socket_address_tls[
                                     "port_value"
                                 ]
-                        break
-                await asyncio.sleep(0.1)
-
-        self._started = True
+                                if self._tls_enable_http3:
+                                    socket_address_quic = response_data[
+                                        "listener_statuses"
+                                    ][2]["local_address"]["socket_address"]
+                                    self._listener_port_quic = socket_address_quic[
+                                        "port_value"
+                                    ]
+                            break
+                    await asyncio.sleep(0.1)
+                if self._admin_address is None:
+                    msg = "Failed to resolve Envoy admin address."
+                    raise StartupError(msg)  # noqa: TRY301
+            except BaseException:
+                await asyncio.shield(self.stop())
+                raise
 
     async def wait(self) -> None:
+        if self._process is None:
+            return
         await self._process.wait()
 
     async def stop(self) -> None:
-        if not self._started:
+        if self._process is None or self._process.returncode is not None:
             return
-        self._started = False
         try:
             if sys.platform == "win32":
                 # Easiest way to gracefully shutdown Envoy on Windows is to use admin API
@@ -234,7 +243,7 @@ class PyvoyServer:
                     self._process.terminate()
             else:
                 self._process.terminate()
-            await self._process.wait()
+            await asyncio.shield(self._process.wait())
         except ProcessLookupError:
             # Envoy likely crashed, no need to look like multiple errors.
             pass
@@ -257,15 +266,19 @@ class PyvoyServer:
 
     @property
     def stdout(self) -> asyncio.StreamReader | None:
+        if self._process is None:
+            return None
         return self._process.stdout
 
     @property
     def stderr(self) -> asyncio.StreamReader | None:
+        if self._process is None:
+            return None
         return self._process.stderr
 
     @property
     def stopped(self) -> bool:
-        return not self._started
+        return self._process is None or self._process.returncode is not None
 
     def get_envoy_config(self) -> dict:
         base_pyvoy_config = {}
@@ -527,3 +540,7 @@ def _maybe_patch_args_with_debug(args: list[str]) -> list[str]:
         return _pydev_bundle.pydev_monkey.patch_args(args)
     except Exception:
         return args
+
+
+class StartupError(RuntimeError):
+    """Raised when the Pyvoy server fails to start properly."""

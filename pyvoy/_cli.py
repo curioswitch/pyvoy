@@ -12,7 +12,14 @@ from typing import get_args
 import yaml
 from envoy import get_envoy_path
 
-from ._server import Interface, LogLevel, Mount, PyvoyServer, get_envoy_environ
+from ._server import (
+    Interface,
+    LogLevel,
+    Mount,
+    PyvoyServer,
+    StartupError,
+    get_envoy_environ,
+)
 from ._watcher import watch
 
 
@@ -272,31 +279,31 @@ async def amain() -> None:
 
 
 async def _run_server(server: PyvoyServer) -> None:
-    async with server:
-        if server.stopped:
+    try:
+        async with server:
             print(  # noqa: T201
-                "Failed to start Envoy server, see logs for details.", file=sys.stderr
+                f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
+                file=sys.stderr,
             )
-            return
-        print(  # noqa: T201
-            f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
-            file=sys.stderr,
-        )
 
-        async def shutdown() -> None:
-            print("Shutting down pyvoy...")  # noqa: T201
-            await server.stop()
+            async def shutdown() -> None:
+                print("Shutting down pyvoy...")  # noqa: T201
+                await server.stop()
 
-        if sys.platform != "win32":
-            asyncio.get_event_loop().add_signal_handler(
-                signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
-            )
-        try:
-            await server.wait()
-        except asyncio.CancelledError:
             if sys.platform != "win32":
-                asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
-            await shutdown()
+                asyncio.get_event_loop().add_signal_handler(
+                    signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
+                )
+            try:
+                await server.wait()
+            except asyncio.CancelledError:
+                if sys.platform != "win32":
+                    asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
+                await shutdown()
+    except StartupError:
+        print(  # noqa: T201
+            "Failed to start Envoy server, see logs for details.", file=sys.stderr
+        )
 
 
 def _cert_path_or_content(path_or_content: str | None) -> Path | bytes | None:

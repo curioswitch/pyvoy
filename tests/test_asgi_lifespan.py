@@ -68,14 +68,16 @@ async def test_normal_lifespan_disabled(client: Client):
 
 @pytest.mark.asyncio
 async def test_startup_failed():
-    logs: list[str] = []
-    async with PyvoyServer(
+    server = PyvoyServer(
         "tests.apps.asgi.lifespan:startup_failed",
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
-    ) as server:
-        assert server.stdout is not None
-        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+    )
+    with pytest.raises(RuntimeError):
+        await server.start()
+    assert server.stdout is not None
+    logs: list[str] = []
+    logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
 
     await logs_task
     assert any("I failed to startup" in log_line for log_line in logs), (
@@ -85,14 +87,16 @@ async def test_startup_failed():
 
 @pytest.mark.asyncio
 async def test_startup_failed_no_msg():
-    logs: list[str] = []
-    async with PyvoyServer(
+    server = PyvoyServer(
         "tests.apps.asgi.lifespan:startup_failed_no_msg",
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
-    ) as server:
-        assert server.stdout is not None
-        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+    )
+    with pytest.raises(RuntimeError):
+        await server.start()
+    assert server.stdout is not None
+    logs: list[str] = []
+    logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
 
     await logs_task
     assert any("Application startup failed" in log_line for log_line in logs), (
@@ -212,18 +216,33 @@ async def test_immediate_exception(client: Client):
         assert response.text() == "Ok"
 
 
-# The lifespan not required version of this test is everything in test_kitchensink.py
+@pytest.mark.asyncio
+async def test_lifespan_optional_not_supported(client: Client):
+    async with PyvoyServer("tests.apps.asgi.kitchensink") as server:
+        url = f"http://{server.listener_address}:{server.listener_port}"
+
+        # This isn't an error case so we don't have anything to assert other than standard
+        # success.
+        response = await client.post(
+            f"{url}/request-and-response-body", content=b"Bear please"
+        )
+        assert response.status == 200
+        assert response.text() == "Yogi Bear"
+
+
 @pytest.mark.asyncio
 async def test_lifespan_required_not_supported():
-    logs: list[str] = []
-    async with PyvoyServer(
+    server = PyvoyServer(
         "tests.apps.asgi.kitchensink",
         lifespan=True,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
-    ) as server:
-        assert server.stdout is not None
-        logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
+    )
+    with pytest.raises(RuntimeError):
+        await server.start()
+    assert server.stdout is not None
+    logs: list[str] = []
+    logs_task = asyncio.create_task(_read_logs(server.stdout, logs))
 
     await logs_task
     assert any(
