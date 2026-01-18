@@ -1050,6 +1050,10 @@ async def _echo_scope(
     extensions = scope["extensions"]
     assert extensions is not None  # noqa: S101
 
+    server, server_port = "", 0
+    if s := scope.get("server"):
+        server, server_port = s
+
     await send(
         {
             "type": "http.response.start",
@@ -1063,6 +1067,8 @@ async def _echo_scope(
                 (b"x-scope-http-version", scope["http_version"].encode()),
                 (b"x-scope-path", scope["path"].encode()),
                 (b"x-scope-root-path", scope["root_path"].encode()),
+                (b"x-scope-server-address", server.encode()),
+                (b"x-scope-server-port", str(server_port).encode()),
                 (
                     b"x-scope-tls-version",
                     str(extensions.get("tls", {}).get("tls_version", "")).encode(),
