@@ -182,7 +182,8 @@ class PyvoyServer:
             )
             for _ in range(100):
                 if self._process.returncode is not None:
-                    return
+                    msg = "Envoy server failed to start."
+                    raise StartupError(msg)
                 with contextlib.suppress(Exception):
                     admin_address = Path(admin_address_file.name).read_text()
                     if admin_address:
@@ -527,3 +528,7 @@ def _maybe_patch_args_with_debug(args: list[str]) -> list[str]:
         return _pydev_bundle.pydev_monkey.patch_args(args)
     except Exception:
         return args
+
+
+class StartupError(RuntimeError):
+    """Raised when the Pyvoy server fails to start properly."""
