@@ -17,6 +17,7 @@ Python interpreter into a module that can be loaded by a stock Envoy binary.
 - Any Envoy configuration features can be integrated as normal
   - It can be more performant to offload features like CORS or content encoding to Envoy
 - Auto-restart on file change and IDE debugging for development
+- Request and response backpressure integrated with Envoy's flow control
 
 ## Limitations
 

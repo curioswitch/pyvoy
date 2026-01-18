@@ -6,7 +6,12 @@ site_author = "CurioSwitch"
 copyright = "&copy; CurioSwitch"
 repo_url = "https://github.com/curioswitch/pyvoy"
 edit_uri = "edit/main/docs/"
-nav = [{ "Introduction" = "index.md" }, "settings.md", "design.md"]
+nav = [
+    { "Introduction" = "index.md" },
+    "settings.md",
+    "deployment.md",
+    "design.md",
+]
 
 [project.theme]
 favicon = "img/favicon.png"

@@ -24,6 +24,7 @@ to bring you all features of HTTP/2 and 3, with great performance and stability.
 - A complete, battle-tested HTTP stack - it's just Envoy
 - Any Envoy configuration features can be integrated as normal
 - Auto-restart on file change and IDE debugging for development
+- Request and response backpressure integrated with Envoy's flow control
 
 ## Limitations
 
