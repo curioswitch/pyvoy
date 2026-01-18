@@ -540,9 +540,18 @@ def _all_the_headers(
 
 
 def _nihongo(
-    _environ: WSGIEnvironment, start_response: StartResponse
+    environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
-    # Can't actually get raw path in WSGI
+    try:
+        # Can't actually get raw path in WSGI
+        _assert_dict_value(
+            environ,
+            "HTTP_X_COUNTRY",
+            "日本,ジャパン".encode().decode("latin1"),
+            start_response,
+        )
+    except AssertionFailed as e:
+        return e.response
     return _success(start_response)
 
 

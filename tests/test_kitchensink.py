@@ -527,7 +527,10 @@ async def test_all_the_headers(url: str, client: Client) -> None:
 
 @pytest.mark.asyncio
 async def test_nihongo(url: str, client: Client) -> None:
-    response = await client.get(f"{url}/日本語?q=英語")
+    response = await client.get(
+        f"{url}/日本語?q=英語",
+        headers=(("x-country", "日本"), ("x-country", "ジャパン")),
+    )
     assert response.status == 200, response.text()
 
 

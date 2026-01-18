@@ -1037,6 +1037,10 @@ async def _nihongo(
         await _assert_dict_value(
             scope, "raw_path", b"/%E6%97%A5%E6%9C%AC%E8%AA%9E", send
         )
+        headers = defaultdict(list)
+        for k, v in scope["headers"]:
+            headers[k.decode()].append(v.decode())
+        await _assert_dict_value(headers, "x-country", ["日本", "ジャパン"], send)
     except AssertionFailed:
         return
 
