@@ -223,13 +223,15 @@ impl ExecutorInner {
                 _ => {
                     let header_name = key.to_wsgi_string(py, &self.constants);
                     if let Some(existing) = environ.get_item(&header_name)? {
-                        let value_str = String::from_utf8_lossy(value.as_bytes());
+                        let value_str = &decode_latin1(value.as_bytes());
                         let existing = existing.cast::<PyString>()?;
                         let new_value = format!("{},{}", existing.to_str()?, value_str);
                         environ.set_item(header_name, new_value)?;
                     } else {
-                        environ
-                            .set_item(header_name, PyString::from_bytes(py, value.as_bytes())?)?;
+                        environ.set_item(
+                            header_name,
+                            PyString::new(py, &decode_latin1(value.as_bytes())),
+                        )?;
                     }
                 }
             }
