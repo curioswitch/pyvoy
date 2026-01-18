@@ -98,8 +98,8 @@ async def amain() -> None:
 
     parser.add_argument(
         "--tls-require-client-certificate",
-        help="require client certificate for TLS connections",
-        action="store_true",
+        help="require client certificate for TLS connections when tls-ca-cert is specified",
+        action=argparse.BooleanOptionalAction,
         default=True,
     )
 

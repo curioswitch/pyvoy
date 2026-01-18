@@ -542,14 +542,37 @@ fn get_address<EHF: EnvoyHttpFilter>(
         envoy_filter.get_attribute_int(port_attr_id),
     ) {
         (Some(host), Some(port)) => {
-            let mut host = host.as_slice();
-            if let Some(colon_idx) = host.iter().position(|&c| c == b':') {
-                host = &host[..colon_idx];
-            }
-            Some((Box::from(str::from_utf8(host).unwrap_or("")), port))
+            // Unfortunately it means less coverage for cases Envoy should not be
+            // providing like empty host, but it's not worth risking a panic for
+            // an uncommonly used field.
+            let host = host.as_slice();
+            let host_str = str::from_utf8(host).unwrap_or("");
+            let address = strip_port(host_str);
+            Some((Box::from(address), port))
         }
         _ => None,
     }
+}
+
+fn strip_port(s: &str) -> &str {
+    if let Some(rest) = s.strip_prefix('[') {
+        // IPv6 address with brackets
+        if let Some(end) = rest.find(']') {
+            return &rest[..end];
+        }
+        // Can't reach in practice.
+    }
+
+    if let Some((host, _)) = s.rsplit_once(':') {
+        if host.contains(':') {
+            // IPv6 without brackets
+            return s;
+        }
+        return host;
+    }
+
+    // IPv4 host without port
+    s
 }
 
 /// Wrapper to mark Receiver as Sync. PyO3 hackily uses Sync as a signal for whether
