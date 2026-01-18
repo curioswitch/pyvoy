@@ -14,7 +14,6 @@ from tempfile import NamedTemporaryFile
 from typing import IO, TYPE_CHECKING, Literal
 
 import find_libpython
-import yaml
 from envoy import get_envoy_path
 
 from ._bin import get_pyvoy_dir_path
@@ -74,6 +73,8 @@ def get_envoy_environ() -> dict[str, str]:
 
 
 class PyvoyServer:
+    """Programmatic entrypoint to pyvoy."""
+
     _process: asyncio.subprocess.Process | None
     _listener_address: str
     _listener_port: int
@@ -81,7 +82,6 @@ class PyvoyServer:
     _listener_port_quic: int | None
     _stdout: int | IO[bytes] | None
     _stderr: int | IO[bytes] | None
-    _print_envoy_config: bool
     _interface: Interface
     _root_path: str
     _log_level: LogLevel
@@ -112,8 +112,33 @@ class PyvoyServer:
         additional_envoy_args: list[str] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
-        print_envoy_config: bool = False,
     ) -> None:
+        """Creates a new pyvoy server. Will serve requests when started.
+
+        Args:
+            app: The application to serve, either as a string in 'module:attr' format
+                or as an iterable of Mount objects to serve multiple.
+            address: The address to listen on.
+            port: The port to listen on.
+            tls_port: The port to listen on for TLS connections in addition to port.
+                      If not specified and tls_key/cert are provided, a single TLS port
+                      specified by port will be used.
+            tls_key: The server TLS private key as bytes or a path to a file containing it.
+            tls_cert: The server TLS certificate as bytes or a path to a file containing it.
+            tls_ca_cert: The TLS CA certificate as bytes or a path to a file containing it
+                         to use for client certificate validation.
+            tls_enable_http3: Whether to enable HTTP/3 support for TLS connections.
+            tls_require_client_certificate: Whether to require client certificates for
+                TLS connections when a CA certificate is specified.
+            interface: The interface type of the application ('asgi' or 'wsgi').
+            root_path: The root path to mount the application at.
+            log_level: The log level for Envoy.
+            worker_threads: The number of worker threads to use.
+            lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
+            additional_envoy_args: Additional command-line arguments to pass to Envoy.
+            stdout: Where to redirect the server's stdout.
+            stderr: Where to redirect the server's stderr.
+        """
         self._app = app
         self._address = address
         self._port = port
@@ -127,7 +152,6 @@ class PyvoyServer:
         self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
-        self._print_envoy_config = print_envoy_config
         self._log_level = log_level
         self._worker_threads = worker_threads
         self._lifespan = lifespan
@@ -151,11 +175,12 @@ class PyvoyServer:
         await self.stop()
 
     async def start(self) -> None:
-        config = self.get_envoy_config()
+        """Starts the pyvoy server.
 
-        if self._print_envoy_config:
-            print(yaml.dump(config))  # noqa: T201
-            return
+        Raises:
+            StartupError: If the server fails to start.
+        """
+        config = self.get_envoy_config()
 
         env = {**os.environ, **get_envoy_environ()}
 
@@ -223,11 +248,14 @@ class PyvoyServer:
                 raise
 
     async def wait(self) -> None:
+        """Waits for the server to finish shutting down. May be necessary
+        if stopping in a separate task."""
         if self._process is None:
             return
         await self._process.wait()
 
     async def stop(self) -> None:
+        """Stops the pyvoy server."""
         if self._process is None or self._process.returncode is not None:
             return
         try:
@@ -250,37 +278,48 @@ class PyvoyServer:
 
     @property
     def listener_address(self) -> str:
+        """The address the server is listening on."""
         return self._listener_address
 
     @property
     def listener_port(self) -> int:
+        """The port the server is listening on."""
         return self._listener_port
 
     @property
     def listener_port_tls(self) -> int | None:
+        """The TLS port the server is listening on, if any."""
         return self._listener_port_tls
 
     @property
     def listener_port_quic(self) -> int | None:
+        """The QUIC port the server is listening on, if any."""
         return self._listener_port_quic
 
     @property
     def stdout(self) -> asyncio.StreamReader | None:
+        """The server's stdout stream, if capturing is enabled."""
         if self._process is None:
             return None
         return self._process.stdout
 
     @property
     def stderr(self) -> asyncio.StreamReader | None:
+        """The server's stderr stream, if capturing is enabled."""
         if self._process is None:
             return None
         return self._process.stderr
 
     @property
     def stopped(self) -> bool:
+        """Whether the server has stopped."""
         return self._process is None or self._process.returncode is not None
 
     def get_envoy_config(self) -> dict:
+        """Returns the Envoy configuration to use to start the server with pyvoy.
+        The returned dictionary can be serialized to JSON or YAML to pass to Envoy
+        on the command line.
+        """
         base_pyvoy_config = {}
         if self._worker_threads is not None:
             base_pyvoy_config["worker_threads"] = self._worker_threads
