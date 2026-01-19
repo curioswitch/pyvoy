@@ -51,4 +51,4 @@ These flags cause the CLI to print output rather than start a server to help set
 - `--print-envoy-config` - Prints the Envoy config YAML that would be used if actually starting the server.
 - `--print-envoy-entrypoint` - Prints a shell script with environment variables included needed for setting up pyvoy.
 
-You can see more details in [./deployment.md](deployment).
+You can see more details in [deployment](./deployment.md).
