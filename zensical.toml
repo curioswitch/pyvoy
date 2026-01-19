@@ -11,6 +11,7 @@ nav = [
     "settings.md",
     "deployment.md",
     "design.md",
+    "api.md",
 ]
 
 [project.theme]
@@ -33,3 +34,17 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.superfences]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = ["."]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_options = { ignore_init_summary = true }
+docstring_style = "google"
+inherited_members = false
+members_order = "source"
+merge_init_into_class = true
+show_root_heading = true
+show_signature = false
+show_source = false
