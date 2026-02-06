@@ -100,3 +100,29 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
         }
     }
 }
+
+fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkFilter>(
+    _envoy_filter_config: &mut EC,
+    _filter_name: &str,
+    filter_config: &[u8],
+) -> Option<Box<dyn NetworkFilterConfig<EHF>>> {
+    let filter_config = match YamlLoader::load_from_str(std::str::from_utf8(filter_config).unwrap())
+    {
+        Ok(conf) => conf,
+        Err(e) => {
+            envoy_log_error!("Failed to parse filter config YAML: {}", e);
+            return None;
+        }
+    };
+    if filter_config.is_empty() {
+        envoy_log_error!("Filter config is empty");
+        return None;
+    }
+    let filter_config = &filter_config[0];
+    let worker_threads = filter_config["worker_threads"].as_i64().unwrap_or(1) as usize;
+    let enable_lifespan = filter_config["lifespan"].as_bool();
+
+    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
+    asgi::websocket::Config::new(app, constants, worker_threads, enable_lifespan)
+        .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
+}
