@@ -3,10 +3,8 @@ use std::sync::{
     mpsc::{self, Sender},
 };
 
-use crate::{
-    asgi::python::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
-    types::{Constants, SyncReceiver},
-};
+use super::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable};
+use crate::types::{Constants, SyncReceiver};
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
     exceptions::PyRuntimeError,

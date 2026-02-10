@@ -37,7 +37,7 @@ class Mount:
     path: str
     """The path prefix to mount the application at."""
 
-    interface: str = "asgi"
+    interface: Interface = "asgi"
     """The interface type of the application."""
 
 
@@ -109,6 +109,7 @@ class PyvoyServer:
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
         lifespan: bool | None = None,
+        websockets: bool = False,
         additional_envoy_args: list[str] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
@@ -149,6 +150,7 @@ class PyvoyServer:
         self._tls_enable_http3 = tls_enable_http3
         self._tls_require_client_certificate = tls_require_client_certificate
         self._interface = interface
+        self._websockets = websockets
         self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
@@ -211,7 +213,9 @@ class PyvoyServer:
                         msg = "Envoy server failed to start."
                         raise StartupError(msg)  # noqa: TRY301
                     with contextlib.suppress(Exception):
-                        admin_address = Path(admin_address_file.name).read_text()
+                        admin_address = await asyncio.to_thread(
+                            Path(admin_address_file.name).read_text
+                        )
                         if admin_address:
                             self._admin_address = admin_address
                             response = await asyncio.to_thread(
@@ -433,12 +437,29 @@ class PyvoyServer:
         )
         if enable_http3:
             http_config["http3_protocol_options"] = {}
+        network_filters: list[dict] = []
+        if self._websockets:
+            network_filters.append(
+                {
+                    "name": "pyvoy-ws",
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.network.dynamic_modules.v3.DynamicModuleNetworkFilter",
+                        "dynamic_module_config": {"name": "pyvoy"},
+                        "filter_name": "pyvoy-ws",
+                        "filter_config": {
+                            "@type": "type.googleapis.com/google.protobuf.StringValue",
+                            "value": json.dumps(pyvoy_config),
+                        },
+                    },
+                }
+            )
         filter_chain: dict = {
             "filters": [
+                *network_filters,
                 {
                     "name": "envoy.filters.network.http_connection_manager",
                     "typed_config": http_config,
-                }
+                },
             ]
         }
 

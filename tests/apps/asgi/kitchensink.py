@@ -7,7 +7,13 @@ from time import perf_counter_ns
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, HTTPScope
+    from asgiref.typing import (
+        ASGIReceiveCallable,
+        ASGISendCallable,
+        HTTPScope,
+        Scope,
+        WebSocketScope,
+    )
 
 
 async def _send_failure(msg: str, send: ASGISendCallable) -> None:
@@ -1088,7 +1094,7 @@ async def _echo_scope(
     await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
-async def app(
+async def http_app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
     path = scope["path"]
@@ -1157,3 +1163,60 @@ async def app(
             await _echo_scope(scope, recv, send)
         case _:
             await _send_failure(f"unknown path: {scope['path']}", send)
+
+
+async def ws_echo(
+    _scope: WebSocketScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    msg = await recv()
+    if msg["type"] != "websocket.connect":
+        msg = 'msg["type"] != "websocket.connect"'
+        raise RuntimeError(msg)
+    await send(
+        {
+            "type": "websocket.accept",
+            "headers": [(b"x-animal", b"bear"), (b"x-color", b"brown")],
+            "subprotocol": None,
+        }
+    )
+    while True:
+        msg = await recv()
+        match msg["type"]:
+            case "websocket.receive":
+                if "text" in msg:
+                    await send(
+                        {"type": "websocket.send", "text": msg["text"], "bytes": None}
+                    )
+                elif "bytes" in msg:
+                    await send(
+                        {"type": "websocket.send", "bytes": msg["bytes"], "text": None}
+                    )
+            case "websocket.disconnect":
+                return
+            case _:
+                msg = f"Unexpected message type: {msg['type']}"
+                raise RuntimeError(msg)
+
+
+async def ws_app(
+    scope: WebSocketScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    path = scope["path"]
+    if root_path := scope.get("root_path"):
+        path = path.removeprefix(root_path)
+    match path:
+        case "/echo":
+            await ws_echo(scope, recv, send)
+        case _:
+            await send({"type": "websocket.close", "code": 1000, "reason": None})
+
+
+async def app(scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    match scope["type"]:
+        case "websocket":
+            await ws_app(scope, recv, send)
+        case "http":
+            await http_app(scope, recv, send)
+        case _:
+            msg = "Unknown scope type"
+            raise ValueError(msg)

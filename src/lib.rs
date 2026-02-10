@@ -15,7 +15,20 @@ mod headernames;
 mod types;
 mod wsgi;
 
-declare_init_functions!(init, new_http_filter_config_fn);
+#[unsafe(no_mangle)]
+pub extern "C" fn envoy_dynamic_module_on_program_init() -> *const ::std::os::raw::c_char {
+    envoy_proxy_dynamic_modules_rust_sdk::NEW_HTTP_FILTER_CONFIG_FUNCTION
+        .get_or_init(|| new_http_filter_config_fn);
+    envoy_proxy_dynamic_modules_rust_sdk::NEW_NETWORK_FILTER_CONFIG_FUNCTION
+        .get_or_init(|| new_network_filter_config_fn);
+
+    if init() {
+        envoy_proxy_dynamic_modules_rust_sdk::abi::kAbiVersion.as_ptr()
+            as *const ::std::os::raw::c_char
+    } else {
+        ::std::ptr::null()
+    }
+}
 
 fn init() -> bool {
     Python::initialize();
@@ -119,10 +132,14 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
         return None;
     }
     let filter_config = &filter_config[0];
+    let Some(app) = filter_config["app"].as_str() else {
+        envoy_log_error!("Filter config missing required 'app' field");
+        return None;
+    };
     let worker_threads = filter_config["worker_threads"].as_i64().unwrap_or(1) as usize;
     let enable_lifespan = filter_config["lifespan"].as_bool();
 
-    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
+    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, "")));
     asgi::websocket::Config::new(app, constants, worker_threads, enable_lifespan)
         .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
 }
