@@ -50,6 +50,7 @@ impl EnvoyStream {
     pub(super) fn read_from(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         let mut inner = self.inner.lock().unwrap();
         let (buffers, total_size) = envoy_filter.get_read_buffer_chunks();
+        eprintln!("total_size={}", total_size);
         inner.read_buffer.reserve(total_size);
         for buf in buffers {
             inner.read_buffer.put(buf.as_slice());

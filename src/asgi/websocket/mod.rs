@@ -206,9 +206,11 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut ENF, event_id: u64) {
+        eprintln!("on_scheduled: event_id={}", event_id);
         if event_id == EVENT_ID_REQUEST {
             match &self.state {
                 WebSocketState::FinishHandshake(_, _) => {
+                    eprintln!("send websocket.connect");
                     let future = self.recv_bridge.get().unwrap();
                     self.executor.handle_recv_future_connect(future);
                 }
@@ -216,7 +218,10 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                     self.handle_disconnect(code, reason);
                     return;
                 }
-                WebSocketState::Accepted(_) => self.read_web_socket(envoy_filter),
+                WebSocketState::Accepted(_) => {
+                    eprintln!("read websocket");
+                    self.read_web_socket(envoy_filter);
+                }
                 _ => {}
             }
             return;
@@ -234,50 +239,53 @@ impl Filter {
     }
 
     fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
-        if let WebSocketState::FinishHandshake(stream, mut response) =
-            std::mem::replace(&mut self.state, WebSocketState::Sentinel)
-        {
-            eprintln!("processing send events: FinishHandshake");
-            let event = self.send_bridge.get().unwrap();
-            let event = match event {
-                SendEvent::Close { code, reason } => {
-                    eprintln!("Sending close during handshake");
-                    let mut response = http::Response::new(());
-                    *response.status_mut() = http::StatusCode::FORBIDDEN;
-                    let mut buffer = Vec::new();
-                    write_response(&mut buffer, &response).unwrap();
-                    envoy_filter.write(&buffer, true);
-                    self.state = WebSocketState::Closed { code, reason };
-                    return;
+        match std::mem::replace(&mut self.state, WebSocketState::Sentinel) {
+            WebSocketState::FinishHandshake(stream, mut response) => {
+                eprintln!("processing send events: FinishHandshake");
+                let event = self.send_bridge.get().unwrap();
+                let event = match event {
+                    SendEvent::Close { code, reason } => {
+                        eprintln!("Sending close during handshake");
+                        let mut response = http::Response::new(());
+                        *response.status_mut() = http::StatusCode::FORBIDDEN;
+                        let mut buffer = Vec::new();
+                        write_response(&mut buffer, &response).unwrap();
+                        envoy_filter.write(&buffer, true);
+                        self.state = WebSocketState::Closed { code, reason };
+                        return;
+                    }
+                    SendEvent::Accept(e) => e,
+                    SendEvent::Exception => {
+                        eprintln!("Exception during handshake");
+                        envoy_filter.close_with_details(
+                            abi::envoy_dynamic_module_type_network_connection_close_type::Abort,
+                            "Exception during handshake",
+                        );
+                        self.state = WebSocketState::Closed {
+                            code: 1000,
+                            reason: Utf8Bytes::default(),
+                        };
+                        return;
+                    }
+                    _ => unreachable!(), // SendCallable ensures
+                };
+                for (name, value) in event.headers.iter() {
+                    response.headers_mut().append(name, value.clone());
                 }
-                SendEvent::Accept(e) => e,
-                SendEvent::Exception => {
-                    eprintln!("Exception during handshake");
-                    envoy_filter.close_with_details(
-                        abi::envoy_dynamic_module_type_network_connection_close_type::Abort,
-                        "Exception during handshake",
-                    );
-                    self.state = WebSocketState::Closed {
-                        code: 1000,
-                        reason: Utf8Bytes::default(),
-                    };
-                    return;
-                }
-                _ => unreachable!(), // SendCallable ensures
-            };
-            for (name, value) in event.headers.iter() {
-                response.headers_mut().append(name, value.clone());
+                eprintln!("Sending handshake response");
+                let mut buffer = Vec::new();
+                write_response(&mut buffer, &response).unwrap();
+                envoy_filter.write(&buffer, false);
+                let websocket = WebSocket::from_raw_socket(stream, Role::Server, None);
+                self.state = WebSocketState::Accepted(websocket);
+                // In case there were any recv tasks started before sending the acceptance.
+                envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
+                self.executor.handle_send_future(event.future);
+                return;
             }
-            eprintln!("Sending handshake response");
-            let mut buffer = Vec::new();
-            write_response(&mut buffer, &response).unwrap();
-            envoy_filter.write(&buffer, false);
-            let websocket = WebSocket::from_raw_socket(stream, Role::Server, None);
-            self.state = WebSocketState::Accepted(websocket);
-            // In case there were any recv tasks started before sending the acceptance.
-            envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
-            self.executor.handle_send_future(event.future);
-            return;
+            other => {
+                self.state = other;
+            }
         }
 
         eprintln!("processing send events: Accepted");
@@ -328,8 +336,10 @@ impl Filter {
 
     fn read_web_socket(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         if self.recv_bridge.is_empty() {
+            eprintln!("recv bridge empty");
             return;
         }
+        eprintln!("recv bridge not empty");
         let WebSocketState::Accepted(websocket) = &mut self.state else {
             unreachable!()
         };
@@ -368,6 +378,7 @@ impl Filter {
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
                 {
+                    eprintln!("WouldBlock");
                     break;
                 }
                 Err(_) => {

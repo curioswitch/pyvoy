@@ -1179,6 +1179,7 @@ async def ws_echo(
             "subprotocol": None,
         }
     )
+    await asyncio.sleep(0.5)
     while True:
         msg = await recv()
         match msg["type"]:
