@@ -28,10 +28,10 @@ classifiers = [
 
 dependencies = [
     "envoy-server==1.37.0",
-    "find-libpython",
-    "pyyaml",
-    "uvloop; sys_platform != 'win32'",
-    "winloop; sys_platform == 'win32'",
+    "find-libpython>=0.5.1",
+    "pyyaml>=6.0",
+    "uvloop>=0.22.1; sys_platform != 'win32'",
+    "winloop>=0.4.1; sys_platform == 'win32'",
 ]
 
 [dependency-groups]
