@@ -1858,8 +1858,8 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "envoy-server", specifier = "==1.37.0" },
-    { name = "find-libpython" },
-    { name = "pyyaml" },
+    { name = "find-libpython", specifier = ">=0.5.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "winloop", marker = "sys_platform == 'win32'" },
 ]
