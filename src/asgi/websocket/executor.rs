@@ -681,7 +681,11 @@ impl SendCallable {
                 };
                 let reason: Utf8Bytes =
                     if let Some(reason) = event.get_item(&self.constants.reason)? {
-                        reason.extract::<&str>()?.into()
+                        if reason.is_none() {
+                            Utf8Bytes::default()
+                        } else {
+                            reason.extract::<&str>()?.into()
+                        }
                     } else {
                         Utf8Bytes::default()
                     };

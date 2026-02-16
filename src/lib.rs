@@ -23,7 +23,7 @@ pub extern "C" fn envoy_dynamic_module_on_program_init() -> *const ::std::os::ra
         .get_or_init(|| new_network_filter_config_fn);
 
     if init() {
-        envoy_proxy_dynamic_modules_rust_sdk::abi::kAbiVersion.as_ptr()
+        envoy_proxy_dynamic_modules_rust_sdk::abi::envoy_dynamic_modules_abi_version.as_ptr()
             as *const ::std::os::raw::c_char
     } else {
         ::std::ptr::null()

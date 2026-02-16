@@ -1184,19 +1184,19 @@ async def ws_echo(
         msg = await recv()
         match msg["type"]:
             case "websocket.receive":
-                if "text" in msg:
-                    await send(
-                        {"type": "websocket.send", "text": msg["text"], "bytes": None}
-                    )
-                elif "bytes" in msg:
-                    await send(
-                        {"type": "websocket.send", "bytes": msg["bytes"], "text": None}
-                    )
+                await send(
+                    {
+                        "type": "websocket.send",
+                        "text": msg.get("text"),
+                        "bytes": msg.get("bytes"),
+                    }
+                )
             case "websocket.disconnect":
-                return
+                break
             case _:
                 msg = f"Unexpected message type: {msg['type']}"
                 raise RuntimeError(msg)
+    await send({"type": "websocket.close", "code": 1000, "reason": None})
 
 
 async def ws_app(
