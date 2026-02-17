@@ -62,12 +62,6 @@ impl EnvoyStream {
         envoy_filter.drain_read_buffer(total_size);
     }
 
-    pub(super) fn put(&self, data: &[u8]) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.read_buffer.put(data);
-        inner.total_read += data.len();
-    }
-
     pub(super) fn write_to(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         let mut inner = self.inner.lock().unwrap();
         if inner.write_buffer.is_empty() {
@@ -101,9 +95,17 @@ impl std::io::Read for EnvoyStream {
                 Err(ErrorKind::WouldBlock.into())
             };
         }
-        let n = std::cmp::min(buf.len(), inner.read_buffer.len());
-        let split = inner.read_buffer.split_to(n);
-        buf[..n].copy_from_slice(&split);
+        let n = if inner.read_buffer.len() <= buf.len() {
+            let n = inner.read_buffer.len();
+            buf[..n].copy_from_slice(&inner.read_buffer);
+            inner.read_buffer.clear();
+            n
+        } else {
+            let n = buf.len();
+            let split = inner.read_buffer.split_to(n);
+            buf[..n].copy_from_slice(&split);
+            n
+        };
         Ok(n)
     }
 }

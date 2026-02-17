@@ -11,7 +11,6 @@ use tungstenite::{Message, Utf8Bytes, WebSocket};
 
 use crate::asgi::python::EVENT_ID_REQUEST;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::websocket;
 use crate::asgi::websocket::executor::{Body, RecvFuture, SendEvent, WebSocketExecutor};
 use crate::asgi::websocket::stream::EnvoyStream;
 use crate::eventbridge::EventBridge;
@@ -385,13 +384,14 @@ impl Filter {
                                 reason: Utf8Bytes::default(),
                             });
                             self.close_frame = Some(close_frame.clone());
-                            close(
-                                close_frame,
-                                &self.executor,
-                                &mut self.recv_bridge,
-                                websocket,
-                                envoy_filter,
-                            );
+                            finish_close(websocket, envoy_filter);
+                            self.recv_bridge.process(|future| {
+                                self.executor.handle_recv_future_disconnect(
+                                    close_frame.code.into(),
+                                    close_frame.reason.clone(),
+                                    future,
+                                );
+                            });
                             return;
                         }
                         _ => continue,
