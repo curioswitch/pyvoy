@@ -124,6 +124,28 @@ pub(crate) struct Constants {
     /// The string "more_trailers".
     pub more_trailers: Py<PyString>,
 
+    // ASGI WebSocket event fields
+    /// The string "bytes".
+    pub bytes: Py<PyString>,
+    /// The string "code".
+    pub code: Py<PyString>,
+    /// The string "reason".
+    pub reason: Py<PyString>,
+    /// The string "text".
+    pub text: Py<PyString>,
+    /// The string "websocket".
+    pub websocket: Py<PyString>,
+    /// The string "websocket.accept".
+    pub websocket_accept: Py<PyString>,
+    /// The string "websocket.close".
+    pub websocket_close: Py<PyString>,
+    /// The string "websocket.connect".
+    pub websocket_connect: Py<PyString>,
+    /// The string "websocket.disconnect".
+    pub websocket_disconnect: Py<PyString>,
+    /// The string "websocket.receive".
+    pub websocket_receive: Py<PyString>,
+
     // asyncio methods
     /// The string "asyncio".
     pub asyncio: Py<PyString>,
@@ -283,6 +305,17 @@ impl Constants {
             body: PyString::new(py, "body").unbind(),
             more_body: PyString::new(py, "more_body").unbind(),
             http_request: PyString::new(py, "http.request").unbind(),
+
+            bytes: PyString::new(py, "bytes").unbind(),
+            code: PyString::new(py, "code").unbind(),
+            reason: PyString::new(py, "reason").unbind(),
+            text: PyString::new(py, "text").unbind(),
+            websocket: PyString::new(py, "websocket").unbind(),
+            websocket_accept: PyString::new(py, "websocket.accept").unbind(),
+            websocket_close: PyString::new(py, "websocket.close").unbind(),
+            websocket_connect: PyString::new(py, "websocket.connect").unbind(),
+            websocket_disconnect: PyString::new(py, "websocket.disconnect").unbind(),
+            websocket_receive: PyString::new(py, "websocket.receive").unbind(),
 
             asyncio: PyString::new(py, "asyncio").unbind(),
             run_coroutine_threadsafe: PyString::new(py, "run_coroutine_threadsafe").unbind(),

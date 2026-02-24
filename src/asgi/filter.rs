@@ -7,13 +7,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
+use crate::asgi::shared::ExecutorHandles;
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
-    handles: Option<python::ExecutorHandles>,
+    handles: Option<ExecutorHandles>,
 }
 
 impl Config {

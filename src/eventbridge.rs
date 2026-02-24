@@ -59,6 +59,11 @@ impl<T> EventBridge<T> {
         Ok(())
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        matches!(*inner, Inner::Empty | Inner::Closed)
+    }
+
     /// Drains all events on the bridge, calling `f` for each.
     ///
     /// We only lock the mutex to drain and then `send` calls can continue while
@@ -76,6 +81,22 @@ impl<T> EventBridge<T> {
                 for event in events {
                     f(event);
                 }
+            }
+        }
+    }
+
+    /// Gets a single event from the bridge.
+    pub(crate) fn get(&self) -> Option<T> {
+        let mut inner = self.inner.lock().unwrap();
+        match std::mem::replace(&mut *inner, Inner::Empty) {
+            Inner::Closed | Inner::Empty => None,
+            Inner::Single(event) => Some(event),
+            Inner::Multiple(mut events) => {
+                let event = events.remove(0);
+                if !events.is_empty() {
+                    *inner = Inner::Multiple(events);
+                }
+                Some(event)
             }
         }
     }
