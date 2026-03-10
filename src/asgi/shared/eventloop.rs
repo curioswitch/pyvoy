@@ -9,10 +9,8 @@ use pyo3::{
     types::{PyAnyMethods as _, PyDict},
 };
 
-use crate::{
-    asgi::python::lifespan::{Lifespan, execute_lifespan},
-    types::{Constants, SyncReceiver},
-};
+use super::lifespan::{Lifespan, execute_lifespan};
+use crate::types::{Constants, SyncReceiver};
 
 enum EventLoopsInner {
     Single(EventLoop),

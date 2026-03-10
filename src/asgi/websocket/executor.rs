@@ -1,13 +1,30 @@
 use std::{
-    sync::{Arc, atomic::AtomicBool},
-    thread::{self},
+    sync::{
+        Arc,
+        mpsc::{self, Sender},
+    },
+    thread,
 };
+
+use bytes::Bytes;
+use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilterScheduler;
+use http::{HeaderName, HeaderValue};
+use pyo3::{
+    Bound, IntoPyObjectExt as _, Py, PyAny, PyErr, PyResult, Python,
+    exceptions::PyRuntimeError,
+    pyclass, pymethods,
+    types::{
+        PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyString, PyStringMethods as _,
+        PyTracebackMethods as _,
+    },
+};
+use tungstenite::Utf8Bytes;
 
 use crate::{
     asgi::shared::{
         ExecutorHandles,
         app::load_app,
-        awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+        awaitable::{EmptyAwaitable, ErrorAwaitable},
         eventloop::EventLoops,
         get_gil_batch_size,
         headers::extract_headers_from_event,
@@ -16,16 +33,6 @@ use crate::{
     eventbridge::EventBridge,
     types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
 };
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
-use http::{HeaderName, HeaderValue, StatusCode};
-use pyo3::{
-    IntoPyObjectExt,
-    exceptions::{PyRuntimeError, PyValueError},
-    prelude::*,
-    types::{PyBytes, PyDict, PyNone, PyString},
-};
-use std::sync::mpsc;
-use std::sync::mpsc::Sender;
 
 struct ExecutorInner {
     app: Py<PyAny>,
@@ -33,26 +40,16 @@ struct ExecutorInner {
     extensions: Py<PyDict>,
     loops: EventLoops,
     constants: Arc<Constants>,
-    executor: Executor,
+    executor: WebSocketExecutor,
 }
 
-/// An executor of Python code.
-///
-/// We separate execution of Python code from Rust code because the Python GIL
-/// must be held when executing Python code, and we don't want to potentially
-/// block on it from envoy request threads.
-///
-/// We use two threads, one for the asyncio event loop and one to schedule tasks
-/// on it. The task scheduler does some marshaling of Python dictionaries while
-/// holding the GIL and then schedules execution of the actual tasks on the
-/// asyncio event loop thread.
 #[derive(Clone)]
-pub(crate) struct Executor {
+pub(super) struct WebSocketExecutor {
     tx: Sender<Event>,
 }
 
-impl Executor {
-    pub(crate) fn new(
+impl WebSocketExecutor {
+    pub(super) fn new(
         app_module: &str,
         app_attr: &str,
         constants: Arc<Constants>,
@@ -66,13 +63,7 @@ impl Executor {
             worker_threads,
             enable_lifespan,
         )?;
-
-        let extensions = Python::attach(|py| {
-            let extensions = PyDict::new(py);
-            extensions.set_item("http.response.trailers", PyDict::new(py))?;
-            Ok::<_, PyErr>(extensions.unbind())
-        })?;
-
+        let extensions = Python::attach(|py| PyDict::new(py).unbind());
         let (tx, rx) = mpsc::channel::<Event>();
         let executor = Self { tx };
 
@@ -84,6 +75,7 @@ impl Executor {
             constants,
             executor: executor.clone(),
         };
+
         let gil_handle = thread::spawn(move || {
             let rx = SyncReceiver::new(rx);
             let gil_batch_size = get_gil_batch_size();
@@ -125,19 +117,16 @@ impl Executor {
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
-        request_closed: bool,
-        trailers_accepted: bool,
-        response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
-        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+        scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
     ) {
         self.tx
             .send(Event::ExecuteApp(ExecuteAppEvent {
-                scope,
-                request_closed,
-                trailers_accepted,
-                response_closed,
+                scope: WebSocketScope {
+                    scope,
+                    subprotocols: vec![],
+                },
                 recv_bridge,
                 send_bridge,
                 scheduler,
@@ -145,11 +134,28 @@ impl Executor {
             .unwrap();
     }
 
-    pub(crate) fn handle_recv_future(&self, body: Box<[u8]>, more_body: bool, future: RecvFuture) {
+    pub(crate) fn handle_recv_future_connect(&self, future: RecvFuture) {
         self.tx
-            .send(Event::HandleRecvFuture {
-                body,
-                more_body,
+            .send(Event::HandleRecvFutureConnect(future))
+            .unwrap();
+    }
+
+    pub(crate) fn handle_recv_future_message(&self, body: Body, future: RecvFuture) {
+        self.tx
+            .send(Event::HandleRecvFutureMessage { body, future })
+            .unwrap();
+    }
+
+    pub(crate) fn handle_recv_future_disconnect(
+        &self,
+        code: u16,
+        reason: Utf8Bytes,
+        future: RecvFuture,
+    ) {
+        self.tx
+            .send(Event::HandleRecvFutureDisconnect {
+                code,
+                reason,
                 future,
             })
             .unwrap();
@@ -193,15 +199,42 @@ impl ExecutorInner {
                 };
                 loop_.call_method1(&self.constants.call_soon_threadsafe, (app_executor,))?;
             }
-            Event::HandleRecvFuture {
-                body,
-                more_body,
+            Event::HandleRecvFutureConnect(mut future) => {
+                if let Some(future) = future.future.take() {
+                    let connect_future_executor = ConnectFutureExecutor {
+                        future: future.future,
+                        constants: self.constants.clone(),
+                    };
+                    future.loop_.call_method1(
+                        py,
+                        &self.constants.call_soon_threadsafe,
+                        (connect_future_executor,),
+                    )?;
+                }
+            }
+            Event::HandleRecvFutureMessage { body, mut future } => {
+                if let Some(future) = future.future.take() {
+                    let recv_future_executor = RecvFutureMessageExecutor {
+                        body,
+                        future: future.future,
+                        constants: self.constants.clone(),
+                    };
+                    future.loop_.call_method1(
+                        py,
+                        &self.constants.call_soon_threadsafe,
+                        (recv_future_executor,),
+                    )?;
+                }
+            }
+            Event::HandleRecvFutureDisconnect {
+                code,
+                reason,
                 mut future,
             } => {
                 if let Some(future) = future.future.take() {
-                    let recv_future_executor = RecvFutureExecutor {
-                        body,
-                        more_body,
+                    let recv_future_executor = RecvFutureDisconnectExecutor {
+                        code,
+                        reason,
                         future: future.future,
                         constants: self.constants.clone(),
                     };
@@ -250,7 +283,7 @@ impl ExecutorInner {
         f.loop_.call_method1(
             py,
             &self.constants.call_soon_threadsafe,
-            (set_result, PyNone::get(py)),
+            (set_result, py.None()),
         )?;
         Ok(())
     }
@@ -272,7 +305,7 @@ impl ExecutorInner {
 }
 
 /// The callable scheduled on the event loop to execute the ASGI application.
-#[pyclass(module = "_pyvoy.asgi")]
+#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct AppExecutor {
     loop_: Py<PyAny>,
     state: Option<Py<PyDict>>,
@@ -281,7 +314,7 @@ struct AppExecutor {
     extensions: Py<PyDict>,
     event: Option<ExecuteAppEvent>,
     constants: Arc<Constants>,
-    executor: Executor,
+    executor: WebSocketExecutor,
 }
 
 #[pymethods]
@@ -289,9 +322,6 @@ impl AppExecutor {
     fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
         let ExecuteAppEvent {
             scope,
-            request_closed,
-            trailers_accepted,
-            response_closed,
             recv_bridge,
             send_bridge,
             scheduler,
@@ -301,8 +331,8 @@ impl AppExecutor {
 
         let scope_dict = new_scope_dict(
             py,
-            scope,
-            &self.constants.http,
+            scope.scope,
+            &self.constants.websocket,
             &self.asgi,
             &self.extensions,
             &self.state,
@@ -311,31 +341,20 @@ impl AppExecutor {
 
         let scheduler = Arc::new(scheduler);
 
-        let recv = if request_closed {
-            EmptyRecvCallable {
-                response_closed,
-                constants: self.constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        } else {
-            RecvCallable {
-                recv_bridge,
-                scheduler: scheduler.clone(),
-                loop_: loop_.clone().unbind(),
-                executor: self.executor.clone(),
-                constants: self.constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        };
+        let recv = RecvCallable {
+            recv_bridge,
+            scheduler: scheduler.clone(),
+            loop_: loop_.clone().unbind(),
+            executor: self.executor.clone(),
+            constants: self.constants.clone(),
+        }
+        .into_bound_py_any(py)?;
 
         let coro = self.app.bind(py).call1((
             scope_dict,
             recv,
             SendCallable {
-                next_event: NextASGIEvent::Start,
-                response_start: None,
-                trailers_accepted,
-                closed: false,
+                state: SendState::Started,
                 send_bridge: send_bridge.clone(),
                 scheduler: scheduler.clone(),
                 loop_: loop_.clone().unbind(),
@@ -357,22 +376,66 @@ impl AppExecutor {
     }
 }
 
-/// The callable scheduled on the event loop to handle a receive future.
-#[pyclass(module = "_pyvoy.asgi")]
-struct RecvFutureExecutor {
-    body: Box<[u8]>,
-    more_body: bool,
+#[pyclass(module = "_pyvoy.asgi.websocket")]
+struct ConnectFutureExecutor {
     future: Py<PyAny>,
     constants: Arc<Constants>,
 }
 
 #[pymethods]
-impl RecvFutureExecutor {
+impl ConnectFutureExecutor {
     fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
         let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, PyBytes::new(py, &self.body))?;
-        event.set_item(&self.constants.more_body, self.more_body)?;
+        event.set_item(&self.constants.typ, &self.constants.websocket_connect)?;
+        self.future
+            .call_method1(py, &self.constants.set_result, (event,))?;
+        Ok(())
+    }
+}
+
+/// The callable scheduled on the event loop to handle a receive future.
+#[pyclass(module = "_pyvoy.asgi.websocket")]
+struct RecvFutureMessageExecutor {
+    body: Body,
+    future: Py<PyAny>,
+    constants: Arc<Constants>,
+}
+
+#[pymethods]
+impl RecvFutureMessageExecutor {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.websocket_receive)?;
+        match &self.body {
+            Body::Bytes(bytes) => {
+                event.set_item(&self.constants.bytes, PyBytes::new(py, bytes))?;
+            }
+            Body::Text(s) => {
+                event.set_item(&self.constants.text, PyString::new(py, s))?;
+            }
+        }
+        self.future
+            .call_method1(py, &self.constants.set_result, (event,))?;
+        Ok(())
+    }
+}
+
+/// The callable scheduled on the event loop to handle a receive future.
+#[pyclass(module = "_pyvoy.asgi.websocket")]
+struct RecvFutureDisconnectExecutor {
+    code: u16,
+    reason: Utf8Bytes,
+    future: Py<PyAny>,
+    constants: Arc<Constants>,
+}
+
+#[pymethods]
+impl RecvFutureDisconnectExecutor {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
+        event.set_item(&self.constants.code, self.code)?;
+        event.set_item(&self.constants.reason, PyString::new(py, &self.reason))?;
         self.future
             .call_method1(py, &self.constants.set_result, (event,))?;
         Ok(())
@@ -380,7 +443,7 @@ impl RecvFutureExecutor {
 }
 
 /// The callable scheduled on the event loop to handle a dropped receive future.
-#[pyclass(module = "_pyvoy.asgi")]
+#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct DroppedRecvFutureExecutor {
     future: Py<PyAny>,
     constants: Arc<Constants>,
@@ -389,7 +452,10 @@ struct DroppedRecvFutureExecutor {
 #[pymethods]
 impl DroppedRecvFutureExecutor {
     fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
-        let event = self.constants.asgi_empty_recv_disconnect.bind(py).copy()?;
+        let event = PyDict::new(py);
+        event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
+        event.set_item(&self.constants.code, 1005u16)?;
+        event.set_item(&self.constants.reason, &self.constants.empty_string)?;
         self.future
             .call_method1(py, &self.constants.set_result, (event,))?;
         Ok(())
@@ -397,20 +463,32 @@ impl DroppedRecvFutureExecutor {
 }
 
 struct ExecuteAppEvent {
-    scope: Scope,
-    request_closed: bool,
-    trailers_accepted: bool,
-    response_closed: Arc<AtomicBool>,
+    scope: WebSocketScope,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
+    scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
+}
+
+struct WebSocketScope {
+    scope: Scope,
+    subprotocols: Vec<String>,
+}
+
+pub(super) enum Body {
+    Bytes(Bytes),
+    Text(Utf8Bytes),
 }
 
 enum Event {
     ExecuteApp(ExecuteAppEvent),
-    HandleRecvFuture {
-        body: Box<[u8]>,
-        more_body: bool,
+    HandleRecvFutureConnect(RecvFuture),
+    HandleRecvFutureMessage {
+        body: Body,
+        future: RecvFuture,
+    },
+    HandleRecvFutureDisconnect {
+        code: u16,
+        reason: Utf8Bytes,
         future: RecvFuture,
     },
     HandleDroppedRecvFuture(LoopFuture),
@@ -420,12 +498,12 @@ enum Event {
 }
 
 /// The receive callable we pass to the application.
-#[pyclass(module = "_pyvoy.asgi")]
+#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct RecvCallable {
     recv_bridge: EventBridge<RecvFuture>,
-    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
     loop_: Py<PyAny>,
-    executor: Executor,
+    executor: WebSocketExecutor,
     constants: Arc<Constants>,
 }
 
@@ -452,34 +530,11 @@ impl RecvCallable {
     }
 }
 
-/// The receive callable we pass to the application when the request was closed
-/// with headers, usually a GET request.
-#[pyclass(module = "_pyvoy.asgi")]
-struct EmptyRecvCallable {
-    response_closed: Arc<AtomicBool>,
-    constants: Arc<Constants>,
-}
-
-#[pymethods]
-impl EmptyRecvCallable {
-    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let event = if self
-            .response_closed
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            self.constants.asgi_empty_recv_disconnect.bind(py).copy()?
-        } else {
-            self.constants.asgi_empty_recv.bind(py).copy()?
-        };
-        ValueAwaitable::new_py(py, event.into_any().unbind())
-    }
-}
-
 /// The done callback to run when the ASGI application completes.
-#[pyclass(module = "_pyvoy.asgi")]
+#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct AppFutureHandler {
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
     constants: Arc<Constants>,
 }
 
@@ -492,7 +547,10 @@ impl AppFutureHandler {
             if e.is_instance_of::<ClientDisconnectedError>(py) {
                 return Ok(());
             }
-            let tb = e.traceback(py).unwrap().format().unwrap_or_default();
+            let tb = e
+                .traceback(py)
+                .map(|tb| tb.format().unwrap_or_default())
+                .unwrap_or_default();
             eprintln!("Exception in ASGI application\n{}{}", tb, e);
             if self.send_bridge.send(SendEvent::Exception).is_ok() {
                 self.scheduler.commit(EVENT_ID_RESPONSE);
@@ -502,24 +560,20 @@ impl AppFutureHandler {
     }
 }
 
-enum NextASGIEvent {
-    Start,
-    Body { trailers: bool },
-    Trailers,
-    Done,
+enum SendState {
+    Started,
+    Accepted,
+    Closed,
 }
 
 /// The send callable passed to ASGI applications.
-#[pyclass(module = "_pyvoy.asgi")]
+#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct SendCallable {
-    next_event: NextASGIEvent,
-    response_start: Option<ResponseStartEvent>,
-    trailers_accepted: bool,
-    closed: bool,
+    state: SendState,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
     loop_: Py<PyAny>,
-    executor: Executor,
+    executor: WebSocketExecutor,
     constants: Arc<Constants>,
 }
 
@@ -532,7 +586,7 @@ impl SendCallable {
         py: Python<'py>,
         event: Bound<'py, PyDict>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        if self.closed {
+        if matches!(self.state, SendState::Closed) {
             return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
         }
 
@@ -540,148 +594,114 @@ impl SendCallable {
             .get_item(&self.constants.typ)?
             .ok_or_else(|| PyRuntimeError::new_err("Unexpected ASGI message, missing 'type'."))?;
         let event_type = event_type_py.cast::<PyString>()?.to_str()?;
-
-        match &self.next_event {
-            NextASGIEvent::Start => {
-                if event_type != "http.response.start" {
-                    return ErrorAwaitable::new_py(
-                        py,
-                        PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.start', but got '{}'.",
-                            event_type
-                        )),
-                    );
-                }
-                let headers = extract_headers_from_event(py, &self.constants, &event)?;
-                let status_code = match event.get_item(&self.constants.status)? {
-                    Some(v) => v.extract::<u16>()?,
-                    None => {
-                        return Err(PyRuntimeError::new_err(
-                            "Unexpected ASGI message, missing 'status' in 'http.response.start'.",
-                        ));
-                    }
-                };
-                let status = StatusCode::from_u16(status_code).map_err(|_| {
-                    PyValueError::new_err(format!("Invalid HTTP status code '{}'", status_code))
-                })?;
-
-                let trailers: bool = match event.get_item(&self.constants.trailers)? {
-                    Some(v) => v.extract()?,
-                    None => false,
-                };
-                self.next_event = NextASGIEvent::Body { trailers };
-                self.response_start.replace(ResponseStartEvent {
-                    status,
-                    headers,
-                    trailers: trailers && self.trailers_accepted,
-                });
-                EmptyAwaitable::new_py(py)
-            }
-            NextASGIEvent::Body { trailers } => {
-                if event_type != "http.response.body" {
-                    return ErrorAwaitable::new_py(
-                        py,
-                        PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.body', but got '{}'.",
-                            event_type
-                        )),
-                    );
-                }
-                let more_body: bool = match event.get_item(&self.constants.more_body)? {
-                    Some(v) => v.extract()?,
-                    None => false,
-                };
-                let body: Box<[u8]> = match event.get_item(&self.constants.body)? {
-                    Some(body) => Box::from(body.cast::<PyBytes>()?.as_bytes()),
-                    _ => Box::default(),
-                };
-                if !more_body {
-                    self.next_event = if *trailers {
-                        NextASGIEvent::Trailers
-                    } else {
-                        NextASGIEvent::Done
-                    }
-                }
-                let (ret, send_future) = if more_body {
-                    let future = self
+        match event_type {
+            "websocket.accept" => match &self.state {
+                SendState::Started => {
+                    let headers = extract_headers_from_event(py, &self.constants, &event)?;
+                    self.state = SendState::Accepted;
+                    let ret = self
                         .loop_
                         .bind(py)
                         .call_method0(&self.constants.create_future)?;
-                    (
-                        future.clone(),
-                        Some(SendFuture {
-                            future: Some(LoopFuture {
-                                future: future.unbind(),
-                                loop_: self.loop_.clone_ref(py),
-                            }),
-                            executor: self.executor.clone(),
-                        }),
-                    )
-                } else {
-                    (EmptyAwaitable::new_py(py)?, None)
-                };
-                let body_event = ResponseBodyEvent {
-                    body,
-                    future: send_future,
-                };
-                if let Some(start_event) = self.response_start.take() {
+
                     if self
                         .send_bridge
-                        .send(SendEvent::Start(start_event, body_event))
-                        .is_ok()
-                    {
-                        self.scheduler.commit(EVENT_ID_RESPONSE);
-                    } else {
-                        // send_future will be completed with exception when dropped if needed.
-                        self.closed = true;
-                    }
-                } else if self.send_bridge.send(SendEvent::Body(body_event)).is_ok() {
-                    self.scheduler.commit(EVENT_ID_RESPONSE);
-                } else {
-                    // send_future will be completed with exception when dropped if needed.
-                    self.closed = true;
-                }
-                Ok(ret)
-            }
-            NextASGIEvent::Trailers => {
-                if event_type != "http.response.trailers" {
-                    return ErrorAwaitable::new_py(
-                        py,
-                        PyRuntimeError::new_err(format!(
-                            "Expected ASGI message 'http.response.trailers', but got '{}'.",
-                            event_type
-                        )),
-                    );
-                }
-                let more_trailers: bool = match event.get_item(&self.constants.more_trailers)? {
-                    Some(v) => v.extract()?,
-                    None => false,
-                };
-                if !more_trailers {
-                    self.next_event = NextASGIEvent::Done;
-                }
-                if self.trailers_accepted {
-                    let headers = extract_headers_from_event(py, &self.constants, &event)?;
-                    if self
-                        .send_bridge
-                        .send(SendEvent::Trailers(ResponseTrailersEvent {
+                        .send(SendEvent::Accept(AcceptEvent {
+                            subprotocol: None,
                             headers,
-                            more_trailers,
+                            future: SendFuture {
+                                future: Some(LoopFuture {
+                                    future: ret.clone().unbind(),
+                                    loop_: self.loop_.clone_ref(py),
+                                }),
+                                executor: self.executor.clone(),
+                            },
                         }))
                         .is_ok()
                     {
                         self.scheduler.commit(EVENT_ID_RESPONSE);
-                    } else {
-                        self.closed = true;
-                        return ErrorAwaitable::new_py(py, ClientDisconnectedError::new_err(()));
                     }
+
+                    Ok(ret)
+                }
+                SendState::Accepted => ErrorAwaitable::new_py(
+                    py,
+                    PyRuntimeError::new_err("WebSocket connection has already been accepted."),
+                ),
+                SendState::Closed => unreachable!(),
+            },
+            "websocket.send" => {
+                let bytes = event
+                    .get_item(&self.constants.bytes)?
+                    .unwrap_or_else(|| py.None().bind(py).clone());
+                let body = if bytes.is_none() {
+                    let text = event
+                        .get_item(&self.constants.text)?
+                        .unwrap_or_else(|| py.None().bind(py).clone());
+
+                    if text.is_none() {
+                        return Err(PyRuntimeError::new_err(
+                            "websocket.send event must have either 'bytes' or 'text' field.",
+                        ));
+                    }
+                    let text_str = text.cast::<PyString>()?;
+                    Body::Text(text_str.to_str()?.into())
+                } else {
+                    Body::Bytes(bytes.extract::<Bytes>()?)
+                };
+
+                let ret = self
+                    .loop_
+                    .bind(py)
+                    .call_method0(&self.constants.create_future)?;
+                if self
+                    .send_bridge
+                    .send(SendEvent::SendMessage(SendMessageEvent {
+                        body,
+                        future: SendFuture {
+                            future: Some(LoopFuture {
+                                future: ret.clone().unbind(),
+                                loop_: self.loop_.clone_ref(py),
+                            }),
+                            executor: self.executor.clone(),
+                        },
+                    }))
+                    .is_ok()
+                {
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                }
+                Ok(ret)
+            }
+            "websocket.close" => {
+                self.state = SendState::Closed;
+                let code = if let Some(code) = event.get_item(&self.constants.code)? {
+                    code.extract::<u16>()?
+                } else {
+                    1000
+                };
+                let reason: Utf8Bytes =
+                    if let Some(reason) = event.get_item(&self.constants.reason)? {
+                        if reason.is_none() {
+                            Utf8Bytes::default()
+                        } else {
+                            reason.extract::<&str>()?.into()
+                        }
+                    } else {
+                        Utf8Bytes::default()
+                    };
+                if self
+                    .send_bridge
+                    .send(SendEvent::Close { code, reason })
+                    .is_ok()
+                {
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
                 }
                 EmptyAwaitable::new_py(py)
             }
-            NextASGIEvent::Done => ErrorAwaitable::new_py(
+            _ => ErrorAwaitable::new_py(
                 py,
                 PyRuntimeError::new_err(format!(
-                    "Unexpected ASGI message '{}' sent, after response already completed.",
+                    "Unexpected ASGI message of type '{}'.",
                     event_type
                 )),
             ),
@@ -689,50 +709,33 @@ impl SendCallable {
     }
 }
 
-/// An event to begin a response with headers.
-pub(crate) struct ResponseStartEvent {
-    /// The status code of the response.
-    pub status: StatusCode,
-    /// The headers of the response.
-    pub headers: Vec<(HeaderName, HeaderValue)>,
-    /// Whether trailers will be sent after the body.
-    pub trailers: bool,
+pub(super) struct AcceptEvent {
+    pub(super) subprotocol: Option<Box<str>>,
+    pub(super) headers: Vec<(HeaderName, HeaderValue)>,
+    pub(super) future: SendFuture,
 }
 
-/// An event to send a chunk of the response body.
-pub(crate) struct ResponseBodyEvent {
-    /// The body bytes to send.
-    pub body: Box<[u8]>,
-    // Future to notify when the body is completed writing.
-    // Not sent for the final piece of body, so None indicates
-    // more_body = False.
-    pub future: Option<SendFuture>,
-}
-
-/// An event to send response trailers.
-pub(crate) struct ResponseTrailersEvent {
-    /// The trailers.
-    pub headers: Vec<(HeaderName, HeaderValue)>,
-    /// Whether more trailers will follow.
-    pub more_trailers: bool,
+pub(super) struct SendMessageEvent {
+    pub(super) body: Body,
+    pub(super) future: SendFuture,
 }
 
 /// An event to send a response, read by the filter when scheduling [`EVENT_ID_RESPONSE`].
-pub(crate) enum SendEvent {
-    /// Start the response with headers and the first body chunk.
-    Start(ResponseStartEvent, ResponseBodyEvent),
-    /// Send a chunk of the response body.
-    Body(ResponseBodyEvent),
-    /// Send response trailers.
-    Trailers(ResponseTrailersEvent),
+pub(super) enum SendEvent {
+    /// Accept the WebSocket connection.
+    Accept(AcceptEvent),
+    /// Sends a WebSocket message.
+    SendMessage(SendMessageEvent),
+    /// Closes the WebSocket connection.
+    Close { code: u16, reason: Utf8Bytes },
     /// Complete the response with failure due to an application exception.
     Exception,
 }
 
 /// A Python future to notify when a receive completes.
-pub(crate) struct RecvFuture {
+pub(super) struct RecvFuture {
     future: Option<LoopFuture>,
-    executor: Executor,
+    executor: WebSocketExecutor,
 }
 
 impl Drop for RecvFuture {
@@ -744,15 +747,15 @@ impl Drop for RecvFuture {
 }
 
 /// A Python future with its associated event loop for easy access from Rust.
-pub(crate) struct LoopFuture {
+pub(super) struct LoopFuture {
     future: Py<PyAny>,
     loop_: Py<PyAny>,
 }
 
 /// A Python future to notify when a send completes.
-pub(crate) struct SendFuture {
+pub(super) struct SendFuture {
     future: Option<LoopFuture>,
-    executor: Executor,
+    executor: WebSocketExecutor,
 }
 
 impl Drop for SendFuture {

@@ -6,3 +6,7 @@ coverage:
   status:
     project: off
     patch: off
+
+ignore:
+  # TODO: Run tests after next Envoy release.
+  - "src/asgi/websocket/**"

@@ -7,7 +7,7 @@ import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pathlib import Path
-from typing import get_args
+from typing import cast, get_args
 
 import yaml
 from envoy import get_envoy_path
@@ -41,6 +41,7 @@ class CLIArgs:
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
+    websockets: bool
     reload: bool
     reload_dirs: list[str]
     reload_includes: list[str]
@@ -149,6 +150,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--websockets",
+        help="enable WebSockets support",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--reload",
         help="enable auto-reloading on code changes",
         action="store_true",
@@ -215,7 +223,15 @@ async def amain() -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            mounts.append(Mount(app=app, path=path, interface=interface))
+            if interface not in get_args(Interface):
+                print(  # noqa: T201
+                    f"Invalid interface '{interface}' for additional mount '{mount_str}', expected one of {', '.join(get_args(Interface))}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            mounts.append(
+                Mount(app=app, path=path, interface=cast("Interface", interface))
+            )
         app = mounts
     else:
         app = args.app
@@ -237,6 +253,7 @@ async def amain() -> None:
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
         lifespan=args.lifespan,
+        websockets=args.websockets,
         additional_envoy_args=additional_envoy_args,
     )
 

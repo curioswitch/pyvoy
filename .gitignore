@@ -20,3 +20,5 @@ profile.json.gz
 out
 site
 .DS_Store
+
+wstest/reports
