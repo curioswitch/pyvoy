@@ -251,6 +251,9 @@ pub(crate) struct Constants {
     /// The function reset on the ContextVar used for transport bridging.
     pub transport_bridge_contextvar_reset: Py<PyAny>,
 
+    /// The function `pyvoy._glue.forward_bytes`.
+    pub glue_forward_bytes: Py<PyAny>,
+
     /// A singleton ClientDisconnectedError exception instance.
     /// The traceback is not important since it is caused by the client,
     /// so we can share it.
@@ -284,6 +287,9 @@ impl Constants {
         let transport_bridge_contextvar = mod_contextvars
             .getattr("ContextVar")?
             .call1(("pyvoy.asgi.transport_bridge",))?;
+
+        let mod_glue = py.import("pyvoy._glue")?;
+        let glue_forward_bytes = mod_glue.getattr("forward_bytes")?;
 
         Ok(Self {
             asgi: PyString::new(py, "asgi").unbind(),
@@ -399,6 +405,8 @@ impl Constants {
             url: PyString::new(py, "url").unbind(),
             class_pyqwest_headers: mod_pyqwest.getattr("Headers")?.unbind(),
             class_pyqwest_response: mod_pyqwest.getattr("Response")?.unbind(),
+
+            glue_forward_bytes: glue_forward_bytes.unbind(),
 
             transport_bridge_contextvar_get: transport_bridge_contextvar.getattr("get")?.unbind(),
             transport_bridge_contextvar_set: transport_bridge_contextvar.getattr("set")?.unbind(),

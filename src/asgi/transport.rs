@@ -22,7 +22,7 @@ use url::Url;
 use crate::{
     asgi::{
         python::{self, EVENT_ID_OUTGOING_REQUEST, LoopFuture},
-        shared::awaitable::ValueAwaitable,
+        shared::awaitable::{EmptyAwaitable, ValueAwaitable},
     },
     eventbridge::EventBridge,
     types::Constants,
@@ -47,7 +47,7 @@ pub(super) enum RequestBody {
     Iter(Py<PyAny>),
 }
 
-pub(super) struct StartStreamEvent {
+pub(crate) struct StartStreamEvent {
     pub method: http::Method,
     pub url: Url,
     pub headers: Vec<(HeaderName, HeaderValue)>,
@@ -57,7 +57,7 @@ pub(super) struct StartStreamEvent {
     pub response_content: ResponseContent,
 }
 
-pub(super) struct SendStreamDataEvent {
+pub(crate) struct SendStreamDataEvent {
     pub stream_handle: u64,
     pub data: Bytes,
     pub end_stream: bool,
@@ -75,7 +75,7 @@ pub(super) struct OnHttpStreamDataEvent {
     pub end_stream: bool,
 }
 
-pub(super) enum TransportEvent {
+pub(crate) enum TransportEvent {
     Start(StartStreamEvent),
     SendData(SendStreamDataEvent),
 }
@@ -218,26 +218,38 @@ impl HTTPTransport {
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
 pub(crate) struct StreamStartExecutor {
+    stream_handle: u64,
     headers: Vec<(HeaderName, HeaderValue)>,
+    request_iter: Option<Py<PyAny>>,
     pub(crate) response_future: Py<PyAny>,
     pub(crate) response_content: ResponseContent,
     end_stream: bool,
+    bridge: EventBridge<TransportEvent>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     constants: Arc<Constants>,
 }
 
 impl StreamStartExecutor {
     pub(crate) fn new(
+        stream_handle: u64,
         headers: Vec<(HeaderName, HeaderValue)>,
+        request_iter: Option<Py<PyAny>>,
         response_future: Py<PyAny>,
         response_content: ResponseContent,
         end_stream: bool,
+        bridge: EventBridge<TransportEvent>,
+        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         constants: Arc<Constants>,
     ) -> Self {
         Self {
+            stream_handle,
             headers,
+            request_iter,
             response_future,
             response_content,
             end_stream,
+            bridge,
+            scheduler: Arc::new(scheduler),
             constants,
         }
     }
@@ -275,6 +287,27 @@ impl StreamStartExecutor {
             kwargs.set_item(&self.constants.headers, headers)?;
         }
         if !self.end_stream {
+            if let Some(request_iter) = &self.request_iter {
+                let request_content = RequestContent {
+                    stream_handle: self.stream_handle,
+                    bridge: self.bridge.clone(),
+                    scheduler: self.scheduler.clone(),
+                }
+                .into_bound_py_any(py)?;
+                let coro = self
+                    .constants
+                    .glue_forward_bytes
+                    .bind(py)
+                    .call1((&request_iter, request_content))?;
+                // TODO: Cancel
+                println!("Creating task for request body iteration");
+                self.response_content
+                    .inner
+                    .loop_
+                    .bind(py)
+                    .call_method1(&self.constants.create_task, (coro,))?;
+            }
+
             let trailers = self.constants.class_pyqwest_headers.bind(py).call0()?;
             {
                 let mut state = self
@@ -480,19 +513,28 @@ struct RequestContent {
 
 #[pymethods]
 impl RequestContent {
-    fn __call__(&self, data: &Bound<'_, PyAny>) -> PyResult<()> {
-        let data = data.extract::<Bytes>()?;
+    fn __call__<'py>(
+        &self,
+        py: Python<'py>,
+        data: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        // TODO: Backpressure
+        let (body, end_stream) = if data.is_none() {
+            (Bytes::new(), true)
+        } else {
+            (data.extract::<Bytes>()?, false)
+        };
         if self
             .bridge
             .send(TransportEvent::SendData(SendStreamDataEvent {
                 stream_handle: self.stream_handle,
-                data,
-                end_stream: false,
+                data: body,
+                end_stream,
             }))
             .is_ok()
         {
             self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
         }
-        Ok(())
+        EmptyAwaitable::new_py(py)
     }
 }

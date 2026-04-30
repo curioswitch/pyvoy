@@ -222,16 +222,20 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             return;
         };
         self.executor.handle_transport_stream_started(
+            stream_handle,
             headers,
+            state.request_iter.take(),
             state.response_content.clone(),
             future,
             end_stream,
+            self.transport_bridge.clone(),
+            Box::from(envoy_filter.new_scheduler()),
         );
     }
 
     fn on_http_stream_data(
         &mut self,
-        envoy_filter: &mut EHF,
+        _envoy_filter: &mut EHF,
         stream_handle: u64,
         response_data: &[EnvoyBuffer],
         end_stream: bool,
@@ -389,7 +393,7 @@ impl Filter {
                 let (body, end_stream, request_iter) = match event.body {
                     RequestBody::Empty => (None, true, None),
                     RequestBody::Buffered(body) => (Some(body), true, None),
-                    RequestBody::Iter(iter) => (None, true, Some(iter)),
+                    RequestBody::Iter(iter) => (None, false, Some(iter)),
                 };
                 let cluster_name = if let Some(name) = event.cluster_name.as_ref() {
                     name.as_str()

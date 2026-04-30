@@ -187,16 +187,24 @@ impl Executor {
 
     pub(crate) fn handle_transport_stream_started(
         &self,
+        stream_handle: u64,
         request_headers: Vec<(HeaderName, HeaderValue)>,
+        request_iter: Option<Py<PyAny>>,
         response_content: ResponseContent,
         response_future: Py<PyAny>,
         end_stream: bool,
+        bridge: EventBridge<TransportEvent>,
+        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         let stream_start_executor = StreamStartExecutor::new(
+            stream_handle,
             request_headers,
+            request_iter,
             response_future,
             response_content,
             end_stream,
+            bridge,
+            scheduler,
             self.constants.clone(),
         );
         self.tx
