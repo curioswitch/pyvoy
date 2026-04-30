@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyBuffer, EnvoyHttpFilterScheduler};
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
@@ -57,6 +57,12 @@ pub(super) struct StartStreamEvent {
     pub response_content: ResponseContent,
 }
 
+pub(super) struct SendStreamDataEvent {
+    pub stream_handle: u64,
+    pub data: Bytes,
+    pub end_stream: bool,
+}
+
 pub(super) struct OnHttpStreamheadersEvent {
     pub stream_handle: u64,
     pub headers: Vec<(HeaderName, HeaderValue)>,
@@ -71,10 +77,7 @@ pub(super) struct OnHttpStreamDataEvent {
 
 pub(super) enum TransportEvent {
     Start(StartStreamEvent),
-    // We need to schedule transport events within the Envoy filter itself since
-    // on_http_stream callbacks seem to be invoked from arbitrary threads.
-    OnHttpStreamHeaders(OnHttpStreamheadersEvent),
-    OnHttpStreamData(OnHttpStreamDataEvent),
+    SendData(SendStreamDataEvent),
 }
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
@@ -300,9 +303,10 @@ impl StreamStartExecutor {
     }
 }
 
-pub struct ResponseState {
-    pub(super) future: Option<Py<PyAny>>,
-    pub(super) content: ResponseContent,
+pub struct TransportState {
+    pub(super) request_iter: Option<Py<PyAny>>,
+    pub(super) response_future: Option<Py<PyAny>>,
+    pub(super) response_content: ResponseContent,
 }
 
 struct ResponseContentState {
@@ -462,6 +466,32 @@ impl ResponseContent {
                 &inner.constants.set_exception,
                 (PyStopAsyncIteration::new_err(()),),
             )?;
+        }
+        Ok(())
+    }
+}
+
+#[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
+struct RequestContent {
+    stream_handle: u64,
+    bridge: EventBridge<TransportEvent>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+}
+
+#[pymethods]
+impl RequestContent {
+    fn __call__(&self, data: &Bound<'_, PyAny>) -> PyResult<()> {
+        let data = data.extract::<Bytes>()?;
+        if self
+            .bridge
+            .send(TransportEvent::SendData(SendStreamDataEvent {
+                stream_handle: self.stream_handle,
+                data,
+                end_stream: false,
+            }))
+            .is_ok()
+        {
+            self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
         }
         Ok(())
     }
