@@ -58,7 +58,7 @@ class Mount:
 
 
 @dataclass(frozen=True, slots=True)
-class TlsConfig:
+class TLSConfig:
     key: bytes | os.PathLike | None = None
     """The TLS key as bytes or a path to a file containing it."""
 
@@ -83,7 +83,7 @@ class Cluster:
     If not specified, will use HTTP/1 for plaintext and ALPN to autodetect for TLS.
     """
 
-    tls: TlsConfig | None = None
+    tls: TLSConfig | None = None
     """TLS configuration for connecting to this cluster. If not specified, will use plaintext."""
 
 

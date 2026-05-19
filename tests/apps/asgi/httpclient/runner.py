@@ -1,64 +1,62 @@
 from __future__ import annotations
 
-import os
 import traceback
 from typing import TYPE_CHECKING
 
-from pyqwest import Client
+from pyqwest import Client, HTTPVersion
 
 from pyvoy.asgi.httpclient import HTTPTransport
+
+from .cases import client
 
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
 
 client_h1c = Client(HTTPTransport("backend_h1c"))
+client_h1 = Client(HTTPTransport("backend_h1"))
 client_h2c = Client(HTTPTransport("backend_h2c"))
-backend = os.getenv("TEST_URL")
-
-
-async def client_get() -> None:
-    url = f"{backend}/echo"
-    resp = await client_h1c.get(url, params={"foo": "bar"})
-    assert resp.status == 200
-    assert resp.headers["x-echo-method"] == "GET"
-    assert resp.headers["x-echo-query-string"] == "foo=bar"
-    assert resp.content == b""
-    assert len(resp.trailers) == 0
-
-
-async def client_post() -> None:
-    url = f"{backend}/echo"
-    headers = [("content-type", "text/plain"), ("te", "trailers")]
-
-    req_content = b"Hello, World!"
-    resp = await client_h2c.post(url, headers, req_content, params={"foo": "bar"})
-    assert resp.status == 200
-    assert resp.headers["x-echo-method"] == "POST"
-    assert resp.headers["x-echo-query-string"] == "foo=bar"
-    assert resp.headers["x-echo-content-type"] == "text/plain"
-    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
-    assert resp.content == b"Hello, World!"
-    assert resp.trailers["x-echo-trailer"] == "last info"
+client_h2 = Client(HTTPTransport("backend_h2"))
 
 
 async def app(
     scope: Scope, _receive: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
-    print(scope)
     assert scope["type"] == "http"  # noqa: S101
     headers = {k.decode(): v.decode() for k, v in scope["headers"]}
+    scheme = headers["x-test-scheme"]
+    http_version_str = headers["x-test-http-version"]
+    match http_version_str:
+        case "h1":
+            http_version = HTTPVersion.HTTP1
+        case "h2":
+            http_version = HTTPVersion.HTTP2
+        case _:
+            http_version = None
+    match (scheme, http_version_str):
+        case ("http", "h1"):
+            http_client = client_h1c
+        case ("https", "h1"):
+            http_client = client_h1
+        case ("http", "h2"):
+            http_client = client_h2c
+        case ("https", "h2"):
+            http_client = client_h2
+        case _:
+            msg = f"Unknown scheme and HTTP version combination: {scheme} {http_version_str}"
+            raise RuntimeError(msg)
+    url = f"http{'s' if scheme == 'https' else ''}://localhost"
+
     try:
         match headers["x-test-case"]:
             case "client_get":
-                await client_get()
+                await client.get(http_client, url)
             case "client_post":
-                await client_post()
+                await client.post(http_client, url, http_version)
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301
     except Exception:
         response_body = traceback.format_exc().encode()
-        print(response_body.decode())
         await send(
             {
                 "type": "http.response.start",

@@ -135,7 +135,6 @@ async def _get_cookie(
 async def app(
     scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
-    print(scope)
     assert scope["type"] == "http"  # noqa: S101
     match scope["path"]:
         case "/echo":

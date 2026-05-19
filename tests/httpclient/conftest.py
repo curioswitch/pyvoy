@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 import trustme
 
-from pyvoy import Cluster, HTTPVersion, PyvoyServer
+from pyvoy import Cluster, HTTPVersion, PyvoyServer, TLSConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 @dataclass
 class Certs:
     ca: bytes
-    server_cert: bytes
-    server_key: bytes
+    cert: bytes
+    key: bytes
 
 
 @pytest.fixture(scope="module")
@@ -25,26 +25,25 @@ def ca() -> trustme.CA:
     return trustme.CA()
 
 
-@pytest.fixture(scope="module")
-def certs(ca: trustme.CA) -> Certs:
-    server = ca.issue_cert("localhost")
-    return Certs(
-        ca=ca.cert_pem.bytes(),
-        server_cert=server.cert_chain_pems[0].bytes(),
-        server_key=server.private_key_pem.bytes(),
-    )
-
-
 @pytest_asyncio.fixture(scope="module")
-async def backend_asgi() -> AsyncIterator[PyvoyServer]:
+async def backend_asgi(ca: trustme.CA) -> AsyncIterator[PyvoyServer]:
+    cert = ca.issue_cert("localhost")
     async with PyvoyServer(
-        "tests.apps.asgi.httpclient.kitchensink", lifespan=False
+        "tests.apps.asgi.httpclient.kitchensink",
+        lifespan=False,
+        tls_port=0,
+        tls_key=cert.private_key_pem.bytes(),
+        tls_cert=cert.cert_chain_pems[0].bytes(),
+        tls_ca_cert=ca.cert_pem.bytes(),
     ) as server:
         yield server
 
 
 @pytest_asyncio.fixture(scope="module")
-async def runner_asgi(backend_asgi: PyvoyServer) -> AsyncIterator[PyvoyServer]:
+async def runner_asgi(
+    backend_asgi: PyvoyServer, ca: trustme.CA
+) -> AsyncIterator[PyvoyServer]:
+    cert = ca.issue_cert("localhost")
     async with PyvoyServer(
         "tests.apps.asgi.httpclient.runner",
         lifespan=False,
@@ -58,9 +57,29 @@ async def runner_asgi(backend_asgi: PyvoyServer) -> AsyncIterator[PyvoyServer]:
                 http_version=HTTPVersion.HTTP1,
             ),
             Cluster(
+                name="backend_h1",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
+                http_version=HTTPVersion.HTTP1,
+                tls=TLSConfig(
+                    key=cert.private_key_pem.bytes(),
+                    cert=cert.cert_chain_pems[0].bytes(),
+                    ca_cert=ca.cert_pem.bytes(),
+                ),
+            ),
+            Cluster(
                 name="backend_h2c",
                 address=f"localhost:{backend_asgi.listener_port}",
                 http_version=HTTPVersion.HTTP2,
+            ),
+            Cluster(
+                name="backend_h2",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
+                http_version=HTTPVersion.HTTP2,
+                tls=TLSConfig(
+                    key=cert.private_key_pem.bytes(),
+                    cert=cert.cert_chain_pems[0].bytes(),
+                    ca_cert=ca.cert_pem.bytes(),
+                ),
             ),
         ],
     ) as server:
@@ -75,3 +94,13 @@ async def url_asgi(runner_asgi: PyvoyServer) -> AsyncIterator[str]:
 @pytest.fixture
 def url(url_asgi: str) -> str:
     return url_asgi
+
+
+@pytest.fixture(params=["http", "https"])
+def http_scheme(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture(params=["h1", "h2"])
+def http_version(request: pytest.FixtureRequest) -> str:
+    return request.param

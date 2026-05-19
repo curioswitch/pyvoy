@@ -9,7 +9,6 @@ use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     Bound, IntoPyObjectExt, Py, PyAny, PyResult, Python,
     exceptions::{PyRuntimeError, PyStopAsyncIteration, PyValueError},
-    pybacked::PyBackedBytes,
     pyclass, pymethods,
     sync::MutexExt,
     types::{

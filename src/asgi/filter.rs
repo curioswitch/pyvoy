@@ -9,10 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::asgi::python;
 use crate::asgi::python::*;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::transport::{
-    OnHttpStreamDataEvent, OnHttpStreamheadersEvent, RequestBody, SendStreamDataEvent,
-    TransportEvent, TransportState,
-};
+use crate::asgi::transport::{RequestBody, SendStreamDataEvent, TransportEvent, TransportState};
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::types::*;
@@ -292,7 +289,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         println!("Transport stream reset by Envoy {_reset_reason:?}");
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {}
+    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {}
 }
 
 impl Filter {

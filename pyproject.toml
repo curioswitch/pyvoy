@@ -218,6 +218,18 @@ typing-extensions = false
   "PERF",
   "D",
 ]
+"tests/**/httpclient/cases/**" = [
+  "ANN",
+  "S101",
+  "S603",
+  "S607",
+  "FBT",
+  "EM",
+  "INP",
+  "SLF",
+  "PERF",
+  "D",
+]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]

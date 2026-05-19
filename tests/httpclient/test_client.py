@@ -8,13 +8,29 @@ if TYPE_CHECKING:
     from pyqwest import Client
 
 
-@pytest.mark.asyncio
-async def test_get(url: str, client: Client) -> None:
-    response = await client.get(url, headers={"x-test-case": "client_get"})
+async def _run_test(
+    case: str, url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    response = await client.get(
+        url,
+        headers={
+            "x-test-case": case,
+            "x-test-scheme": http_scheme,
+            "x-test-http-version": http_version,
+        },
+    )
     assert response.status == 200, response.text()
 
 
 @pytest.mark.asyncio
-async def test_post(url: str, client: Client) -> None:
-    response = await client.get(url, headers={"x-test-case": "client_post"})
-    assert response.status == 200, response.text()
+async def test_get(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_get", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_post(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_post", url, client, http_scheme, http_version)
