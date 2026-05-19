@@ -18,6 +18,7 @@ bytes = "1.11.1"
 crossbeam-channel = "0.5.15"
 encoding_rs = "0.8.35"
 http = "1.4.0"
+itoa = "1.0.18"
 pyo3 = { version = "0.28.0", features = ["bytes"] }
 tungstenite = "0.29.0"
 urlencoding = "2.1.3"

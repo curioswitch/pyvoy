@@ -42,8 +42,7 @@ impl Drop for CanceledFuture {
 }
 
 pub(super) enum RequestBody {
-    Empty,
-    Buffered(PyBackedBytes),
+    Buffered(Bytes),
     Iter(Py<PyAny>),
 }
 
@@ -186,9 +185,7 @@ impl HTTPTransport {
         }
 
         let request_body = request.getattr(&self.constants.content)?;
-        let body = if request_body.is_none() {
-            RequestBody::Empty
-        } else if let Ok(bytes) = request_body.extract::<PyBackedBytes>() {
+        let body = if let Ok(bytes) = request_body.extract::<Bytes>() {
             RequestBody::Buffered(bytes)
         } else {
             RequestBody::Iter(request_body.unbind())

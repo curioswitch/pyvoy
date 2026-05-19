@@ -25,15 +25,33 @@ async def client_get() -> None:
     assert len(resp.trailers) == 0
 
 
+async def client_post() -> None:
+    url = f"{backend}/echo"
+    headers = [("content-type", "text/plain"), ("te", "trailers")]
+
+    req_content = b"Hello, World!"
+    resp = await client.post(url, headers, req_content, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "POST"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.headers["x-echo-content-type"] == "text/plain"
+    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
+    assert resp.content == b"Hello, World!"
+    # assert resp.trailers["x-echo-trailer"] == "last info"
+
+
 async def app(
     scope: Scope, _receive: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
+    print(scope)
     assert scope["type"] == "http"  # noqa: S101
     headers = {k.decode(): v.decode() for k, v in scope["headers"]}
     try:
         match headers["x-test-case"]:
             case "client_get":
                 await client_get()
+            case "client_post":
+                await client_post()
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301

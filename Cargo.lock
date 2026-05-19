@@ -621,6 +621,7 @@ dependencies = [
  "encoding_rs",
  "envoy-proxy-dynamic-modules-rust-sdk",
  "http",
+ "itoa",
  "pyo3",
  "pyo3-build-config",
  "tungstenite",

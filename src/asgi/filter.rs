@@ -285,6 +285,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         _stream_handle: u64,
         _reset_reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
     ) {
+        println!("Transport stream reset by Envoy {_reset_reason:?}");
     }
 
     fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {}
@@ -373,7 +374,11 @@ impl Filter {
         self.transport_bridge.process(|event| match event {
             TransportEvent::Start(event) => {
                 let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
+                let mut has_content_length = false;
                 for (k, v) in event.headers.iter() {
+                    if k == http::header::CONTENT_LENGTH {
+                        has_content_length = true;
+                    }
                     headers.push((k.as_str(), v.as_bytes()));
                 }
                 headers.push((":method", event.method.as_str().as_bytes()));
@@ -391,10 +396,16 @@ impl Filter {
                     &event.url[url::Position::BeforeHost..url::Position::AfterPort]
                 );
                 let (body, end_stream, request_iter) = match event.body {
-                    RequestBody::Empty => (None, true, None),
                     RequestBody::Buffered(body) => (Some(body), true, None),
                     RequestBody::Iter(iter) => (None, false, Some(iter)),
                 };
+                let mut content_length_buffer = itoa::Buffer::new();
+                if let Some(body) = &body && !has_content_length {
+                    headers.push((
+                        "content-length",
+                        content_length_buffer.format(body.len()).as_bytes(),
+                    ));
+                }
                 let cluster_name = if let Some(name) = event.cluster_name.as_ref() {
                     name.as_str()
                 } else {
@@ -403,7 +414,7 @@ impl Filter {
                         _ => "__pyvoy_default_upstream_http__",
                     }
                 };
-                println!("Starting transport stream to cluster {cluster_name}");
+                println!("Starting transport stream to cluster {cluster_name} {end_stream}");
                 let (_res, stream_id) = envoy_filter.start_http_stream(
                     cluster_name,
                     headers,
@@ -412,7 +423,7 @@ impl Filter {
                     60_000,
                 );
                 println!(
-                    "Started transport stream to cluster {cluster_name} with stream: {stream_id}"
+                    "Started transport stream to cluster {cluster_name} with stream: {stream_id}, res: {_res:?}",
                 );
                 self.transport_responses.insert(
                     stream_id,

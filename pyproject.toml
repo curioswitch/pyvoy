@@ -29,11 +29,20 @@ classifiers = [
 dependencies = [
   "envoy-server==1.37.0",
   "find-libpython>=0.5.1",
-  "pyqwest==0.5.1",
+  "pyqwest>=0.6.0",
   "pyyaml>=6.0",
   "uvloop>=0.22.1; sys_platform != 'win32'",
   "winloop>=0.4.1; sys_platform == 'win32'",
 ]
+
+[project.urls]
+Changelog = "https://github.com/curioswitch/pyvoy/releases"
+Homepage = "https://github.com/curioswitch/pyvoy"
+Issues = "https://github.com/curioswitch/pyvoy/issues"
+Repository = "https://github.com/curioswitch/pyvoy.git"
+
+[project.scripts]
+pyvoy = "pyvoy._cli:main"
 
 [dependency-groups]
 dev = [
@@ -58,22 +67,33 @@ dev = [
 
 docs = ["mkdocstrings-python", "zensical"]
 
-[project.urls]
-Changelog = "https://github.com/curioswitch/pyvoy/releases"
-Homepage = "https://github.com/curioswitch/pyvoy"
-Issues = "https://github.com/curioswitch/pyvoy/issues"
-Repository = "https://github.com/curioswitch/pyvoy.git"
-
-[project.scripts]
-pyvoy = "pyvoy._cli:main"
-
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]
 build-backend = "uv_build"
 
-[tool.uv.build-backend]
-module-name = "pyvoy"
-module-root = ""
+[tool.bumpversion]
+current_version = "0.3.0"
+files = [{ filename = "pyproject.toml" }, { filename = "Cargo.toml" }]
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+search = "version = \"{current_version}\""
+replace = "version = \"{new_version}\""
+regex = false
+tag = false
+allow_dirty = true
+ignore_missing_version = false
+commit = true
+message = "Bump version: {current_version} → {new_version}"
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "module"
+asyncio_default_test_loop_scope = "module"
+
+[tool.ruff]
+# Don't run ruff on generated code from external plugins.
+extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
 
 [tool.ruff.format]
 skip-magic-trailing-comma = true
@@ -141,7 +161,7 @@ extend-select = [
 ]
 
 # Document reasons for ignoring specific linting errors
-extend-ignore = [
+ignore = [
   # Not applicable
   "AIR",
   # Dangerous false positives https://github.com/astral-sh/ruff/issues/4845
@@ -203,26 +223,6 @@ typing-extensions = false
 required-imports = ["from __future__ import annotations"]
 split-on-trailing-comma = false
 
-[tool.ruff]
-# Don't run ruff on generated code from external plugins.
-extend-exclude = ["*_pb2.py", "*_pb2.pyi"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = ["--import-mode=importlib"]
-asyncio_default_fixture_loop_scope = "module"
-asyncio_default_test_loop_scope = "module"
-
-[tool.bumpversion]
-current_version = "0.3.0"
-files = [{ filename = "pyproject.toml" }, { filename = "Cargo.toml" }]
-parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
-serialize = ["{major}.{minor}.{patch}"]
-search = "version = \"{current_version}\""
-replace = "version = \"{new_version}\""
-regex = false
-tag = false
-allow_dirty = true
-ignore_missing_version = false
-commit = true
-message = "Bump version: {current_version} → {new_version}"
+[tool.uv.build-backend]
+module-name = "pyvoy"
+module-root = ""
