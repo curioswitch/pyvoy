@@ -38,7 +38,7 @@ async def client_post() -> None:
     assert resp.headers["x-echo-content-type"] == "text/plain"
     assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
     assert resp.content == b"Hello, World!"
-    # assert resp.trailers["x-echo-trailer"] == "last info"
+    assert resp.trailers["x-echo-trailer"] == "last info"
 
 
 async def app(

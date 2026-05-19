@@ -415,6 +415,7 @@ impl ResponseContent {
         }
         let mut state = self.inner.state.lock().unwrap();
         state.http_trailers = Some(trailers);
+        state.end_stream = true;
         state.pending_future.is_some()
     }
 }

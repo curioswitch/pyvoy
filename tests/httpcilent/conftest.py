@@ -30,6 +30,12 @@ async def runner_asgi(backend_asgi: PyvoyServer) -> AsyncIterator[PyvoyServer]:
                 "type": "STATIC",
                 "connect_timeout": "5s",
                 "lb_policy": "ROUND_ROBIN",
+                "typed_extension_protocol_options": {
+                    "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
+                        "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
+                        "explicit_http_config": {"http2_protocol_options": {}},
+                    }
+                },
                 "load_assignment": {
                     "cluster_name": "backend",
                     "endpoints": [

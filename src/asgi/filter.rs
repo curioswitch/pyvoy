@@ -267,6 +267,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         stream_handle: u64,
         response_trailers: &[(EnvoyBuffer, EnvoyBuffer)],
     ) {
+        println!(
+            "Received trailers for transport stream {stream_handle}, has_state={}",
+            self.transport_responses.contains_key(&stream_handle)
+        );
         let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
             return;
         };
