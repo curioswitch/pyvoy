@@ -125,10 +125,9 @@ struct HTTPTransport {
 #[pymethods]
 impl HTTPTransport {
     #[new]
-    #[pyo3(signature = (*, cluster_name=None))]
-    fn py_new(py: Python<'_>, cluster_name: Option<String>) -> Self {
+    fn py_new(py: Python<'_>, cluster_name: String) -> Self {
         Self {
-            cluster_name: cluster_name.map(Arc::new),
+            cluster_name: Some(Arc::new(cluster_name)),
             constants: Constants::get(py),
         }
     }

@@ -12,7 +12,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import IO, TYPE_CHECKING, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit
 
 import find_libpython
 from envoy import get_envoy_path
@@ -30,7 +31,7 @@ LogLevel = Literal[
 ]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Mount:
     app: str
     """The application to mount."""
@@ -40,6 +41,15 @@ class Mount:
 
     interface: Interface = "asgi"
     """The interface type of the application."""
+
+
+@dataclass(frozen=True, slots=True)
+class Cluster:
+    name: str
+    """The name of the cluster. Must be passed to HTTPTransport."""
+
+    address: str
+    """The address to connect to as host:port."""
 
 
 def get_envoy_environ() -> dict[str, str]:
@@ -91,6 +101,7 @@ class PyvoyServer:
     _lifespan: bool | None
     _additional_envoy_args: list[str] | None
     _env: dict[str, str]
+    _clusters: list[dict[str, Any] | Cluster]
 
     _admin_address: str | None
 
@@ -114,6 +125,7 @@ class PyvoyServer:
         websockets: bool = False,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
+        clusters: list[dict[str, Any] | Cluster] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
     ) -> None:
@@ -140,6 +152,8 @@ class PyvoyServer:
             worker_threads: The number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
+            env: Additional environment variables to pass to the Envoy process.
+            upstreams: A list of upstream clusters to add to the Envoy configuration.
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """
@@ -162,6 +176,7 @@ class PyvoyServer:
         self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
         self._env = env if env is not None else {}
+        self._clusters = clusters if clusters is not None else []
 
         self._process = None
         self._listener_port_tls = None
@@ -578,60 +593,53 @@ class PyvoyServer:
                 }
             )
 
-        clusters: list[dict] = [
-            {
-                "name": "__pyvoy_default_upstream_http__",
-                "lb_policy": "CLUSTER_PROVIDED",
-                "cluster_type": {
-                    "name": "envoy.clusters.dynamic_forward_proxy",
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig",
-                        "dns_cache_config": {
-                            "name": "__pyvoy_default_upstream_http_cache__",
-                            "dns_lookup_family": "V4_ONLY",
-                        },
-                    },
-                },
-            },
-            {
-                "name": "__pyvoy_default_upstream_https__",
-                "lb_policy": "CLUSTER_PROVIDED",
-                "cluster_type": {
-                    "name": "envoy.clusters.dynamic_forward_proxy",
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig",
-                        "dns_cache_config": {
-                            "name": "__pyvoy_default_upstream_https_cache__",
-                            "dns_lookup_family": "V4_ONLY",
-                        },
-                    },
-                },
-            },
-        ]
-
         ca_file = ssl.get_default_verify_paths().cafile
         if ca_file is None:
             msg = "Could not find a default system CA certificates file."
             raise StartupError(msg)
 
-        clusters[1]["transport_socket"] = {
-            "name": "envoy.transport_sockets.tls",
-            "typed_config": {
-                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
-                "auto_host_sni": True,
-                "auto_sni_san_validation": True,
-                "common_tls_context": {
-                    "alpn_protocols": ["h2", "http/1.1"],
-                    "validation_context": {"trusted_ca": {"filename": ca_file}},
-                },
-            },
-        }
-
+        static_resources = {"listeners": listeners}
+        if self._clusters:
+            clusters = []
+            for cluster in self._clusters:
+                if isinstance(cluster, Cluster):
+                    result = urlsplit(f"//{cluster.address}")
+                    clusters.append(
+                        {
+                            "name": cluster.name,
+                            "connect_timeout": "5s",
+                            "type": "STRICT_DNS",
+                            "dns_lookup_family": "V4_ONLY",
+                            "lb_policy": "ROUND_ROBIN",
+                            "load_assignment": {
+                                "cluster_name": cluster.name,
+                                "endpoints": [
+                                    {
+                                        "lb_endpoints": [
+                                            {
+                                                "endpoint": {
+                                                    "address": {
+                                                        "socket_address": {
+                                                            "address": result.hostname,
+                                                            "port_value": result.port,
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                else:
+                    clusters.append(cluster)
+            static_resources["clusters"] = clusters
         return {
             "admin": {
                 "address": {"socket_address": {"address": "127.0.0.1", "port_value": 0}}
             },
-            "static_resources": {"listeners": listeners, "clusters": clusters},
+            "static_resources": static_resources,
         }
 
 

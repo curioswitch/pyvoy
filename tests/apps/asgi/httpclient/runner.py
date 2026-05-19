@@ -11,7 +11,7 @@ from pyvoy.asgi.httpclient import HTTPTransport
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
 
-client = Client(HTTPTransport())
+client = Client(HTTPTransport("backend"))
 backend = os.getenv("TEST_URL")
 
 
@@ -31,6 +31,7 @@ async def client_post() -> None:
 
     req_content = b"Hello, World!"
     resp = await client.post(url, headers, req_content, params={"foo": "bar"})
+    print(resp.content.decode())
     assert resp.status == 200
     assert resp.headers["x-echo-method"] == "POST"
     assert resp.headers["x-echo-query-string"] == "foo=bar"

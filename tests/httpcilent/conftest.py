@@ -24,6 +24,33 @@ async def runner_asgi(backend_asgi: PyvoyServer) -> AsyncIterator[PyvoyServer]:
         env={
             "TEST_URL": f"http://{backend_asgi.listener_address}:{backend_asgi.listener_port}"
         },
+        clusters=[
+            {
+                "name": "backend",
+                "type": "STATIC",
+                "connect_timeout": "5s",
+                "lb_policy": "ROUND_ROBIN",
+                "load_assignment": {
+                    "cluster_name": "backend",
+                    "endpoints": [
+                        {
+                            "lb_endpoints": [
+                                {
+                                    "endpoint": {
+                                        "address": {
+                                            "socket_address": {
+                                                "address": backend_asgi.listener_address,
+                                                "port_value": backend_asgi.listener_port,
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                },
+            }
+        ],
     ) as server:
         yield server
 
