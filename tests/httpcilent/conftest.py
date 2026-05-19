@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 import pytest_asyncio
 
-from pyvoy import PyvoyServer
+from pyvoy import Cluster, HTTPVersion, PyvoyServer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -25,37 +25,16 @@ async def runner_asgi(backend_asgi: PyvoyServer) -> AsyncIterator[PyvoyServer]:
             "TEST_URL": f"http://{backend_asgi.listener_address}:{backend_asgi.listener_port}"
         },
         clusters=[
-            {
-                "name": "backend",
-                "type": "STATIC",
-                "connect_timeout": "5s",
-                "lb_policy": "ROUND_ROBIN",
-                "typed_extension_protocol_options": {
-                    "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
-                        "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
-                        "explicit_http_config": {"http2_protocol_options": {}},
-                    }
-                },
-                "load_assignment": {
-                    "cluster_name": "backend",
-                    "endpoints": [
-                        {
-                            "lb_endpoints": [
-                                {
-                                    "endpoint": {
-                                        "address": {
-                                            "socket_address": {
-                                                "address": backend_asgi.listener_address,
-                                                "port_value": backend_asgi.listener_port,
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                },
-            }
+            Cluster(
+                name="backend_h1c",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port}",
+                http_version=HTTPVersion.HTTP1,
+            ),
+            Cluster(
+                name="backend_h2c",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port}",
+                http_version=HTTPVersion.HTTP2,
+            ),
         ],
     ) as server:
         yield server
