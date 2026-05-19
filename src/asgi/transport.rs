@@ -1,6 +1,6 @@
 use std::{
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use bytes::{Bytes, BytesMut};
@@ -418,6 +418,25 @@ impl ResponseContent {
         state.end_stream = true;
         state.pending_future.is_some()
     }
+
+    fn maybe_copy_trailers_to_py(
+        py: Python<'_>,
+        state: &mut MutexGuard<ResponseContentState>,
+        inner: &ResponseContentInner,
+    ) -> PyResult<()> {
+        if let Some(trailers) = state.http_trailers.take()
+            && let Some(py_trailers) = &state.trailers
+        {
+            let py_trailers = py_trailers.bind(py);
+            for (name, value) in &trailers {
+                py_trailers.call_method1(
+                    &inner.constants.add,
+                    (name.as_str(), value.to_str().unwrap_or_default()),
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[pymethods]
@@ -437,17 +456,7 @@ impl ResponseContent {
             return ValueAwaitable::new_py(py, inner.constants.empty_bytes.bind(py));
         }
 
-        if let Some(trailers) = state.http_trailers.take()
-            && let Some(py_trailers) = &state.trailers
-        {
-            let py_trailers = py_trailers.bind(py);
-            for (name, value) in &trailers {
-                py_trailers.call_method1(
-                    &inner.constants.add,
-                    (name.as_str(), value.to_str().unwrap_or_default()),
-                )?;
-            }
-        }
+        Self::maybe_copy_trailers_to_py(py, &mut state, inner)?;
 
         if !state.body.is_empty() {
             println!("Returning body chunk of len {}", state.body.len());
@@ -479,6 +488,9 @@ impl ResponseContent {
         println!("Called ResponseContent __call__");
         let inner = &self.inner;
         let mut state = inner.state.lock_py_attached(py).unwrap();
+
+        Self::maybe_copy_trailers_to_py(py, &mut state, inner)?;
+
         if state.body.is_empty() && !state.end_stream {
             return Ok(());
         }
