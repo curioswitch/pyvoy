@@ -44,10 +44,22 @@ async def app(
         case _:
             msg = f"Unknown scheme and HTTP version combination: {scheme} {http_version_str}"
             raise RuntimeError(msg)
-    url = f"http{'s' if scheme == 'https' else ''}://localhost"
+    url = f"http{'s' if scheme == 'https' else ''}://localhost:9999"
 
     try:
         match headers["x-test-case"]:
+            case "client_basic":
+                await client.basic(http_client, url, http_version, 9999)
+            case "client_iterable_body":
+                await client.iterable_body(http_client, url)
+            case "client_empty_request":
+                await client.empty_request(http_client, url)
+            case "client_bidi":
+                await client.test_bidi(http_client, url, http_version)
+            case "client_large_body":
+                await client.large_body(http_client, url, http_version)
+            case "client_readall":
+                await client.readall(http_client, url)
             case "client_get":
                 await client.get(http_client, url)
             case "client_post":
