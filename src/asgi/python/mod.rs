@@ -14,7 +14,10 @@ use crate::{
             headers::extract_headers_from_event,
             scope::new_scope_dict,
         },
-        transport::{ResponseContent, StreamStartExecutor, TransportBridge, TransportEvent},
+        transport::{
+            ReceivedResponseHeadersExecutor, RequestContent, ResponseContent, TransportBridge,
+            TransportEvent,
+        },
     },
     eventbridge::EventBridge,
     types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
@@ -185,21 +188,19 @@ impl Executor {
             .unwrap();
     }
 
-    pub(crate) fn handle_transport_stream_started(
+    pub(crate) fn handle_transport_received_response_headers(
         &self,
         stream_handle: u64,
-        request_headers: Vec<(HeaderName, HeaderValue)>,
-        request_iter: Option<Py<PyAny>>,
+        response_headers: Vec<(HeaderName, HeaderValue)>,
         response_content: ResponseContent,
         response_future: Py<PyAny>,
         end_stream: bool,
         bridge: EventBridge<TransportEvent>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
-        let stream_start_executor = StreamStartExecutor::new(
+        let stream_start_executor = ReceivedResponseHeadersExecutor::new(
             stream_handle,
-            request_headers,
-            request_iter,
+            response_headers,
             response_future,
             response_content,
             end_stream,
@@ -208,8 +209,14 @@ impl Executor {
             self.constants.clone(),
         );
         self.tx
-            .send(Event::HandleStreamStart(stream_start_executor))
+            .send(Event::HandleTransportReceivedResponseHeaders(
+                stream_start_executor,
+            ))
             .unwrap();
+    }
+
+    pub(crate) fn notify_request(&self, request_content: RequestContent) {
+        self.tx.send(Event::NotifyRequest(request_content)).unwrap();
     }
 
     pub(crate) fn notify_response(&self, response_content: ResponseContent) {
@@ -286,16 +293,18 @@ impl ExecutorInner {
             Event::HandleCanceledFuture(future) => {
                 self.handle_canceled_future(py, future)?;
             }
-            Event::HandleStreamStart(stream_start_executor) => {
-                let loop_ = stream_start_executor
-                    .response_content
-                    .inner
-                    .loop_
-                    .bind(py)
-                    .clone();
+            Event::HandleTransportReceivedResponseHeaders(executor) => {
+                let loop_ = executor.response_content.inner.loop_.bind(py).clone();
                 loop_.call_method1(
                     &self.constants.call_soon_threadsafe,
-                    (stream_start_executor.into_py_any(py)?,),
+                    (executor.into_py_any(py)?,),
+                )?;
+            }
+            Event::NotifyRequest(content) => {
+                let loop_ = content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (content.into_py_any(py)?,),
                 )?;
             }
             Event::NotifyResponse(content) => {
@@ -520,7 +529,8 @@ enum Event {
     HandleDroppedRecvFuture(LoopFuture),
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(LoopFuture),
-    HandleStreamStart(StreamStartExecutor),
+    HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
+    NotifyRequest(RequestContent),
     NotifyResponse(ResponseContent),
     HandleCanceledFuture(LoopFuture),
     Shutdown,

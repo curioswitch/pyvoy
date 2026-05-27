@@ -1,6 +1,6 @@
 use std::{
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, atomic::AtomicU64},
 };
 
 use bytes::{Bytes, BytesMut};
@@ -40,9 +40,9 @@ impl Drop for CanceledFuture {
     }
 }
 
-pub(super) enum RequestBody {
+pub(crate) enum RequestBody {
     Buffered(Bytes),
-    Iter(Py<PyAny>),
+    Iter(RequestContent),
 }
 
 pub(crate) struct StartStreamEvent {
@@ -186,7 +186,13 @@ impl HTTPTransport {
         let body = if let Ok(bytes) = request_body.extract::<Bytes>() {
             RequestBody::Buffered(bytes)
         } else {
-            RequestBody::Iter(request_body.unbind())
+            RequestBody::Iter(RequestContent::new(
+                transport_bridge.bridge.clone(),
+                &transport_bridge.scheduler,
+                request_body.unbind(),
+                loop_.clone().unbind(),
+                self.constants.clone(),
+            ))
         };
 
         let response_content = ResponseContent::new(loop_.clone().unbind(), self.constants.clone());
@@ -212,10 +218,9 @@ impl HTTPTransport {
 }
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
-pub(crate) struct StreamStartExecutor {
+pub(crate) struct ReceivedResponseHeadersExecutor {
     stream_handle: u64,
     headers: Vec<(HeaderName, HeaderValue)>,
-    request_iter: Option<Py<PyAny>>,
     pub(crate) response_future: Py<PyAny>,
     pub(crate) response_content: ResponseContent,
     end_stream: bool,
@@ -224,11 +229,10 @@ pub(crate) struct StreamStartExecutor {
     constants: Arc<Constants>,
 }
 
-impl StreamStartExecutor {
+impl ReceivedResponseHeadersExecutor {
     pub(crate) fn new(
         stream_handle: u64,
         headers: Vec<(HeaderName, HeaderValue)>,
-        request_iter: Option<Py<PyAny>>,
         response_future: Py<PyAny>,
         response_content: ResponseContent,
         end_stream: bool,
@@ -239,7 +243,6 @@ impl StreamStartExecutor {
         Self {
             stream_handle,
             headers,
-            request_iter,
             response_future,
             response_content,
             end_stream,
@@ -251,7 +254,7 @@ impl StreamStartExecutor {
 }
 
 #[pymethods]
-impl StreamStartExecutor {
+impl ReceivedResponseHeadersExecutor {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
         println!(
             "Called StreamStartExecutor with headers: {:#?}, end_stream={}",
@@ -282,27 +285,6 @@ impl StreamStartExecutor {
             kwargs.set_item(&self.constants.headers, headers)?;
         }
         if !self.end_stream {
-            if let Some(request_iter) = &self.request_iter {
-                let request_content = RequestContent {
-                    stream_handle: self.stream_handle,
-                    bridge: self.bridge.clone(),
-                    scheduler: self.scheduler.clone(),
-                }
-                .into_bound_py_any(py)?;
-                let coro = self
-                    .constants
-                    .glue_forward_bytes
-                    .bind(py)
-                    .call1((&request_iter, request_content))?;
-                // TODO: Cancel
-                println!("Creating task for request body iteration");
-                self.response_content
-                    .inner
-                    .loop_
-                    .bind(py)
-                    .call_method1(&self.constants.create_task, (coro,))?;
-            }
-
             let trailers = self.constants.class_pyqwest_headers.bind(py).call0()?;
             {
                 let mut state = self
@@ -332,7 +314,7 @@ impl StreamStartExecutor {
 }
 
 pub struct TransportState {
-    pub(super) request_iter: Option<Py<PyAny>>,
+    pub(super) request_iter: Option<RequestContent>,
     pub(super) response_future: Option<Py<PyAny>>,
     pub(super) response_content: ResponseContent,
 }
@@ -513,14 +495,14 @@ impl ResponseContent {
 }
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
-struct RequestContent {
+struct RequestContentForwarder {
     stream_handle: u64,
     bridge: EventBridge<TransportEvent>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
 }
 
 #[pymethods]
-impl RequestContent {
+impl RequestContentForwarder {
     fn __call__<'py>(
         &self,
         py: Python<'py>,
@@ -544,5 +526,86 @@ impl RequestContent {
             self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
         }
         EmptyAwaitable::new_py(py)
+    }
+}
+
+pub(crate) struct RequestContentInner {
+    stream_handle: AtomicU64,
+    bridge: EventBridge<TransportEvent>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    request_iter: Option<Py<PyAny>>,
+    pub(crate) loop_: Py<PyAny>,
+    task: Mutex<Option<Py<PyAny>>>,
+    constants: Arc<Constants>,
+}
+
+#[pyclass(module = "_pyvoy.asgi.httpclient", from_py_object, frozen)]
+#[derive(Clone)]
+pub(crate) struct RequestContent {
+    pub(crate) inner: Arc<RequestContentInner>,
+}
+
+impl RequestContent {
+    pub(crate) fn new(
+        bridge: EventBridge<TransportEvent>,
+        scheduler: &Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+        request_iter: Py<PyAny>,
+        loop_: Py<PyAny>,
+        constants: Arc<Constants>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(RequestContentInner {
+                stream_handle: AtomicU64::new(0),
+                bridge,
+                scheduler: scheduler.clone(),
+                request_iter: Some(request_iter),
+                loop_,
+                task: Mutex::new(None),
+                constants,
+            }),
+        }
+    }
+
+    pub(crate) fn set_stream_handle(&self, handle: u64) {
+        self.inner
+            .stream_handle
+            .store(handle, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[pymethods]
+impl RequestContent {
+    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
+        println!("Called StartRequestIteratorExecutor");
+        if let Some(request_iter) = &self.inner.request_iter {
+            let request_content = RequestContentForwarder {
+                stream_handle: self
+                    .inner
+                    .stream_handle
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                bridge: self.inner.bridge.clone(),
+                scheduler: self.inner.scheduler.clone(),
+            }
+            .into_bound_py_any(py)?;
+            let coro = self
+                .inner
+                .constants
+                .glue_forward_bytes
+                .bind(py)
+                .call1((&request_iter, request_content))?;
+            // TODO: Cancel
+            println!("Creating task for request body iteration");
+            let task = self
+                .inner
+                .loop_
+                .bind(py)
+                .call_method1(&self.inner.constants.create_task, (coro,))?;
+            self.inner
+                .task
+                .lock_py_attached(py)
+                .unwrap()
+                .replace(task.unbind());
+        }
+        Ok(())
     }
 }

@@ -218,10 +218,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             // Shouldn't happen in practice.
             return;
         };
-        self.executor.handle_transport_stream_started(
+        self.executor.handle_transport_received_response_headers(
             stream_handle,
             headers,
-            state.request_iter.take(),
             state.response_content.clone(),
             future,
             end_stream,
@@ -396,7 +395,7 @@ impl Filter {
                     "authority: {}",
                     &event.url[url::Position::BeforeHost..url::Position::AfterPort]
                 );
-                let (body, end_stream, request_iter) = match event.body {
+                let (body, end_stream, request_content) = match event.body {
                     RequestBody::Buffered(body) => (Some(body), true, None),
                     RequestBody::Iter(iter) => (None, false, Some(iter)),
                 };
@@ -416,7 +415,7 @@ impl Filter {
                     }
                 };
                 println!("Starting transport stream to cluster {cluster_name} {end_stream}");
-                let (_res, stream_id) = envoy_filter.start_http_stream(
+                let (_res, stream_handle) = envoy_filter.start_http_stream(
                     cluster_name,
                     headers,
                     body.as_deref(),
@@ -424,12 +423,16 @@ impl Filter {
                     60_000,
                 );
                 println!(
-                    "Started transport stream to cluster {cluster_name} with stream: {stream_id}, res: {_res:?}",
+                    "Started transport stream to cluster {cluster_name} with stream: {stream_handle}, res: {_res:?}",
                 );
+                if let Some(request_content) = &request_content {
+                    request_content.set_stream_handle(stream_handle);
+                    self.executor.notify_request(request_content.clone());
+                }
                 self.transport_responses.insert(
-                    stream_id,
+                    stream_handle,
                     TransportState {
-                        request_iter,
+                        request_iter: request_content,
                         response_future: Some(event.response_future),
                         response_content: event.response_content,
                     },
