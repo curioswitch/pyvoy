@@ -9,7 +9,12 @@ if TYPE_CHECKING:
 
 
 async def _run_test(
-    case: str, url: str, client: Client, http_scheme: str, http_version: str
+    case: str,
+    url: str,
+    client: Client,
+    http_scheme: str,
+    http_version: str,
+    extra: str = "",
 ) -> None:
     response = await client.get(
         url,
@@ -17,6 +22,7 @@ async def _run_test(
             "x-test-case": case,
             "x-test-scheme": http_scheme,
             "x-test-http-version": http_version,
+            "x-test-extra": extra,
         },
     )
     assert response.status == 200, response.text()
@@ -65,6 +71,20 @@ async def test_readall(
 
 
 @pytest.mark.asyncio
+async def test_execute(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_execute", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_execute_json(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_execute_json", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
 async def test_get(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
@@ -76,3 +96,73 @@ async def test_post(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
     await _run_test("client_post", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_delete(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_delete", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_head(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_head", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_options(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_options", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_patch(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_patch", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_put(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_put", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_nihongo(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_nihongo", url, client, http_scheme, http_version)
+
+
+# TODO: test_content_encoding
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method", ["POST", "PUT", "PATCH", "EXECUTE_POST", "STREAM_POST"]
+)
+async def test_json_content(
+    url: str, client: Client, http_scheme: str, http_version: str, method: str
+) -> None:
+    await _run_test(
+        "client_json_content", url, client, http_scheme, http_version, extra=method
+    )
+
+
+@pytest.mark.asyncio
+async def test_json_content_existing_content_type(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test(
+        "client_json_content_existing_content_type",
+        url,
+        client,
+        http_scheme,
+        http_version,
+    )

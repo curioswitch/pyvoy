@@ -25,6 +25,7 @@ async def app(
     headers = {k.decode(): v.decode() for k, v in scope["headers"]}
     scheme = headers["x-test-scheme"]
     http_version_str = headers["x-test-http-version"]
+    extra = headers.get("x-test-extra", "")
     match http_version_str:
         case "h1":
             http_version = HTTPVersion.HTTP1
@@ -60,10 +61,30 @@ async def app(
                 await client.large_body(http_client, url, http_version)
             case "client_readall":
                 await client.readall(http_client, url)
+            case "client_execute":
+                await client.execute(http_client, url)
+            case "client_execute_json":
+                await client.execute_json(http_client, url)
             case "client_get":
                 await client.get(http_client, url)
             case "client_post":
                 await client.post(http_client, url, http_version)
+            case "client_delete":
+                await client.delete(http_client, url)
+            case "client_head":
+                await client.head(http_client, url)
+            case "client_options":
+                await client.options(http_client, url)
+            case "client_patch":
+                await client.patch(http_client, url)
+            case "client_put":
+                await client.put(http_client, url)
+            case "client_nihongo":
+                await client.nihongo(http_client, url)
+            case "client_json_content":
+                await client.json_content(http_client, url, extra)
+            case "client_json_content_existing_content_type":
+                await client.json_content_existing_content_type(http_client, url)
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301

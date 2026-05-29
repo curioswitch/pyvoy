@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
+from urllib.parse import parse_qs
 
-from pyqwest import Client, Headers, HTTPVersion, SyncClient
+from pyqwest import Client, FullResponse, Headers, HTTPVersion, SyncClient
 
 
 def supports_trailers(http_version: HTTPVersion | None, url: str) -> bool:
@@ -218,6 +220,62 @@ async def readall(client: Client | SyncClient, url: str) -> None:
     assert content == b"Hello!" * 100, len(content)
 
 
+async def execute(client: Client | SyncClient, url: str) -> None:
+    method = "POST"
+    url = f"{url}/echo"
+    headers = [
+        ("content-type", "text/plain"),
+        ("x-hello", "rust"),
+        ("x-hello", "python"),
+    ]
+    req_content = b"Hello, World!"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(
+            client.execute, method, url, headers, req_content, params={"foo": "bar"}
+        )
+    else:
+        resp = await client.execute(
+            method, url, headers, req_content, params={"foo": "bar"}
+        )
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "POST"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.headers["x-echo-content-type"] == "text/plain"
+    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
+    assert resp.headers["x-echo-x-hello"] == "rust"
+    assert resp.headers.getall("x-echo-x-hello") == ["rust", "python"]
+    assert resp.content == b"Hello, World!"
+    assert resp.text() == "Hello, World!"
+    assert len(resp.trailers) == 0
+
+
+async def execute_json(client: Client | SyncClient, url: str) -> None:
+    method = "POST"
+    url = f"{url}/echo"
+    headers = [
+        ("content-type", "text/plain"),
+        ("x-hello", "rust"),
+        ("x-hello", "python"),
+    ]
+    req_content_obj = {"message": "Hello, World!"}
+    req_content = json.dumps(req_content_obj).encode("utf-8")
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(
+            client.execute, method, url, headers, req_content
+        )
+    else:
+        resp = await client.execute(method, url, headers, req_content)
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "POST"
+    assert resp.headers["x-echo-content-type"] == "text/plain"
+    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
+    assert resp.headers["x-echo-x-hello"] == "rust"
+    assert resp.headers.getall("x-echo-x-hello") == ["rust", "python"]
+    assert resp.content == req_content
+    assert resp.json() == req_content_obj
+    assert len(resp.trailers) == 0
+
+
 async def get(client: Client | SyncClient, url: str) -> None:
     url = f"{url}/echo"
     if isinstance(client, SyncClient):
@@ -253,3 +311,159 @@ async def post(
         assert resp.trailers["x-echo-trailer"] == "last info"
     else:
         assert len(resp.trailers) == 0
+
+
+async def delete(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/echo"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(client.delete, url, params={"foo": "bar"})
+    else:
+        resp = await client.delete(url, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "DELETE"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.content == b""
+    assert len(resp.trailers) == 0
+
+
+async def head(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/echo"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(client.head, url, params={"foo": "bar"})
+    else:
+        resp = await client.head(url, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "HEAD"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.content == b""
+    assert len(resp.trailers) == 0
+
+
+async def options(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/echo"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(client.options, url, params={"foo": "bar"})
+    else:
+        resp = await client.options(url, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "OPTIONS"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.content == b""
+    assert len(resp.trailers) == 0
+
+
+async def patch(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/echo"
+    headers = [("content-type", "text/plain")]
+    req_content = b"Hello, World!"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(
+            client.patch, url, headers, req_content, params={"foo": "bar"}
+        )
+    else:
+        resp = await client.patch(url, headers, req_content, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "PATCH"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.headers["x-echo-content-type"] == "text/plain"
+    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
+    assert resp.content == b"Hello, World!"
+    assert len(resp.trailers) == 0
+
+
+async def put(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/echo"
+    headers = [("content-type", "text/plain")]
+    req_content = b"Hello, World!"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(
+            client.put, url, headers, req_content, params={"foo": "bar"}
+        )
+    else:
+        resp = await client.put(url, headers, req_content, params={"foo": "bar"})
+    assert resp.status == 200
+    assert resp.headers["x-echo-method"] == "PUT"
+    assert resp.headers["x-echo-query-string"] == "foo=bar"
+    assert resp.headers["x-echo-content-type"] == "text/plain"
+    assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
+    assert resp.content == b"Hello, World!"
+    assert len(resp.trailers) == 0
+
+
+async def nihongo(client: Client | SyncClient, url: str) -> None:
+    url = f"{url}/日本語 英語?q=テスト&ほげ=fo%26o"
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(client.get, url)
+    else:
+        resp = await client.get(url)
+    assert resp.status == 200
+    qs = parse_qs(resp.headers["x-echo-query-string"])
+    assert qs["q"] == ["テスト"]
+    assert qs["ほげ"] == ["fo&o"]
+
+
+async def json_content(client: Client | SyncClient, url: str, method: str) -> None:
+    url = f"{url}/echo"
+    content = {"message": "Hello, World!"}
+    if isinstance(client, SyncClient):
+        match method:
+            case "POST":
+                resp = await asyncio.to_thread(client.post, url, content=content)
+            case "PUT":
+                resp = await asyncio.to_thread(client.put, url, content=content)
+            case "PATCH":
+                resp = await asyncio.to_thread(client.patch, url, content=content)
+            case "EXECUTE_POST":
+                resp = await asyncio.to_thread(
+                    client.execute, "POST", url, content=content
+                )
+            case "STREAM_POST":
+
+                def run():
+                    with client.stream("POST", url, content=content) as resp:
+                        resp_content = b"".join(resp.content)
+                    return FullResponse(
+                        resp.status, resp.headers, resp_content, resp.trailers
+                    )
+
+                resp = await asyncio.to_thread(run)
+    else:
+        match method:
+            case "POST":
+                resp = await client.post(url, content=content)
+            case "PUT":
+                resp = await client.put(url, content=content)
+            case "PATCH":
+                resp = await client.patch(url, content=content)
+            case "EXECUTE_POST":
+                resp = await client.execute("POST", url, content=content)
+            case "STREAM_POST":
+                async with client.stream("POST", url, content=content) as resp:
+                    resp_content = b""
+                    async for chunk in resp.content:
+                        resp_content += chunk
+                resp = FullResponse(
+                    resp.status, resp.headers, resp_content, resp.trailers
+                )
+    assert resp.status == 200
+    assert resp.headers["content-type"] == "application/json"
+    assert resp.content == b'{"message": "Hello, World!"}'
+    assert resp.json() == content
+
+
+async def json_content_existing_content_type(
+    client: Client | SyncClient, url: str
+) -> None:
+    url = f"{url}/echo"
+    content = {"message": "Hello, World!"}
+    if isinstance(client, SyncClient):
+        resp = await asyncio.to_thread(
+            client.post, url, headers={"content-type": "text/plain"}, content=content
+        )
+    else:
+        resp = await client.post(
+            url, headers={"content-type": "text/plain"}, content=content
+        )
+    assert resp.status == 200
+    assert resp.headers["content-type"] == "text/plain"
+    assert resp.content == b'{"message": "Hello, World!"}'

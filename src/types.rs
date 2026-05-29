@@ -237,6 +237,8 @@ pub(crate) struct Constants {
     pub content: Py<PyString>,
     /// The string "items".
     pub items: Py<PyString>,
+    /// The string "_json".
+    pub json: Py<PyString>,
     /// The string "url".
     pub url: Py<PyString>,
     /// The class pyqwest.Headers.
@@ -402,6 +404,7 @@ impl Constants {
             add: PyString::new(py, "add").unbind(),
             content: PyString::new(py, "content").unbind(),
             items: PyString::new(py, "items").unbind(),
+            json: PyString::new(py, "_json").unbind(),
             url: PyString::new(py, "url").unbind(),
             class_pyqwest_headers: mod_pyqwest.getattr("Headers")?.unbind(),
             class_pyqwest_response: mod_pyqwest.getattr("Response")?.unbind(),

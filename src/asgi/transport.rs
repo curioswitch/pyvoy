@@ -165,6 +165,8 @@ impl HTTPTransport {
         let url = url::Url::parse(request_url.cast::<PyString>()?.to_str()?)
             .map_err(|_| PyValueError::new_err("invalid request URL"))?;
 
+        let mut has_content_type = false;
+
         for item in req_headers
             .call_method0(&self.constants.items)?
             .try_iter()?
@@ -178,8 +180,18 @@ impl HTTPTransport {
                 HeaderName::from_str(name_py_str),
                 HeaderValue::from_str(value_py_str),
             ) {
+                if name == http::header::CONTENT_TYPE {
+                    has_content_type = true;
+                }
                 headers.push((name, value));
             }
+        }
+
+        if !has_content_type && request.getattr(&self.constants.json)?.is_truthy()? {
+            headers.push((
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/json"),
+            ));
         }
 
         let request_body = request.getattr(&self.constants.content)?;
