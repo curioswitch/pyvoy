@@ -223,6 +223,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             headers,
             state.response_content.clone(),
             future,
+            state.request_iter.clone(),
             end_stream,
             self.transport_bridge.clone(),
             Box::from(envoy_filter.new_scheduler()),
@@ -282,13 +283,29 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_http_stream_reset(
         &mut self,
         _envoy_filter: &mut EHF,
-        _stream_handle: u64,
-        _reset_reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
+        stream_handle: u64,
+        reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
     ) {
-        println!("Transport stream reset by Envoy {_reset_reason:?}");
+        println!("Transport stream {stream_handle} reset by Envoy {reason:?}");
+        println!("Getting state for transport stream {stream_handle} from transport_responses");
+        let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
+            println!("No state found for transport stream {stream_handle}");
+            return;
+        };
+        if let Some(response_future) = state.response_future.take() {
+            // No response headers received before resetting.
+            self.executor
+                .set_response_future_exception(response_future, state.response_content.clone());
+        }
+        if state.response_content.reset(reason) {
+            println!("Notifying response future for transport stream {stream_handle} due to reset");
+            self.executor.notify_response(state.response_content);
+        }
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {}
+    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {
+        println!("Transport stream complete {_stream_handle}");
+    }
 }
 
 impl Filter {
@@ -451,6 +468,19 @@ impl Filter {
                 );
                 unsafe {
                     envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
+                }
+            }
+            TransportEvent::Reset(mut event) => {
+                println!("Resetting transport stream {}", event.stream_handle);
+                if let Some(state) = self.transport_responses.get(&event.stream_handle) {
+                    println!("Got state for transport stream {}", event.stream_handle);
+                    if let Some(exception) = event.exception.take() {
+                        println!("Setting exception for transport stream {}", event.stream_handle);
+                        state.response_content.set_exception(exception);
+                    }
+                }
+                unsafe {
+                    envoy_filter.reset_http_stream(event.stream_handle);
                 }
             }
         });

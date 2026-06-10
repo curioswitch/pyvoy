@@ -85,6 +85,12 @@ async def app(
                 await client.json_content(http_client, url, extra)
             case "client_json_content_existing_content_type":
                 await client.json_content_existing_content_type(http_client, url)
+            case "client_close_no_read":
+                await client.close_no_read(http_client, url)
+            case "client_close_pending_read":
+                await client.close_pending_read(http_client, url)
+            case "client_request_content_error":
+                await client.request_content_error(http_client, url)
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301

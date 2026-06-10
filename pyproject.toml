@@ -238,3 +238,6 @@ split-on-trailing-comma = false
 [tool.uv.build-backend]
 module-name = "pyvoy"
 module-root = ""
+
+[tool.uv.sources]
+pyqwest = { path = "../pyqwest" }

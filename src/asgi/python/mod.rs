@@ -15,8 +15,8 @@ use crate::{
             scope::new_scope_dict,
         },
         transport::{
-            ReceivedResponseHeadersExecutor, RequestContent, ResponseContent, TransportBridge,
-            TransportEvent,
+            ReceivedResponseHeadersExecutor, RequestContent, ResponseContent,
+            SetResponseFutureException, TransportBridge, TransportEvent,
         },
     },
     eventbridge::EventBridge,
@@ -194,6 +194,7 @@ impl Executor {
         response_headers: Vec<(HeaderName, HeaderValue)>,
         response_content: ResponseContent,
         response_future: Py<PyAny>,
+        request_content: Option<RequestContent>,
         end_stream: bool,
         bridge: EventBridge<TransportEvent>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
@@ -203,6 +204,7 @@ impl Executor {
             response_headers,
             response_future,
             response_content,
+            request_content,
             end_stream,
             bridge,
             scheduler,
@@ -212,6 +214,16 @@ impl Executor {
             .send(Event::HandleTransportReceivedResponseHeaders(
                 stream_start_executor,
             ))
+            .unwrap();
+    }
+
+    pub(crate) fn set_response_future_exception(
+        &self,
+        future: Py<PyAny>,
+        response_content: ResponseContent,
+    ) {
+        self.tx
+            .send(Event::SetResponseFutureException(future, response_content))
             .unwrap();
     }
 
@@ -298,6 +310,17 @@ impl ExecutorInner {
                 loop_.call_method1(
                     &self.constants.call_soon_threadsafe,
                     (executor.into_py_any(py)?,),
+                )?;
+            }
+            Event::SetResponseFutureException(future, content) => {
+                let loop_ = content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (SetResponseFutureException {
+                        future,
+                        exception: content.take_exception(),
+                        constants: self.constants.clone(),
+                    },),
                 )?;
             }
             Event::NotifyRequest(content) => {
@@ -530,6 +553,7 @@ enum Event {
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(LoopFuture),
     HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
+    SetResponseFutureException(Py<PyAny>, ResponseContent),
     NotifyRequest(RequestContent),
     NotifyResponse(ResponseContent),
     HandleCanceledFuture(LoopFuture),

@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from urllib.parse import parse_qs
 
-from pyqwest import Client, FullResponse, Headers, HTTPVersion, SyncClient
+import pytest
+from pyqwest import (
+    Client,
+    FullResponse,
+    Headers,
+    HTTPVersion,
+    ReadError,
+    SyncClient,
+    WriteError,
+)
 
 
 def supports_trailers(http_version: HTTPVersion | None, url: str) -> bool:
@@ -467,3 +476,104 @@ async def json_content_existing_content_type(
     assert resp.status == 200
     assert resp.headers["content-type"] == "text/plain"
     assert resp.content == b'{"message": "Hello, World!"}'
+
+
+# GAP: We always propagate reset to the response and get an error, even when no pending read.
+async def close_no_read(async_client: Client, url: str) -> None:
+    client = async_client
+    queue = asyncio.Queue()
+
+    request_cancelled = asyncio.Event()
+    generator_cancelled = asyncio.Event()
+
+    class RequestGenerator:
+        def __aiter__(self) -> AsyncIterator[bytes]:
+            return self
+
+        async def __anext__(self) -> bytes:
+            try:
+                return await queue.get()
+            except asyncio.CancelledError:
+                request_cancelled.set()
+                raise
+
+        async def aclose(self) -> None:
+            generator_cancelled.set()
+
+    async with client.stream(
+        "POST",
+        f"{url}/echo",
+        headers={"content-type": "text/plain", "te": "trailers"},
+        content=RequestGenerator(),
+    ) as resp:
+        assert resp.status == 200
+        content = resp.content
+
+    with pytest.raises(ReadError):
+        chunk = await anext(content, None)
+    await resp.aclose()
+
+    await asyncio.wait_for(request_cancelled.wait(), timeout=1.0)
+    await asyncio.wait_for(generator_cancelled.wait(), timeout=1.0)
+
+
+async def close_pending_read(async_client: Client, url: str) -> None:
+    client = async_client
+    queue = asyncio.Queue()
+
+    async with client.stream(
+        "POST",
+        f"{url}/echo",
+        headers={"content-type": "text/plain", "te": "trailers"},
+        content=request_body(queue),
+    ) as resp:
+        assert resp.status == 200
+        content = resp.content
+
+        async def read_content() -> memoryview | bytes | bytearray | None:
+            return await anext(content, None)
+
+        read_task = asyncio.create_task(read_content())
+
+        while not resp._read_pending:  # pyright: ignore[reportAttributeAccessIssue]  # noqa: ASYNC110
+            await asyncio.sleep(0.001)
+
+    with pytest.raises(ReadError):
+        await read_task
+    assert not resp._read_pending  # pyright: ignore[reportAttributeAccessIssue]
+
+
+# GAP: Since we have more control, the error is deterministic here, unlike the race we handle
+# in the pyqwest version of this test.
+async def request_content_error(client: Client | SyncClient, url: str) -> None:
+    # There is a race between whether the error is handled on the request
+    # or response side, which can look like a connection error when the server
+    # aborts or a response error. We match any.
+    with pytest.raises(WriteError) as exc_info:
+        method = "POST"
+        url = f"{url}/echo"
+        if isinstance(client, SyncClient):
+
+            def req_content_sync() -> Iterator[bytes]:
+                yield b"Hello, World!"
+                msg = "Test error"
+                raise RuntimeError(msg)
+
+            def run():
+                request_content = req_content_sync()
+                with client.stream(method, url, content=request_content) as resp:
+                    b"".join(resp.content)
+
+            await asyncio.to_thread(run)
+        else:
+
+            async def req_content() -> AsyncIterator[bytes]:
+                yield b"Hello, World!"
+                msg = "Test error"
+                raise RuntimeError(msg)
+
+            async with client.stream(method, url, content=req_content()) as resp:
+                content = b""
+                async for chunk in resp.content:
+                    content += chunk
+    assert "Test error" in str(exc_info.value)

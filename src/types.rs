@@ -239,12 +239,16 @@ pub(crate) struct Constants {
     pub items: Py<PyString>,
     /// The string "_json".
     pub json: Py<PyString>,
+    /// The string "_set_request_iter_task".
+    pub set_request_iter_task: Py<PyString>,
     /// The string "url".
     pub url: Py<PyString>,
     /// The class pyqwest.Headers.
     pub class_pyqwest_headers: Py<PyAny>,
     /// The class pyqwest.Response.
     pub class_pyqwest_response: Py<PyAny>,
+    /// The class pyqwest.ReadError.
+    pub class_pyqwest_read_error: Py<PyAny>,
 
     /// The function get on the ContextVar used for transport bridging.
     pub transport_bridge_contextvar_get: Py<PyAny>,
@@ -405,9 +409,11 @@ impl Constants {
             content: PyString::new(py, "content").unbind(),
             items: PyString::new(py, "items").unbind(),
             json: PyString::new(py, "_json").unbind(),
+            set_request_iter_task: PyString::new(py, "_set_request_iter_task").unbind(),
             url: PyString::new(py, "url").unbind(),
             class_pyqwest_headers: mod_pyqwest.getattr("Headers")?.unbind(),
             class_pyqwest_response: mod_pyqwest.getattr("Response")?.unbind(),
+            class_pyqwest_read_error: mod_pyqwest.getattr("ReadError")?.unbind(),
 
             glue_forward_bytes: glue_forward_bytes.unbind(),
 

@@ -4,11 +4,13 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyBuffer, EnvoyHttpFilterScheduler};
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyBuffer, EnvoyHttpFilterScheduler, abi};
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
-    Bound, IntoPyObjectExt, Py, PyAny, PyResult, Python,
-    exceptions::{PyRuntimeError, PyStopAsyncIteration, PyValueError},
+    Bound, IntoPyObjectExt, Py, PyAny, PyErr, PyResult, Python,
+    exceptions::{
+        PyConnectionError, PyException, PyRuntimeError, PyStopAsyncIteration, PyValueError,
+    },
     pyclass, pymethods,
     sync::MutexExt,
     types::{
@@ -21,7 +23,7 @@ use url::Url;
 use crate::{
     asgi::{
         python::{self, EVENT_ID_OUTGOING_REQUEST, LoopFuture},
-        shared::awaitable::{EmptyAwaitable, ValueAwaitable},
+        shared::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
     },
     eventbridge::EventBridge,
     types::Constants,
@@ -61,6 +63,11 @@ pub(crate) struct SendStreamDataEvent {
     pub end_stream: bool,
 }
 
+pub(crate) struct SendStreamResetEvent {
+    pub stream_handle: u64,
+    pub exception: Option<Py<PyAny>>,
+}
+
 pub(super) struct OnHttpStreamheadersEvent {
     pub stream_handle: u64,
     pub headers: Vec<(HeaderName, HeaderValue)>,
@@ -76,6 +83,7 @@ pub(super) struct OnHttpStreamDataEvent {
 pub(crate) enum TransportEvent {
     Start(StartStreamEvent),
     SendData(SendStreamDataEvent),
+    Reset(SendStreamResetEvent),
 }
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
@@ -235,6 +243,7 @@ pub(crate) struct ReceivedResponseHeadersExecutor {
     headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) response_future: Py<PyAny>,
     pub(crate) response_content: ResponseContent,
+    request_content: Option<RequestContent>,
     end_stream: bool,
     bridge: EventBridge<TransportEvent>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
@@ -247,6 +256,7 @@ impl ReceivedResponseHeadersExecutor {
         headers: Vec<(HeaderName, HeaderValue)>,
         response_future: Py<PyAny>,
         response_content: ResponseContent,
+        request_content: Option<RequestContent>,
         end_stream: bool,
         bridge: EventBridge<TransportEvent>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
@@ -257,6 +267,7 @@ impl ReceivedResponseHeadersExecutor {
             headers,
             response_future,
             response_content,
+            request_content,
             end_stream,
             bridge,
             scheduler: Arc::new(scheduler),
@@ -319,6 +330,14 @@ impl ReceivedResponseHeadersExecutor {
             .class_pyqwest_response
             .bind(py)
             .call((), Some(&kwargs))?;
+
+        if let Some(request_content) = &self.request_content {
+            let task = request_content.inner.task.lock_py_attached(py).unwrap();
+            if let Some(task) = task.as_ref() {
+                response.call_method1(&self.constants.set_request_iter_task, (task,))?;
+            }
+        }
+
         self.response_future
             .call_method1(py, &self.constants.set_result, (response,))?;
         Ok(())
@@ -337,12 +356,14 @@ struct ResponseContentState {
     body: BytesMut,
     http_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
     end_stream: bool,
+    reset_reason: Option<abi::envoy_dynamic_module_type_http_stream_reset_reason>,
+    exception: Option<Py<PyAny>>,
 }
 
 pub(crate) struct ResponseContentInner {
     pub(crate) loop_: Py<PyAny>,
     state: Mutex<ResponseContentState>,
-    constants: Arc<Constants>,
+    pub(crate) constants: Arc<Constants>,
 }
 
 /// ResponseContent is the async iterator returned to Python for responses with content.
@@ -366,6 +387,8 @@ impl ResponseContent {
                     body: BytesMut::new(),
                     http_trailers: None,
                     end_stream: false,
+                    reset_reason: None,
+                    exception: None,
                 }),
                 constants,
             }),
@@ -409,6 +432,26 @@ impl ResponseContent {
         let mut state = self.inner.state.lock().unwrap();
         state.http_trailers = Some(trailers);
         state.end_stream = true;
+        state.pending_future.is_some()
+    }
+
+    pub(super) fn set_exception(&self, exception: Py<PyAny>) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.exception = Some(exception);
+    }
+
+    pub(crate) fn take_exception(&self) -> Option<Py<PyAny>> {
+        let mut state = self.inner.state.lock().unwrap();
+        state.exception.take()
+    }
+
+    pub(super) fn reset(
+        &self,
+        reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
+    ) -> bool {
+        let mut state = self.inner.state.lock().unwrap();
+        state.end_stream = true;
+        state.reset_reason = Some(reason);
         state.pending_future.is_some()
     }
 
@@ -458,6 +501,15 @@ impl ResponseContent {
             return ValueAwaitable::new_py(py, &chunk);
         }
 
+        if let Some(exception) = &state.exception {
+            println!("Response content has exception, returning ErrorAwaitable");
+            return ErrorAwaitable::new_py(py, PyErr::from_value(exception.bind(py).clone()));
+        }
+        if let Some(reason) = state.reset_reason {
+            println!("Stream was reset with reason {:?}", reason);
+            return ErrorAwaitable::new_py(py, map_reset_reason(py, reason, &inner.constants)?);
+        }
+
         if state.end_stream {
             println!("End of stream reached, returning StopAsyncIteration");
             return Err(PyStopAsyncIteration::new_err(()));
@@ -488,9 +540,25 @@ impl ResponseContent {
             return Ok(());
         }
         let Some(pending_future) = state.pending_future.take() else {
+            println!("No pending future, nothing to notify");
             return Ok(());
         };
-        if !state.body.is_empty() {
+
+        if let Some(exception) = &state.exception {
+            println!("Response content has exception, setting exception on future");
+            pending_future.call_method1(
+                py,
+                &inner.constants.set_exception,
+                (PyErr::from_value(exception.bind(py).clone()),),
+            )?;
+        } else if let Some(reason) = state.reset_reason {
+            println!("Stream was reset with reason {:?}", reason);
+            pending_future.call_method1(
+                py,
+                &inner.constants.set_exception,
+                (map_reset_reason(py, reason, &inner.constants)?,),
+            )?;
+        } else if !state.body.is_empty() {
             let chunk = PyBytes::new(py, &state.body).into_any();
             state.body.clear();
             pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
@@ -503,6 +571,16 @@ impl ResponseContent {
             )?;
         }
         Ok(())
+    }
+
+    #[getter]
+    fn _read_pending(&self, py: Python<'_>) -> PyResult<bool> {
+        let state = self.inner.state.lock_py_attached(py).unwrap();
+        println!(
+            "Called _read_pending, pending_future={}",
+            state.pending_future.is_some()
+        );
+        Ok(state.pending_future.is_some())
     }
 }
 
@@ -521,6 +599,41 @@ impl RequestContentForwarder {
         data: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         // TODO: Backpressure
+        if let Ok(status) = data.extract::<u32>() {
+            match status {
+                1 => {
+                    if self
+                        .bridge
+                        .send(TransportEvent::Reset(SendStreamResetEvent {
+                            stream_handle: self.stream_handle,
+                            exception: None,
+                        }))
+                        .is_ok()
+                    {
+                        println!("Sending reset transport event");
+                        self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
+                    }
+                }
+                _ => unreachable!(),
+            }
+            return EmptyAwaitable::new_py(py);
+        } else if let Ok(exception) = data.cast::<PyException>() {
+            if self
+                .bridge
+                .send(TransportEvent::Reset(SendStreamResetEvent {
+                    stream_handle: self.stream_handle,
+                    exception: Some(exception.clone().into_any().unbind()),
+                }))
+                .is_ok()
+            {
+                println!(
+                    "Sending reset transport event due to exception: {}",
+                    exception
+                );
+                self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
+            }
+            return EmptyAwaitable::new_py(py);
+        }
         let (body, end_stream) = if data.is_none() {
             (Bytes::new(), true)
         } else {
@@ -620,4 +733,78 @@ impl RequestContent {
         }
         Ok(())
     }
+}
+
+#[pyclass]
+pub(crate) struct SetResponseFutureException {
+    pub(crate) future: Py<PyAny>,
+    pub(crate) exception: Option<Py<PyAny>>,
+    pub(crate) constants: Arc<Constants>,
+}
+
+#[pymethods]
+impl SetResponseFutureException {
+    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
+        println!(
+            "Called SetResponseFutureException for future {:?} with exception {:?}",
+            self.future, self.exception
+        );
+        let err = if let Some(exception) = &self.exception {
+            exception.bind(py).clone()
+        } else {
+            self.constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("stream reset",))?
+        };
+        self.future
+            .call_method1(py, &self.constants.set_exception, (PyErr::from_value(err),))?;
+        Ok(())
+    }
+}
+
+fn map_reset_reason(
+    py: Python<'_>,
+    reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
+    constants: &Constants,
+) -> PyResult<PyErr> {
+    let res = match reason {
+        abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalReset
+        | abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalRefusedStreamReset => {
+            PyErr::from_value(
+                constants
+                    .class_pyqwest_read_error
+                    .bind(py)
+                    .call1(("local stream reset",))?,
+            )
+        }
+        abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteReset
+        | abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteRefusedStreamReset => {
+            PyErr::from_value(
+                constants
+                    .class_pyqwest_read_error
+                    .bind(py)
+                    .call1(("remote stream reset",))?,
+            )
+        }
+        abi::envoy_dynamic_module_type_http_stream_reset_reason::ProtocolError => {
+            PyErr::from_value(
+                constants
+                    .class_pyqwest_read_error
+                    .bind(py)
+                    .call1(("protocol error",))?,
+            )
+        }
+        abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionFailure
+        | abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionTermination => {
+            PyConnectionError::new_err("connection error")
+        }
+        abi::envoy_dynamic_module_type_http_stream_reset_reason::Overflow => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("stream overflow",))?,
+        ),
+    };
+    Ok(res)
 }
