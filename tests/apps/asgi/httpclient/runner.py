@@ -16,6 +16,7 @@ client_h1c = Client(HTTPTransport("backend_h1c"))
 client_h1 = Client(HTTPTransport("backend_h1"))
 client_h2c = Client(HTTPTransport("backend_h2c"))
 client_h2 = Client(HTTPTransport("backend_h2"))
+client_unavailable = Client(HTTPTransport("backend_unavailable"))
 
 
 async def app(
@@ -97,6 +98,8 @@ async def app(
                 await errors.request_timeout(http_client, url)
             case "errors_response_content_timeout":
                 await errors.response_content_timeout(http_client, url)
+            case "errors_connection_error":
+                await errors.connection_error(client_unavailable, url)
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301

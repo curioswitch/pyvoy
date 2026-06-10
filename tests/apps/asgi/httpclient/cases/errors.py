@@ -78,3 +78,19 @@ async def response_content_timeout(client: Client | SyncClient, url: str) -> Non
                 ) as resp:
                     assert resp.status == 200
                     await anext(resp.content)
+
+
+@pytest.mark.asyncio
+async def connection_error(client: Client | SyncClient, url: str) -> None:
+    method = "GET"
+    url = f"{url}/echo"
+    with pytest.raises(ConnectionError):
+        if isinstance(client, SyncClient):
+
+            def run():
+                client.stream(method, url)
+
+            await asyncio.to_thread(run)
+        else:
+            async with client.stream(method, url):
+                pass

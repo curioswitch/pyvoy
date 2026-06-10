@@ -55,3 +55,10 @@ async def test_response_content_timeout(
     await _run_test(
         "errors_response_content_timeout", url, client, http_scheme, http_version
     )
+
+
+@pytest.mark.asyncio
+async def test_connection_error(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("errors_connection_error", url, client, http_scheme, http_version)

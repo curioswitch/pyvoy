@@ -81,6 +81,11 @@ async def runner_asgi(
                     ca_cert=ca.cert_pem.bytes(),
                 ),
             ),
+            Cluster(
+                name="backend_unavailable",
+                address="localhost:9999",
+                http_version=HTTPVersion.HTTP1,
+            ),
         ],
     ) as server:
         yield server

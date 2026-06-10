@@ -292,9 +292,6 @@ impl ExecutorInner {
             Event::HandleDroppedSendFuture(future) => {
                 self.handle_dropped_send_future(py, future)?;
             }
-            Event::HandleCanceledFuture(future) => {
-                self.handle_canceled_future(py, future)?;
-            }
             Event::HandleTransportReceivedResponseHeaders(executor) => {
                 let loop_ = executor.response_content.inner.loop_.bind(py).clone();
                 loop_.call_method1(
@@ -358,14 +355,6 @@ impl ExecutorInner {
             &self.constants.call_soon_threadsafe,
             (set_exception, &self.constants.client_disconnected_err),
         )?;
-        Ok(())
-    }
-
-    fn handle_canceled_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let cancel = future.future.getattr(py, &self.constants.cancel)?;
-        future
-            .loop_
-            .call_method1(py, &self.constants.call_soon_threadsafe, (cancel,))?;
         Ok(())
     }
 
@@ -546,7 +535,6 @@ enum Event {
     SetResponseFutureException(Py<PyAny>, ResponseContent),
     NotifyRequest(RequestContent),
     NotifyResponse(ResponseContent),
-    HandleCanceledFuture(LoopFuture),
     Shutdown,
 }
 
