@@ -22,25 +22,12 @@ use url::Url;
 
 use crate::{
     asgi::{
-        python::{self, EVENT_ID_OUTGOING_REQUEST, LoopFuture},
+        python::EVENT_ID_OUTGOING_REQUEST,
         shared::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
     },
     eventbridge::EventBridge,
     types::Constants,
 };
-
-struct CanceledFuture {
-    future: Option<LoopFuture>,
-    executor: python::Executor,
-}
-
-impl Drop for CanceledFuture {
-    fn drop(&mut self) {
-        if let Some(future) = self.future.take() {
-            self.executor.handle_canceled_future(future);
-        }
-    }
-}
 
 pub(crate) enum RequestBody {
     Buffered(Bytes),
@@ -66,18 +53,6 @@ pub(crate) struct SendStreamDataEvent {
 pub(crate) struct SendStreamResetEvent {
     pub stream_handle: u64,
     pub exception: Option<Py<PyAny>>,
-}
-
-pub(super) struct OnHttpStreamheadersEvent {
-    pub stream_handle: u64,
-    pub headers: Vec<(HeaderName, HeaderValue)>,
-    pub end_stream: bool,
-}
-
-pub(super) struct OnHttpStreamDataEvent {
-    pub stream_handle: u64,
-    pub data: Vec<u8>,
-    pub end_stream: bool,
 }
 
 pub(crate) enum TransportEvent {
@@ -239,38 +214,29 @@ impl HTTPTransport {
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
 pub(crate) struct ReceivedResponseHeadersExecutor {
-    stream_handle: u64,
     headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) response_future: Py<PyAny>,
     pub(crate) response_content: ResponseContent,
     request_content: Option<RequestContent>,
     end_stream: bool,
-    bridge: EventBridge<TransportEvent>,
-    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     constants: Arc<Constants>,
 }
 
 impl ReceivedResponseHeadersExecutor {
     pub(crate) fn new(
-        stream_handle: u64,
         headers: Vec<(HeaderName, HeaderValue)>,
         response_future: Py<PyAny>,
         response_content: ResponseContent,
         request_content: Option<RequestContent>,
         end_stream: bool,
-        bridge: EventBridge<TransportEvent>,
-        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
         constants: Arc<Constants>,
     ) -> Self {
         Self {
-            stream_handle,
             headers,
             response_future,
             response_content,
             request_content,
             end_stream,
-            bridge,
-            scheduler: Arc::new(scheduler),
             constants,
         }
     }
@@ -283,6 +249,23 @@ impl ReceivedResponseHeadersExecutor {
             "Called StreamStartExecutor with headers: {:#?}, end_stream={}",
             self.headers, self.end_stream
         );
+
+        let response_future = self.response_future.bind(py);
+        if response_future
+            .call_method0(&self.constants.cancelled)?
+            .extract::<bool>()?
+        {
+            println!("Response future was already cancelled, not sending response");
+            if let Some(request_content) = &self.request_content {
+                let task = request_content.inner.task.lock_py_attached(py).unwrap();
+                if let Some(task) = task.as_ref() {
+                    println!("Cancelling request body iteration task");
+                    task.call_method0(py, &self.constants.cancel)?;
+                }
+            }
+            return Ok(());
+        }
+
         let status = self
             .headers
             .iter()
@@ -338,8 +321,7 @@ impl ReceivedResponseHeadersExecutor {
             }
         }
 
-        self.response_future
-            .call_method1(py, &self.constants.set_result, (response,))?;
+        response_future.call_method1(&self.constants.set_result, (response,))?;
         Ok(())
     }
 }

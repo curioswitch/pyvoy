@@ -7,7 +7,7 @@ from pyqwest import Client, HTTPVersion
 
 from pyvoy.asgi.httpclient import HTTPTransport
 
-from .cases import client
+from .cases import client, errors
 
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
@@ -91,6 +91,12 @@ async def app(
                 await client.close_pending_read(http_client, url)
             case "client_request_content_error":
                 await client.request_content_error(http_client, url)
+            case "client_response_error":
+                await client.response_error(http_client, url)
+            case "errors_request_timeout":
+                await errors.request_timeout(http_client, url)
+            case "errors_response_content_timeout":
+                await errors.response_content_timeout(http_client, url)
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301

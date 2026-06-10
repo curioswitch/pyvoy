@@ -190,24 +190,18 @@ impl Executor {
 
     pub(crate) fn handle_transport_received_response_headers(
         &self,
-        stream_handle: u64,
         response_headers: Vec<(HeaderName, HeaderValue)>,
         response_content: ResponseContent,
         response_future: Py<PyAny>,
         request_content: Option<RequestContent>,
         end_stream: bool,
-        bridge: EventBridge<TransportEvent>,
-        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         let stream_start_executor = ReceivedResponseHeadersExecutor::new(
-            stream_handle,
             response_headers,
             response_future,
             response_content,
             request_content,
             end_stream,
-            bridge,
-            scheduler,
             self.constants.clone(),
         );
         self.tx
@@ -235,10 +229,6 @@ impl Executor {
         self.tx
             .send(Event::NotifyResponse(response_content))
             .unwrap();
-    }
-
-    pub(crate) fn handle_canceled_future(&self, future: LoopFuture) {
-        self.tx.send(Event::HandleCanceledFuture(future)).unwrap();
     }
 
     pub(crate) fn shutdown(&self) {

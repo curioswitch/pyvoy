@@ -510,7 +510,7 @@ async def close_no_read(async_client: Client, url: str) -> None:
         content = resp.content
 
     with pytest.raises(ReadError):
-        chunk = await anext(content, None)
+        await anext(content, None)
     await resp.aclose()
 
     await asyncio.wait_for(request_cancelled.wait(), timeout=1.0)
@@ -535,12 +535,12 @@ async def close_pending_read(async_client: Client, url: str) -> None:
 
         read_task = asyncio.create_task(read_content())
 
-        while not resp._read_pending:  # pyright: ignore[reportAttributeAccessIssue]  # noqa: ASYNC110
+        while not resp._read_pending:  # pyright: ignore[reportAttributeAccessIssue]  # noqa: ASYNC110  # ty:ignore[unresolved-attribute]
             await asyncio.sleep(0.001)
 
     with pytest.raises(ReadError):
         await read_task
-    assert not resp._read_pending  # pyright: ignore[reportAttributeAccessIssue]
+    assert not resp._read_pending  # pyright: ignore[reportAttributeAccessIssue]  # ty:ignore[unresolved-attribute]
 
 
 # GAP: Since we have more control, the error is deterministic here, unlike the race we handle
@@ -577,3 +577,38 @@ async def request_content_error(client: Client | SyncClient, url: str) -> None:
                 async for chunk in resp.content:
                     content += chunk
     assert "Test error" in str(exc_info.value)
+
+
+# GAP: Since we have more control, the error is deterministic here, unlike the race we handle
+# in the pyqwest version of this test.
+async def response_error(client: Client | SyncClient, url: str) -> None:
+    status = 0
+    # There is a race between whether the error is handled on the request
+    # or response side, which looks like a connection error when the server
+    # aborts. We match either.
+    with pytest.raises(ReadError):
+        method = "POST"
+        url = f"{url}/echo"
+        headers = {"x-error-response": "1"}
+        request_content = b"Hello"
+        if isinstance(client, SyncClient):
+
+            def run():
+                nonlocal status
+                with client.stream(
+                    method, url, headers=headers, content=request_content
+                ) as resp:
+                    status = resp.status
+                    b"".join(resp.content)
+
+            await asyncio.to_thread(run)
+        else:
+            async with client.stream(
+                method, url, headers=headers, content=request_content
+            ) as resp:
+                status = resp.status
+                content = b""
+                async for chunk in resp.content:
+                    content += chunk
+    # Make sure we got response headers before the error
+    assert status == 200

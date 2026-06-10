@@ -219,14 +219,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             return;
         };
         self.executor.handle_transport_received_response_headers(
-            stream_handle,
             headers,
             state.response_content.clone(),
             future,
             state.request_iter.clone(),
             end_stream,
-            self.transport_bridge.clone(),
-            Box::from(envoy_filter.new_scheduler()),
         );
     }
 

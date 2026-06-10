@@ -189,3 +189,10 @@ async def test_request_content_error(
     await _run_test(
         "client_request_content_error", url, client, http_scheme, http_version
     )
+
+
+@pytest.mark.asyncio
+async def test_response_error(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("client_response_error", url, client, http_scheme, http_version)

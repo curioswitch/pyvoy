@@ -1700,7 +1700,7 @@ wheels = [
 
 [[package]]
 name = "pyqwest"
-version = "0.6.0"
+version = "0.6.1"
 source = { directory = "../pyqwest" }
 dependencies = [
     { name = "opentelemetry-api" },
@@ -1720,11 +1720,13 @@ dev = [
     { name = "opentelemetry-test-utils" },
     { name = "poethepoet" },
     { name = "psutil" },
+    { name = "pyright", extras = ["nodejs"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "pytest-order" },
+    { name = "pyvoy" },
     { name = "ruff" },
     { name = "trustme" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
