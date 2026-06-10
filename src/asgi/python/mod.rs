@@ -190,6 +190,7 @@ impl Executor {
 
     pub(crate) fn handle_transport_received_response_headers(
         &self,
+        status: StatusCode,
         response_headers: Vec<(HeaderName, HeaderValue)>,
         response_content: ResponseContent,
         response_future: Py<PyAny>,
@@ -197,6 +198,7 @@ impl Executor {
         end_stream: bool,
     ) {
         let stream_start_executor = ReceivedResponseHeadersExecutor::new(
+            status,
             response_headers,
             response_future,
             response_content,

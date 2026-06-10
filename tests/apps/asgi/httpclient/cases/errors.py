@@ -80,17 +80,18 @@ async def response_content_timeout(client: Client | SyncClient, url: str) -> Non
                     await anext(resp.content)
 
 
+# GAP: Envoy always synthesizes as 503 response for our callouts, so we never raise
+# ConnectionError like in pyqwest. User code should generally not be affected
+# since in practice, both are almost always handled the same way.
 @pytest.mark.asyncio
 async def connection_error(client: Client | SyncClient, url: str) -> None:
-    method = "GET"
     url = f"{url}/echo"
-    with pytest.raises(ConnectionError):
-        if isinstance(client, SyncClient):
+    if isinstance(client, SyncClient):
 
-            def run():
-                client.stream(method, url)
+        def run():
+            client.get(url)
 
-            await asyncio.to_thread(run)
-        else:
-            async with client.stream(method, url):
-                pass
+        res = await asyncio.to_thread(run)
+    else:
+        res = await client.get(url)
+    assert res.status == 503

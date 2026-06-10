@@ -214,6 +214,7 @@ impl HTTPTransport {
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
 pub(crate) struct ReceivedResponseHeadersExecutor {
+    status: StatusCode,
     headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) response_future: Py<PyAny>,
     pub(crate) response_content: ResponseContent,
@@ -224,6 +225,7 @@ pub(crate) struct ReceivedResponseHeadersExecutor {
 
 impl ReceivedResponseHeadersExecutor {
     pub(crate) fn new(
+        status: StatusCode,
         headers: Vec<(HeaderName, HeaderValue)>,
         response_future: Py<PyAny>,
         response_content: ResponseContent,
@@ -232,6 +234,7 @@ impl ReceivedResponseHeadersExecutor {
         constants: Arc<Constants>,
     ) -> Self {
         Self {
+            status,
             headers,
             response_future,
             response_content,
@@ -266,13 +269,6 @@ impl ReceivedResponseHeadersExecutor {
             return Ok(());
         }
 
-        let status = self
-            .headers
-            .iter()
-            .find(|(name, _)| name == ":status")
-            .and_then(|(_, value)| value.to_str().ok())
-            .and_then(|s| StatusCode::from_bytes(s.as_bytes()).ok())
-            .unwrap_or(StatusCode::OK);
         let headers = if !self.headers.is_empty() {
             let py_headers = self.constants.class_pyqwest_headers.bind(py).call0()?;
             for (name, value) in &self.headers {
@@ -286,7 +282,7 @@ impl ReceivedResponseHeadersExecutor {
             None
         };
         let kwargs = PyDict::new(py);
-        kwargs.set_item(&self.constants.status, status.as_u16())?;
+        kwargs.set_item(&self.constants.status, self.status.as_u16())?;
         if let Some(headers) = headers {
             kwargs.set_item(&self.constants.headers, headers)?;
         }

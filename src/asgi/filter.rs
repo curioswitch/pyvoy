@@ -1,5 +1,5 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
 use std::collections::HashMap;
@@ -203,7 +203,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         };
         let mut headers: Vec<(HeaderName, HeaderValue)> =
             Vec::with_capacity(response_headers.len());
+        let mut status = StatusCode::OK;
         for (k, v) in response_headers {
+            if k.as_slice() == b":status" {
+                status = StatusCode::from_bytes(v.as_slice())
+                    // Should be validated by Envoy already so just fallback.
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                continue;
+            }
             match (
                 HeaderName::from_bytes(k.as_slice()),
                 HeaderValue::from_bytes(v.as_slice()),
@@ -219,6 +226,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             return;
         };
         self.executor.handle_transport_received_response_headers(
+            status,
             headers,
             state.response_content.clone(),
             future,
