@@ -69,6 +69,7 @@ pub(crate) enum ResetReason {
     Connection,
     Overflow,
     ServerRequestDone,
+    InvalidUpstream,
 }
 
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
@@ -682,6 +683,7 @@ impl RequestContent {
 #[pyclass]
 pub(crate) struct SetResponseFutureException {
     pub(crate) future: Py<PyAny>,
+    pub(crate) reason: ResetReason,
     pub(crate) exception: Option<Py<PyAny>>,
     pub(crate) request_content: Option<RequestContent>,
     pub(crate) constants: Arc<Constants>,
@@ -691,15 +693,12 @@ pub(crate) struct SetResponseFutureException {
 impl SetResponseFutureException {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
         let err = if let Some(exception) = &self.exception {
-            exception.bind(py).clone()
+            PyErr::from_value(exception.bind(py).clone())
         } else {
-            self.constants
-                .class_pyqwest_read_error
-                .bind(py)
-                .call1(("stream reset",))?
+            map_reset_reason(py, self.reason, &self.constants)?
         };
         self.future
-            .call_method1(py, &self.constants.set_exception, (PyErr::from_value(err),))?;
+            .call_method1(py, &self.constants.set_exception, (err,))?;
         if let Some(request_content) = &self.request_content {
             let task = request_content.inner.task.lock_py_attached(py).unwrap();
             if let Some(task) = task.as_ref() {
@@ -742,6 +741,12 @@ fn map_reset_reason(py: Python<'_>, reason: ResetReason, constants: &Constants) 
                 .class_pyqwest_read_error
                 .bind(py)
                 .call1(("server request completed before client response",))?,
+        ),
+        ResetReason::InvalidUpstream => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("invalid upstream config",))?,
         ),
     };
     Ok(res)

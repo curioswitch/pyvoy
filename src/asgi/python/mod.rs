@@ -15,7 +15,7 @@ use crate::{
             scope::new_scope_dict,
         },
         transport::{
-            ReceivedResponseHeadersExecutor, RequestContent, ResponseContent,
+            ReceivedResponseHeadersExecutor, RequestContent, ResetReason, ResponseContent,
             SetResponseFutureException, TransportBridge, TransportEvent,
         },
     },
@@ -216,12 +216,14 @@ impl Executor {
     pub(crate) fn set_response_future_exception(
         &self,
         future: Py<PyAny>,
+        reason: ResetReason,
         response_content: ResponseContent,
         request_content: Option<RequestContent>,
     ) {
         self.tx
             .send(Event::SetResponseFutureException(
                 future,
+                reason,
                 response_content,
                 request_content,
             ))
@@ -306,12 +308,18 @@ impl ExecutorInner {
                     (executor.into_py_any(py)?,),
                 )?;
             }
-            Event::SetResponseFutureException(future, response_content, request_content) => {
+            Event::SetResponseFutureException(
+                future,
+                reason,
+                response_content,
+                request_content,
+            ) => {
                 let loop_ = response_content.inner.loop_.bind(py).clone();
                 loop_.call_method1(
                     &self.constants.call_soon_threadsafe,
                     (SetResponseFutureException {
                         future,
+                        reason,
                         exception: response_content.take_exception(),
                         request_content,
                         constants: self.constants.clone(),
@@ -540,7 +548,12 @@ enum Event {
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(LoopFuture),
     HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
-    SetResponseFutureException(Py<PyAny>, ResponseContent, Option<RequestContent>),
+    SetResponseFutureException(
+        Py<PyAny>,
+        ResetReason,
+        ResponseContent,
+        Option<RequestContent>,
+    ),
     NotifyRequest(RequestContent),
     NotifyResponse(ResponseContent),
     Shutdown,

@@ -160,6 +160,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             if let Some(response_future) = state.response_future {
                 self.executor.set_response_future_exception(
                     response_future,
+                    ResetReason::ServerRequestDone,
                     state.response_content,
                     state.request_content,
                 );
@@ -295,14 +296,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
             return;
         };
-        if let Some(response_future) = state.response_future.take() {
-            // No response headers received before resetting.
-            self.executor.set_response_future_exception(
-                response_future,
-                state.response_content.clone(),
-                state.request_content,
-            );
-        }
+
         let reason = match reason {
             abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalReset
             | abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalRefusedStreamReset => {
@@ -323,6 +317,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 ResetReason::Overflow
             }
         };
+        if let Some(response_future) = state.response_future.take() {
+            // No response headers received before resetting.
+            self.executor.set_response_future_exception(
+                response_future,
+                reason,
+                state.response_content.clone(),
+                state.request_content,
+            );
+        }
         if state.response_content.reset(reason) {
             self.executor.notify_response(state.response_content);
         }
@@ -448,13 +451,22 @@ impl Filter {
                         content_length_buffer.format(body.len()).as_bytes(),
                     ));
                 }
-                let (_res, stream_handle) = envoy_filter.start_http_stream(
+                let (res, stream_handle) = envoy_filter.start_http_stream(
                     &event.cluster_name,
                     headers,
                     body.as_deref(),
                     end_stream,
                     60_000,
                 );
+                if res != abi::envoy_dynamic_module_type_http_callout_init_result::Success {
+                    self.executor.set_response_future_exception(
+                        event.response_future,
+                        ResetReason::InvalidUpstream,
+                        event.response_content,
+                        request_content,
+                    );
+                    return;
+                }
                 if let Some(request_content) = &request_content {
                     request_content.set_stream_handle(stream_handle);
                     self.executor.notify_request(request_content.clone());

@@ -1700,7 +1700,7 @@ wheels = [
 
 [[package]]
 name = "pyqwest"
-version = "0.6.1"
+version = "0.6.2"
 source = { directory = "../pyqwest" }
 dependencies = [
     { name = "opentelemetry-api" },
