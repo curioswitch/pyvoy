@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::asgi::python;
 use crate::asgi::python::*;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::transport::{RequestBody, SendStreamDataEvent, TransportEvent, TransportState};
+use crate::asgi::transport::{
+    RequestBody, ResetReason, SendStreamDataEvent, TransportEvent, TransportState,
+};
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::types::*;
@@ -153,6 +155,20 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.response_closed.store(true, Ordering::Relaxed);
         self.recv_bridge.close();
         self.send_bridge.close();
+
+        for (_, state) in self.transport_responses.drain() {
+            if let Some(response_future) = state.response_future {
+                self.executor.set_response_future_exception(
+                    response_future,
+                    state.response_content,
+                    state.request_content,
+                );
+            } else {
+                if state.response_content.reset(ResetReason::ServerRequestDone) {
+                    self.executor.notify_response(state.response_content);
+                }
+            }
+        }
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
@@ -224,7 +240,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             headers,
             state.response_content.clone(),
             future,
-            state.request_iter.clone(),
+            state.request_content.clone(),
             end_stream,
         );
     }
@@ -237,7 +253,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_stream: bool,
     ) {
         let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
-            // Can't happen in practice since we would have reset the stream above, but avoid panic anyways.
+            // Can't happen in practice since we would have reset the stream in on_http_stream_headers,
+            // but avoid panic anyways.
             return;
         };
         let len = response_data.iter().map(|b| b.as_slice().len()).sum();
@@ -280,15 +297,42 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         };
         if let Some(response_future) = state.response_future.take() {
             // No response headers received before resetting.
-            self.executor
-                .set_response_future_exception(response_future, state.response_content.clone());
+            self.executor.set_response_future_exception(
+                response_future,
+                state.response_content.clone(),
+                state.request_content,
+            );
         }
+        let reason = match reason {
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalReset
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalRefusedStreamReset => {
+                ResetReason::Local
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteReset
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteRefusedStreamReset => {
+                ResetReason::Remote
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::ProtocolError => {
+                ResetReason::Protocol
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionFailure
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionTermination => {
+                ResetReason::Connection
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::Overflow => {
+                ResetReason::Overflow
+            }
+        };
         if state.response_content.reset(reason) {
             self.executor.notify_response(state.response_content);
         }
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {}
+    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {
+        // Cleanup for a successful response. It may be more precise to do this on data with end_stream or
+        // trailers but simpler to just take care of it here.
+        self.transport_responses.remove(&stream_handle);
+    }
 }
 
 impl Filter {
@@ -426,7 +470,7 @@ impl Filter {
                 self.transport_responses.insert(
                     stream_handle,
                     TransportState {
-                        request_iter: request_content,
+                        request_content,
                         response_future: Some(event.response_future),
                         response_content: event.response_content,
                     },

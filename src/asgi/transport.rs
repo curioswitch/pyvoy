@@ -61,6 +61,16 @@ pub(crate) enum TransportEvent {
     Reset(SendStreamResetEvent),
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ResetReason {
+    Local,
+    Remote,
+    Protocol,
+    Connection,
+    Overflow,
+    ServerRequestDone,
+}
+
 #[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
 pub(crate) struct TransportBridge {
     loop_: Py<PyAny>,
@@ -316,7 +326,7 @@ impl ReceivedResponseHeadersExecutor {
 }
 
 pub struct TransportState {
-    pub(super) request_iter: Option<RequestContent>,
+    pub(super) request_content: Option<RequestContent>,
     pub(super) response_future: Option<Py<PyAny>>,
     pub(super) response_content: ResponseContent,
 }
@@ -327,7 +337,7 @@ struct ResponseContentState {
     body: BytesMut,
     http_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
     end_stream: bool,
-    reset_reason: Option<abi::envoy_dynamic_module_type_http_stream_reset_reason>,
+    reset_reason: Option<ResetReason>,
     exception: Option<Py<PyAny>>,
 }
 
@@ -406,10 +416,7 @@ impl ResponseContent {
         state.exception.take()
     }
 
-    pub(super) fn reset(
-        &self,
-        reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
-    ) -> bool {
+    pub(super) fn reset(&self, reason: ResetReason) -> bool {
         let mut state = self.inner.state.lock().unwrap();
         state.end_stream = true;
         state.reset_reason = Some(reason);
@@ -676,6 +683,7 @@ impl RequestContent {
 pub(crate) struct SetResponseFutureException {
     pub(crate) future: Py<PyAny>,
     pub(crate) exception: Option<Py<PyAny>>,
+    pub(crate) request_content: Option<RequestContent>,
     pub(crate) constants: Arc<Constants>,
 }
 
@@ -692,51 +700,48 @@ impl SetResponseFutureException {
         };
         self.future
             .call_method1(py, &self.constants.set_exception, (PyErr::from_value(err),))?;
+        if let Some(request_content) = &self.request_content {
+            let task = request_content.inner.task.lock_py_attached(py).unwrap();
+            if let Some(task) = task.as_ref() {
+                task.call_method0(py, &self.constants.cancel)?;
+            }
+        }
         Ok(())
     }
 }
 
-fn map_reset_reason(
-    py: Python<'_>,
-    reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
-    constants: &Constants,
-) -> PyResult<PyErr> {
+fn map_reset_reason(py: Python<'_>, reason: ResetReason, constants: &Constants) -> PyResult<PyErr> {
     let res = match reason {
-        abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalReset
-        | abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalRefusedStreamReset => {
-            PyErr::from_value(
-                constants
-                    .class_pyqwest_read_error
-                    .bind(py)
-                    .call1(("local stream reset",))?,
-            )
-        }
-        abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteReset
-        | abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteRefusedStreamReset => {
-            PyErr::from_value(
-                constants
-                    .class_pyqwest_read_error
-                    .bind(py)
-                    .call1(("remote stream reset",))?,
-            )
-        }
-        abi::envoy_dynamic_module_type_http_stream_reset_reason::ProtocolError => {
-            PyErr::from_value(
-                constants
-                    .class_pyqwest_read_error
-                    .bind(py)
-                    .call1(("protocol error",))?,
-            )
-        }
-        abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionFailure
-        | abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionTermination => {
-            PyConnectionError::new_err("connection error")
-        }
-        abi::envoy_dynamic_module_type_http_stream_reset_reason::Overflow => PyErr::from_value(
+        ResetReason::Local => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("local stream reset",))?,
+        ),
+        ResetReason::Remote => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("remote stream reset",))?,
+        ),
+        ResetReason::Protocol => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("protocol error",))?,
+        ),
+        ResetReason::Connection => PyConnectionError::new_err("connection error"),
+        ResetReason::Overflow => PyErr::from_value(
             constants
                 .class_pyqwest_read_error
                 .bind(py)
                 .call1(("stream overflow",))?,
+        ),
+        ResetReason::ServerRequestDone => PyErr::from_value(
+            constants
+                .class_pyqwest_read_error
+                .bind(py)
+                .call1(("server request completed before client response",))?,
         ),
     };
     Ok(res)

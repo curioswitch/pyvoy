@@ -18,10 +18,8 @@ async def forward_bytes(
             await receiver(chunk)
         await receiver(None)
     except asyncio.CancelledError:
-        print("forward_bytes: CancelledError caught, stopping forwarding")
         await receiver(1)
     except Exception as e:
-        print(f"forward_bytes: Exception caught: {e}")
         err = WriteError(str(e))
         err.__cause__ = e
         await receiver(err)

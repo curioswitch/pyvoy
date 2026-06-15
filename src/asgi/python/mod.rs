@@ -217,9 +217,14 @@ impl Executor {
         &self,
         future: Py<PyAny>,
         response_content: ResponseContent,
+        request_content: Option<RequestContent>,
     ) {
         self.tx
-            .send(Event::SetResponseFutureException(future, response_content))
+            .send(Event::SetResponseFutureException(
+                future,
+                response_content,
+                request_content,
+            ))
             .unwrap();
     }
 
@@ -301,13 +306,14 @@ impl ExecutorInner {
                     (executor.into_py_any(py)?,),
                 )?;
             }
-            Event::SetResponseFutureException(future, content) => {
-                let loop_ = content.inner.loop_.bind(py).clone();
+            Event::SetResponseFutureException(future, response_content, request_content) => {
+                let loop_ = response_content.inner.loop_.bind(py).clone();
                 loop_.call_method1(
                     &self.constants.call_soon_threadsafe,
                     (SetResponseFutureException {
                         future,
-                        exception: content.take_exception(),
+                        exception: response_content.take_exception(),
+                        request_content,
                         constants: self.constants.clone(),
                     },),
                 )?;
@@ -534,7 +540,7 @@ enum Event {
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(LoopFuture),
     HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
-    SetResponseFutureException(Py<PyAny>, ResponseContent),
+    SetResponseFutureException(Py<PyAny>, ResponseContent, Option<RequestContent>),
     NotifyRequest(RequestContent),
     NotifyResponse(ResponseContent),
     Shutdown,
