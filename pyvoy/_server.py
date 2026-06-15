@@ -188,7 +188,7 @@ class PyvoyServer:
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
-            upstreams: A list of upstream clusters to add to the Envoy configuration.
+            clusters: A list of upstream clusters to add to the Envoy configuration.
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """

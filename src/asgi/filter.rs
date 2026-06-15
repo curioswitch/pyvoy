@@ -164,10 +164,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     state.response_content,
                     state.request_content,
                 );
-            } else {
-                if state.response_content.reset(ResetReason::ServerRequestDone) {
-                    self.executor.notify_response(state.response_content);
-                }
+            } else if state.response_content.reset(ResetReason::ServerRequestDone) {
+                self.executor.notify_response(state.response_content);
             }
         }
     }
@@ -456,7 +454,7 @@ impl Filter {
                     headers,
                     body.as_deref(),
                     end_stream,
-                    60_000,
+                    event.timeout_ms,
                 );
                 if res != abi::envoy_dynamic_module_type_http_callout_init_result::Success {
                     self.executor.set_response_future_exception(
@@ -471,6 +469,7 @@ impl Filter {
                     request_content.set_stream_handle(stream_handle);
                     self.executor.notify_request(request_content.clone());
                 }
+                event.response_content.set_stream_handle(stream_handle);
                 self.transport_responses.insert(
                     stream_handle,
                     TransportState {
@@ -491,13 +490,13 @@ impl Filter {
                 }
             }
             TransportEvent::Reset(mut event) => {
-                if let Some(state) = self.transport_responses.get(&event.stream_handle)
-                    && let Some(exception) = event.exception.take()
-                {
-                    state.response_content.set_exception(exception);
-                }
-                unsafe {
-                    envoy_filter.reset_http_stream(event.stream_handle);
+                if let Some(state) = self.transport_responses.get(&event.stream_handle) {
+                    if let Some(exception) = event.exception.take() {
+                        state.response_content.set_exception(exception);
+                    }
+                    unsafe {
+                        envoy_filter.reset_http_stream(event.stream_handle);
+                    }
                 }
             }
         });

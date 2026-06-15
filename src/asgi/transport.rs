@@ -40,6 +40,7 @@ pub(crate) struct StartStreamEvent {
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub body: RequestBody,
     pub cluster_name: Arc<String>,
+    pub timeout_ms: u64,
     pub response_future: Py<PyAny>,
     pub response_content: ResponseContent,
 }
@@ -109,18 +110,28 @@ pub(crate) fn register_py_module(py: Python<'_>) -> PyResult<()> {
     Ok(())
 }
 
+/// The default upstream stream timeout when none is configured on the transport.
+const DEFAULT_TIMEOUT_MS: u64 = 60_000;
+
 #[pyclass(module = "pyvoy.asgi.httpclient")]
 struct HTTPTransport {
     cluster_name: Arc<String>,
+    timeout_ms: u64,
     constants: Arc<Constants>,
 }
 
 #[pymethods]
 impl HTTPTransport {
     #[new]
-    fn py_new(py: Python<'_>, cluster_name: String) -> Self {
+    #[pyo3(signature = (cluster_name, *, timeout=None))]
+    fn py_new(py: Python<'_>, cluster_name: String, timeout: Option<f64>) -> Self {
+        let timeout_ms = match timeout {
+            Some(timeout) => (timeout * 1000.0) as u64,
+            None => DEFAULT_TIMEOUT_MS,
+        };
         Self {
             cluster_name: Arc::new(cluster_name),
+            timeout_ms,
             constants: Constants::get(py),
         }
     }
@@ -201,7 +212,12 @@ impl HTTPTransport {
             ))
         };
 
-        let response_content = ResponseContent::new(loop_.clone().unbind(), self.constants.clone());
+        let response_content = ResponseContent::new(
+            loop_.clone().unbind(),
+            transport_bridge.bridge.clone(),
+            transport_bridge.scheduler.clone(),
+            self.constants.clone(),
+        );
 
         if transport_bridge
             .bridge
@@ -211,6 +227,7 @@ impl HTTPTransport {
                 headers,
                 body,
                 cluster_name: self.cluster_name.clone(),
+                timeout_ms: self.timeout_ms,
                 response_future: future.clone().unbind(),
                 response_content,
             }))
@@ -345,6 +362,9 @@ struct ResponseContentState {
 pub(crate) struct ResponseContentInner {
     pub(crate) loop_: Py<PyAny>,
     state: Mutex<ResponseContentState>,
+    bridge: EventBridge<TransportEvent>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    stream_handle: AtomicU64,
     pub(crate) constants: Arc<Constants>,
 }
 
@@ -359,7 +379,12 @@ pub(crate) struct ResponseContent {
 }
 
 impl ResponseContent {
-    fn new(loop_: Py<PyAny>, constants: Arc<Constants>) -> Self {
+    fn new(
+        loop_: Py<PyAny>,
+        bridge: EventBridge<TransportEvent>,
+        scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+        constants: Arc<Constants>,
+    ) -> Self {
         Self {
             inner: Arc::new(ResponseContentInner {
                 loop_,
@@ -372,9 +397,18 @@ impl ResponseContent {
                     reset_reason: None,
                     exception: None,
                 }),
+                bridge,
+                scheduler,
+                stream_handle: AtomicU64::new(0),
                 constants,
             }),
         }
+    }
+
+    pub(crate) fn set_stream_handle(&self, handle: u64) {
+        self.inner
+            .stream_handle
+            .store(handle, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Buffers response data to return to Python. Returns true if there is a pending Python future
@@ -503,7 +537,14 @@ impl ResponseContent {
             return Ok(());
         };
 
-        if let Some(exception) = &state.exception {
+        // Deliver any buffered data before surfacing errors or end of stream, matching the
+        // ordering in `__anext__`. Otherwise a reset arriving alongside a final chunk while a
+        // read is pending would drop the buffered data.
+        if !state.body.is_empty() {
+            let chunk = PyBytes::new(py, &state.body).into_any();
+            state.body.clear();
+            pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
+        } else if let Some(exception) = &state.exception {
             pending_future.call_method1(
                 py,
                 &inner.constants.set_exception,
@@ -515,10 +556,6 @@ impl ResponseContent {
                 &inner.constants.set_exception,
                 (map_reset_reason(py, reason, &inner.constants)?,),
             )?;
-        } else if !state.body.is_empty() {
-            let chunk = PyBytes::new(py, &state.body).into_any();
-            state.body.clear();
-            pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
         } else {
             // state.end_stream
             pending_future.call_method1(
@@ -534,6 +571,30 @@ impl ResponseContent {
     fn _read_pending(&self, py: Python<'_>) -> PyResult<bool> {
         let state = self.inner.state.lock_py_attached(py).unwrap();
         Ok(state.pending_future.is_some())
+    }
+
+    /// Called by pyqwest when the response is closed. If the stream has not already finished,
+    /// the response was closed before being fully consumed so we reset the upstream stream to
+    /// release it rather than leaving it open and buffering data until the timeout.
+    fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = &self.inner;
+        let state = inner.state.lock_py_attached(py).unwrap();
+        if !state.end_stream {
+            let stream_handle = inner
+                .stream_handle
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if inner
+                .bridge
+                .send(TransportEvent::Reset(SendStreamResetEvent {
+                    stream_handle,
+                    exception: None,
+                }))
+                .is_ok()
+            {
+                inner.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
+            }
+        }
+        EmptyAwaitable::new_py(py)
     }
 }
 
