@@ -29,7 +29,7 @@ classifiers = [
 dependencies = [
   "envoy-server==1.37.0",
   "find-libpython>=0.5.1",
-  "pyqwest>=0.6.0",
+  "pyqwest>=0.6.2",
   "pyyaml>=6.0",
   "uvloop>=0.22.1; sys_platform != 'win32'",
   "winloop>=0.4.1; sys_platform == 'win32'",
@@ -238,6 +238,3 @@ split-on-trailing-comma = false
 [tool.uv.build-backend]
 module-name = "pyvoy"
 module-root = ""
-
-[tool.uv.sources]
-pyqwest = { path = "../pyqwest" }
