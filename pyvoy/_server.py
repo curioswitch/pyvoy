@@ -5,7 +5,6 @@ import base64
 import contextlib
 import json
 import os
-import ssl
 import subprocess
 import sys
 import urllib.request
@@ -627,11 +626,6 @@ class PyvoyServer:
                     ],
                 }
             )
-
-        ca_file = ssl.get_default_verify_paths().cafile
-        if ca_file is None:
-            msg = "Could not find a default system CA certificates file."
-            raise StartupError(msg)
 
         static_resources = {"listeners": listeners}
         if self._clusters:
