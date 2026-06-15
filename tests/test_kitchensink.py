@@ -297,7 +297,7 @@ async def test_exception_after_response_complete(
 # Filter logic has a fast path for empty content so we need to test both.
 @pytest.mark.parametrize("content", [b"", b"hello"])
 @pytest.mark.skipif(
-    sys.version < (3, 11), reason="asyncio.timeout requires Python 3.11+"
+    sys.version_info < (3, 11), reason="asyncio.timeout requires Python 3.11+"
 )
 async def test_client_closed_before_response(
     client: Client, url_asgi: str, logs_asgi: StreamReader, content: bytes
