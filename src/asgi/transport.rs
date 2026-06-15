@@ -248,21 +248,14 @@ impl ReceivedResponseHeadersExecutor {
 #[pymethods]
 impl ReceivedResponseHeadersExecutor {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        println!(
-            "Called StreamStartExecutor with headers: {:#?}, end_stream={}",
-            self.headers, self.end_stream
-        );
-
         let response_future = self.response_future.bind(py);
         if response_future
             .call_method0(&self.constants.cancelled)?
             .extract::<bool>()?
         {
-            println!("Response future was already cancelled, not sending response");
             if let Some(request_content) = &self.request_content {
                 let task = request_content.inner.task.lock_py_attached(py).unwrap();
                 if let Some(task) = task.as_ref() {
-                    println!("Cancelling request body iteration task");
                     task.call_method0(py, &self.constants.cancel)?;
                 }
             }
@@ -376,19 +369,9 @@ impl ResponseContent {
     /// Buffers response data to return to Python. Returns true if there is a pending Python future
     /// that needs to be notified via the event loop.
     pub(super) fn feed_response_data(&self, data: Vec<u8>, end_stream: bool) -> bool {
-        println!(
-            "Feeding response data, len={}, end_stream={}",
-            data.len(),
-            end_stream
-        );
         let mut state = self.inner.state.lock().unwrap();
         state.body.extend_from_slice(&data);
         state.end_stream |= end_stream;
-        println!(
-            "Pending future: {}, body len={}",
-            state.pending_future.is_some(),
-            state.body.len()
-        );
         state.pending_future.is_some()
     }
 
@@ -460,40 +443,32 @@ impl ResponseContent {
     }
 
     fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        println!("Called ResponseContent __anext__");
         let inner = &self.inner;
         let mut state = inner.state.lock_py_attached(py).unwrap();
         // There's really no use case for concurrently iterating an async body. Order can't be guaranteed,
         // anyways so we just return empty when there was already a pending future.
         if state.pending_future.is_some() {
-            println!("Already a pending future, returning empty");
             return ValueAwaitable::new_py(py, inner.constants.empty_bytes.bind(py));
         }
 
         Self::maybe_copy_trailers_to_py(py, &mut state, inner)?;
 
         if !state.body.is_empty() {
-            println!("Returning body chunk of len {}", state.body.len());
             let chunk = PyBytes::new(py, &state.body).into_any();
             state.body.clear();
             return ValueAwaitable::new_py(py, &chunk);
         }
 
         if let Some(exception) = &state.exception {
-            println!("Response content has exception, returning ErrorAwaitable");
             return ErrorAwaitable::new_py(py, PyErr::from_value(exception.bind(py).clone()));
         }
         if let Some(reason) = state.reset_reason {
-            println!("Stream was reset with reason {:?}", reason);
             return ErrorAwaitable::new_py(py, map_reset_reason(py, reason, &inner.constants)?);
         }
 
         if state.end_stream {
-            println!("End of stream reached, returning StopAsyncIteration");
             return Err(PyStopAsyncIteration::new_err(()));
         }
-
-        println!("Creating future for pending response data");
 
         let future = self
             .inner
@@ -508,7 +483,6 @@ impl ResponseContent {
 
     /// Called by the event loop when notifying of events from Envoy.
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        println!("Called ResponseContent __call__");
         let inner = &self.inner;
         let mut state = inner.state.lock_py_attached(py).unwrap();
 
@@ -518,19 +492,16 @@ impl ResponseContent {
             return Ok(());
         }
         let Some(pending_future) = state.pending_future.take() else {
-            println!("No pending future, nothing to notify");
             return Ok(());
         };
 
         if let Some(exception) = &state.exception {
-            println!("Response content has exception, setting exception on future");
             pending_future.call_method1(
                 py,
                 &inner.constants.set_exception,
                 (PyErr::from_value(exception.bind(py).clone()),),
             )?;
         } else if let Some(reason) = state.reset_reason {
-            println!("Stream was reset with reason {:?}", reason);
             pending_future.call_method1(
                 py,
                 &inner.constants.set_exception,
@@ -554,10 +525,6 @@ impl ResponseContent {
     #[getter]
     fn _read_pending(&self, py: Python<'_>) -> PyResult<bool> {
         let state = self.inner.state.lock_py_attached(py).unwrap();
-        println!(
-            "Called _read_pending, pending_future={}",
-            state.pending_future.is_some()
-        );
         Ok(state.pending_future.is_some())
     }
 }
@@ -576,7 +543,7 @@ impl RequestContentForwarder {
         py: Python<'py>,
         data: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        // TODO: Backpressure
+        // TODO: Backpressure when envoy dynamic modules support it
         if let Ok(status) = data.extract::<u32>() {
             match status {
                 1 => {
@@ -588,7 +555,6 @@ impl RequestContentForwarder {
                         }))
                         .is_ok()
                     {
-                        println!("Sending reset transport event");
                         self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
                     }
                 }
@@ -604,10 +570,6 @@ impl RequestContentForwarder {
                 }))
                 .is_ok()
             {
-                println!(
-                    "Sending reset transport event due to exception: {}",
-                    exception
-                );
                 self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
             }
             return EmptyAwaitable::new_py(py);
@@ -679,7 +641,6 @@ impl RequestContent {
 #[pymethods]
 impl RequestContent {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        println!("Called StartRequestIteratorExecutor");
         if let Some(request_iter) = &self.inner.request_iter {
             let request_content = RequestContentForwarder {
                 stream_handle: self
@@ -696,8 +657,6 @@ impl RequestContent {
                 .glue_forward_bytes
                 .bind(py)
                 .call1((&request_iter, request_content))?;
-            // TODO: Cancel
-            println!("Creating task for request body iteration");
             let task = self
                 .inner
                 .loop_
@@ -723,10 +682,6 @@ pub(crate) struct SetResponseFutureException {
 #[pymethods]
 impl SetResponseFutureException {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        println!(
-            "Called SetResponseFutureException for future {:?} with exception {:?}",
-            self.future, self.exception
-        );
         let err = if let Some(exception) = &self.exception {
             exception.bind(py).clone()
         } else {

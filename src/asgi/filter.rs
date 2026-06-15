@@ -190,12 +190,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         response_headers: &[(EnvoyBuffer, EnvoyBuffer)],
         end_stream: bool,
     ) {
-        println!(
-            "Received headers for transport stream {stream_handle}, end_stream={end_stream}, has_state={}",
-            self.transport_responses.contains_key(&stream_handle)
-        );
         let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
-            println!("No state found for transport stream {stream_handle}");
             // Happens if there is a configuration bug for the upstream.
             // TODO: Surface this.
             unsafe { envoy_filter.reset_http_stream(stream_handle) };
@@ -221,7 +216,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             }
         }
         let Some(future) = state.response_future.take() else {
-            println!("No future found for transport stream {stream_handle}");
             // Shouldn't happen in practice.
             return;
         };
@@ -243,21 +237,15 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         end_stream: bool,
     ) {
         let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
-            println!("No state found for transport stream {stream_handle}");
             // Can't happen in practice since we would have reset the stream above, but avoid panic anyways.
             return;
         };
         let len = response_data.iter().map(|b| b.as_slice().len()).sum();
-        println!(
-            "Received data for transport stream {stream_handle}, len={len}, end_stream={end_stream}"
-        );
-
         let mut body = Vec::with_capacity(len);
         for buffer in response_data {
             body.extend_from_slice(buffer.as_slice());
         }
         if state.response_content.feed_response_data(body, end_stream) {
-            println!("Notifying response future for transport stream {stream_handle}");
             self.executor
                 .notify_response(state.response_content.clone());
         }
@@ -269,10 +257,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         stream_handle: u64,
         response_trailers: &[(EnvoyBuffer, EnvoyBuffer)],
     ) {
-        println!(
-            "Received trailers for transport stream {stream_handle}, has_state={}",
-            self.transport_responses.contains_key(&stream_handle)
-        );
         let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
             return;
         };
@@ -291,10 +275,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         stream_handle: u64,
         reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
     ) {
-        println!("Transport stream {stream_handle} reset by Envoy {reason:?}");
-        println!("Getting state for transport stream {stream_handle} from transport_responses");
         let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
-            println!("No state found for transport stream {stream_handle}");
             return;
         };
         if let Some(response_future) = state.response_future.take() {
@@ -303,14 +284,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 .set_response_future_exception(response_future, state.response_content.clone());
         }
         if state.response_content.reset(reason) {
-            println!("Notifying response future for transport stream {stream_handle} due to reset");
             self.executor.notify_response(state.response_content);
         }
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {
-        println!("Transport stream complete {_stream_handle}");
-    }
+    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, _stream_handle: u64) {}
 }
 
 impl Filter {
@@ -413,16 +391,14 @@ impl Filter {
                     ":authority",
                     event.url[url::Position::BeforeHost..url::Position::AfterPort].as_bytes(),
                 ));
-                println!(
-                    "authority: {}",
-                    &event.url[url::Position::BeforeHost..url::Position::AfterPort]
-                );
                 let (body, end_stream, request_content) = match event.body {
                     RequestBody::Buffered(body) => (Some(body), true, None),
                     RequestBody::Iter(iter) => (None, false, Some(iter)),
                 };
                 let mut content_length_buffer = itoa::Buffer::new();
-                if let Some(body) = &body && !has_content_length {
+                if let Some(body) = &body
+                    && !has_content_length
+                {
                     headers.push((
                         "content-length",
                         content_length_buffer.format(body.len()).as_bytes(),
@@ -436,16 +412,12 @@ impl Filter {
                         _ => "__pyvoy_default_upstream_http__",
                     }
                 };
-                println!("Starting transport stream to cluster {cluster_name} {end_stream}");
                 let (_res, stream_handle) = envoy_filter.start_http_stream(
                     cluster_name,
                     headers,
                     body.as_deref(),
                     end_stream,
                     60_000,
-                );
-                println!(
-                    "Started transport stream to cluster {cluster_name} with stream: {stream_handle}, res: {_res:?}",
                 );
                 if let Some(request_content) = &request_content {
                     request_content.set_stream_handle(stream_handle);
@@ -466,21 +438,13 @@ impl Filter {
                     data,
                     end_stream,
                 } = event;
-                println!(
-                    "Sending data for transport stream {stream_handle}, len={}, end_stream={}",
-                    data.len(),
-                    end_stream
-                );
                 unsafe {
                     envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
                 }
             }
             TransportEvent::Reset(mut event) => {
-                println!("Resetting transport stream {}", event.stream_handle);
                 if let Some(state) = self.transport_responses.get(&event.stream_handle) {
-                    println!("Got state for transport stream {}", event.stream_handle);
                     if let Some(exception) = event.exception.take() {
-                        println!("Setting exception for transport stream {}", event.stream_handle);
                         state.response_content.set_exception(exception);
                     }
                 }
