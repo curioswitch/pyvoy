@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Iterator
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
 import pytest
@@ -15,6 +15,9 @@ from pyqwest import (
     SyncClient,
     WriteError,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
 
 
 def supports_trailers(http_version: HTTPVersion | None, url: str) -> bool:

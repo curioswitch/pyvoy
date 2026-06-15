@@ -479,10 +479,10 @@ impl Filter {
                 }
             }
             TransportEvent::Reset(mut event) => {
-                if let Some(state) = self.transport_responses.get(&event.stream_handle) {
-                    if let Some(exception) = event.exception.take() {
-                        state.response_content.set_exception(exception);
-                    }
+                if let Some(state) = self.transport_responses.get(&event.stream_handle)
+                    && let Some(exception) = event.exception.take()
+                {
+                    state.response_content.set_exception(exception);
                 }
                 unsafe {
                     envoy_filter.reset_http_stream(event.stream_handle);
