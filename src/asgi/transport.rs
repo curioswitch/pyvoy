@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyBuffer, EnvoyHttpFilterScheduler, abi};
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyBuffer, EnvoyHttpFilterScheduler};
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     Bound, IntoPyObjectExt, Py, PyAny, PyErr, PyResult, Python,
@@ -39,7 +39,7 @@ pub(crate) struct StartStreamEvent {
     pub url: Url,
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub body: RequestBody,
-    pub cluster_name: Option<Arc<String>>,
+    pub cluster_name: Arc<String>,
     pub response_future: Py<PyAny>,
     pub response_content: ResponseContent,
 }
@@ -110,7 +110,7 @@ pub(crate) fn register_py_module(py: Python<'_>) -> PyResult<()> {
 
 #[pyclass(module = "pyvoy.asgi.httpclient")]
 struct HTTPTransport {
-    cluster_name: Option<Arc<String>>,
+    cluster_name: Arc<String>,
     constants: Arc<Constants>,
 }
 
@@ -119,7 +119,7 @@ impl HTTPTransport {
     #[new]
     fn py_new(py: Python<'_>, cluster_name: String) -> Self {
         Self {
-            cluster_name: Some(Arc::new(cluster_name)),
+            cluster_name: Arc::new(cluster_name),
             constants: Constants::get(py),
         }
     }

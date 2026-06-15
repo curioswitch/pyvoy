@@ -448,16 +448,8 @@ impl Filter {
                         content_length_buffer.format(body.len()).as_bytes(),
                     ));
                 }
-                let cluster_name = if let Some(name) = event.cluster_name.as_ref() {
-                    name.as_str()
-                } else {
-                    match event.url.scheme() {
-                        "https" => "__pyvoy_default_upstream_https__",
-                        _ => "__pyvoy_default_upstream_http__",
-                    }
-                };
                 let (_res, stream_handle) = envoy_filter.start_http_stream(
-                    cluster_name,
+                    &event.cluster_name,
                     headers,
                     body.as_deref(),
                     end_stream,
