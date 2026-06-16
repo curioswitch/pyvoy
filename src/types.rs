@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use crate::envoy::*;
@@ -8,6 +9,7 @@ use http::{
     HeaderName, HeaderValue, Method,
     uri::{self, Scheme},
 };
+use pyo3::sync::PyOnceLock;
 use pyo3::{
     IntoPyObjectExt, create_exception,
     exceptions::PyOSError,
@@ -149,6 +151,10 @@ pub(crate) struct Constants {
     // asyncio methods
     /// The string "asyncio".
     pub asyncio: Py<PyString>,
+    /// The string "cancel".
+    pub cancel: Py<PyString>,
+    /// The string "cancelled".
+    pub cancelled: Py<PyString>,
     /// The string "run_coroutine_threadsafe".
     pub run_coroutine_threadsafe: Py<PyString>,
     /// The string "create_task".
@@ -226,8 +232,35 @@ pub(crate) struct Constants {
     /// An empty string object.
     pub empty_string: Py<PyString>,
 
-    /// The root path value passed from configuration.
-    pub root_path_value: Py<PyString>,
+    // Pyqwest
+    /// The string "add".
+    pub add: Py<PyString>,
+    /// The string "content".
+    pub content: Py<PyString>,
+    /// The string "items".
+    pub items: Py<PyString>,
+    /// The string "_json".
+    pub json: Py<PyString>,
+    /// The string "_set_request_iter_task".
+    pub set_request_iter_task: Py<PyString>,
+    /// The string "url".
+    pub url: Py<PyString>,
+    /// The class pyqwest.Headers.
+    pub class_pyqwest_headers: Py<PyAny>,
+    /// The class pyqwest.Response.
+    pub class_pyqwest_response: Py<PyAny>,
+    /// The class pyqwest.ReadError.
+    pub class_pyqwest_read_error: Py<PyAny>,
+
+    /// The function get on the ContextVar used for transport bridging.
+    pub transport_bridge_contextvar_get: Py<PyAny>,
+    /// The function set on the ContextVar used for transport bridging.
+    pub transport_bridge_contextvar_set: Py<PyAny>,
+    /// The function reset on the ContextVar used for transport bridging.
+    pub transport_bridge_contextvar_reset: Py<PyAny>,
+
+    /// The function `pyvoy._glue.forward_bytes`.
+    pub glue_forward_bytes: Py<PyAny>,
 
     /// A singleton ClientDisconnectedError exception instance.
     /// The traceback is not important since it is caused by the client,
@@ -236,27 +269,37 @@ pub(crate) struct Constants {
 }
 
 impl Constants {
-    pub fn new(py: Python<'_>, root_path: &str) -> Self {
-        let client_disconnected_err = ClientDisconnectedError::new_err(())
-            .into_py_any(py)
-            .unwrap();
-        client_disconnected_err
-            .setattr(py, "__traceback__", PyNone::get(py))
-            .unwrap();
+    pub fn get(py: Python<'_>) -> Arc<Self> {
+        static INSTANCE: PyOnceLock<Arc<Constants>> = PyOnceLock::new();
+        INSTANCE
+            // It is a programming bug for this to fail so we just unwrap.
+            .get_or_init(py, || Arc::new(Self::create(py).unwrap()))
+            .clone()
+    }
+
+    fn create(py: Python<'_>) -> PyResult<Self> {
+        let client_disconnected_err = ClientDisconnectedError::new_err(()).into_py_any(py)?;
+        client_disconnected_err.setattr(py, "__traceback__", PyNone::get(py))?;
 
         let asgi_empty_recv = PyDict::new(py);
-        asgi_empty_recv.set_item("type", "http.request").unwrap();
-        asgi_empty_recv
-            .set_item("body", PyBytes::new(py, b""))
-            .unwrap();
-        asgi_empty_recv.set_item("more_body", false).unwrap();
+        asgi_empty_recv.set_item("type", "http.request")?;
+        asgi_empty_recv.set_item("body", PyBytes::new(py, b""))?;
+        asgi_empty_recv.set_item("more_body", false)?;
 
         let asgi_empty_recv_disconnect = PyDict::new(py);
-        asgi_empty_recv_disconnect
-            .set_item("type", "http.disconnect")
-            .unwrap();
+        asgi_empty_recv_disconnect.set_item("type", "http.disconnect")?;
 
-        Self {
+        let mod_pyqwest = py.import("pyqwest")?;
+
+        let mod_contextvars = py.import("contextvars")?;
+        let transport_bridge_contextvar = mod_contextvars
+            .getattr("ContextVar")?
+            .call1(("pyvoy.asgi.transport_bridge",))?;
+
+        let mod_glue = py.import("pyvoy._glue")?;
+        let glue_forward_bytes = mod_glue.getattr("forward_bytes")?;
+
+        Ok(Self {
             asgi: PyString::new(py, "asgi").unbind(),
             extensions: PyString::new(py, "extensions").unbind(),
             http: PyString::new(py, "http").unbind(),
@@ -318,6 +361,8 @@ impl Constants {
             websocket_receive: PyString::new(py, "websocket.receive").unbind(),
 
             asyncio: PyString::new(py, "asyncio").unbind(),
+            cancel: PyString::new(py, "cancel").unbind(),
+            cancelled: PyString::new(py, "cancelled").unbind(),
             run_coroutine_threadsafe: PyString::new(py, "run_coroutine_threadsafe").unbind(),
             create_task: PyString::new(py, "create_task").unbind(),
             add_done_callback: PyString::new(py, "add_done_callback").unbind(),
@@ -362,10 +407,27 @@ impl Constants {
             empty_bytes: PyBytes::new(py, b"").unbind(),
             empty_string: PyString::new(py, "").unbind(),
 
-            root_path_value: PyString::new(py, root_path).unbind(),
+            // pyqwest
+            add: PyString::new(py, "add").unbind(),
+            content: PyString::new(py, "content").unbind(),
+            items: PyString::new(py, "items").unbind(),
+            json: PyString::new(py, "_json").unbind(),
+            set_request_iter_task: PyString::new(py, "_set_request_iter_task").unbind(),
+            url: PyString::new(py, "url").unbind(),
+            class_pyqwest_headers: mod_pyqwest.getattr("Headers")?.unbind(),
+            class_pyqwest_response: mod_pyqwest.getattr("Response")?.unbind(),
+            class_pyqwest_read_error: mod_pyqwest.getattr("ReadError")?.unbind(),
+
+            glue_forward_bytes: glue_forward_bytes.unbind(),
+
+            transport_bridge_contextvar_get: transport_bridge_contextvar.getattr("get")?.unbind(),
+            transport_bridge_contextvar_set: transport_bridge_contextvar.getattr("set")?.unbind(),
+            transport_bridge_contextvar_reset: transport_bridge_contextvar
+                .getattr("reset")?
+                .unbind(),
 
             client_disconnected_err,
-        }
+        })
     }
 }
 

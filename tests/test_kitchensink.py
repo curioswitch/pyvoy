@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 from asyncio import StreamReader
 from typing import TYPE_CHECKING
 
@@ -295,18 +296,19 @@ async def test_exception_after_response_complete(
 @pytest.mark.asyncio
 # Filter logic has a fast path for empty content so we need to test both.
 @pytest.mark.parametrize("content", [b"", b"hello"])
+@pytest.mark.skipif(
+    sys.version_info < (3, 11), reason="asyncio.timeout requires Python 3.11+"
+)
 async def test_client_closed_before_response(
     client: Client, url_asgi: str, logs_asgi: StreamReader, content: bytes
 ) -> None:
     # Before response headers, the way to close is timeout.
     with pytest.raises(TimeoutError):
-        async with client.stream(
-            "GET",
-            f"{url_asgi}/client-closed-before-response",
-            content=content,
-            timeout=0.001,
-        ) as response:
-            await response.aclose()
+        async with asyncio.timeout(0.001):
+            async with client.stream(
+                "GET", f"{url_asgi}/client-closed-before-response", content=content
+            ) as response:
+                await response.aclose()
     read_lines = await assert_logs_contains(
         logs_asgi,
         [

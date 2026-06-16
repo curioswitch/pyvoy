@@ -491,7 +491,7 @@ fn finish_close(
     }
 }
 
-fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {
+fn new_scope(request: http::Request<()>, _envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {
     let (head, _) = request.into_parts();
     let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(head.headers.len());
     let mut current_name: Option<HeaderName> = None;

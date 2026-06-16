@@ -30,8 +30,14 @@ pub(crate) struct ValueAwaitable {
 
 impl ValueAwaitable {
     /// Creates a new [`ValueAwaitable`].
-    pub(crate) fn new_py<'py>(py: Python<'py>, value: Py<PyAny>) -> PyResult<Bound<'py, PyAny>> {
-        Self { value: Some(value) }.into_bound_py_any(py)
+    pub(crate) fn new_py<'py>(
+        py: Python<'py>,
+        value: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        Self {
+            value: Some(value.clone().unbind()),
+        }
+        .into_bound_py_any(py)
     }
 }
 

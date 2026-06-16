@@ -9,9 +9,11 @@ import subprocess
 import sys
 import urllib.request
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import IO, TYPE_CHECKING, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal
+from urllib.parse import urlsplit
 
 import find_libpython
 from envoy import get_envoy_path
@@ -29,7 +31,20 @@ LogLevel = Literal[
 ]
 
 
-@dataclass(frozen=True)
+class HTTPVersion(str, Enum):
+    """An enumeration of HTTP versions."""
+
+    HTTP1 = "HTTP/1.1"
+    """HTTP/1.1"""
+
+    HTTP2 = "HTTP/2"
+    """HTTP/2"""
+
+    HTTP3 = "HTTP/3"
+    """HTTP/3"""
+
+
+@dataclass(frozen=True, slots=True)
 class Mount:
     app: str
     """The application to mount."""
@@ -39,6 +54,36 @@ class Mount:
 
     interface: Interface = "asgi"
     """The interface type of the application."""
+
+
+@dataclass(frozen=True, slots=True)
+class TLSConfig:
+    key: bytes | os.PathLike | None = None
+    """The TLS key as bytes or a path to a file containing it."""
+
+    cert: bytes | os.PathLike | None = None
+    """The TLS certificate as bytes or a path to a file containing it."""
+
+    ca_cert: bytes | os.PathLike | None = None
+    """The TLS CA certificate as bytes or a path to a file containing it."""
+
+
+@dataclass(frozen=True, slots=True)
+class Cluster:
+    name: str
+    """The name of the cluster. Must be passed to HTTPTransport."""
+
+    address: str
+    """The address to connect to as host:port."""
+
+    http_version: HTTPVersion | None = None
+    """The HTTP version to use when connecting to this cluster.
+
+    If not specified, will use HTTP/1 for plaintext and ALPN to autodetect for TLS.
+    """
+
+    tls: TLSConfig | None = None
+    """TLS configuration for connecting to this cluster. If not specified, will use plaintext."""
 
 
 def get_envoy_environ() -> dict[str, str]:
@@ -89,6 +134,8 @@ class PyvoyServer:
     _worker_threads: int | None
     _lifespan: bool | None
     _additional_envoy_args: list[str] | None
+    _env: dict[str, str]
+    _clusters: list[dict[str, Any] | Cluster]
 
     _admin_address: str | None
 
@@ -111,6 +158,8 @@ class PyvoyServer:
         lifespan: bool | None = None,
         websockets: bool = False,
         additional_envoy_args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        clusters: list[dict[str, Any] | Cluster] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
     ) -> None:
@@ -137,6 +186,8 @@ class PyvoyServer:
             worker_threads: The number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
+            env: Additional environment variables to pass to the Envoy process.
+            clusters: A list of upstream clusters to add to the Envoy configuration.
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """
@@ -158,6 +209,8 @@ class PyvoyServer:
         self._worker_threads = worker_threads
         self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
+        self._env = env if env is not None else {}
+        self._clusters = clusters if clusters is not None else []
 
         self._process = None
         self._listener_port_tls = None
@@ -184,7 +237,7 @@ class PyvoyServer:
         """
         config = self.get_envoy_config()
 
-        env = {**os.environ, **get_envoy_environ()}
+        env = {**os.environ, **get_envoy_environ(), **self._env}
 
         with NamedTemporaryFile("r") as admin_address_file:
             if sys.platform == "win32":
@@ -574,11 +627,91 @@ class PyvoyServer:
                 }
             )
 
+        static_resources = {"listeners": listeners}
+        if self._clusters:
+            clusters = []
+            for cluster in self._clusters:
+                if isinstance(cluster, Cluster):
+                    result = urlsplit(f"//{cluster.address}")
+                    cluster_config = {
+                        "name": cluster.name,
+                        "connect_timeout": "5s",
+                        "type": "STRICT_DNS",
+                        "dns_lookup_family": "V4_ONLY",
+                        "lb_policy": "ROUND_ROBIN",
+                        "typed_extension_protocol_options": {
+                            "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
+                                "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
+                                "explicit_http_config": {"http2_protocol_options": {}},
+                            }
+                        },
+                        "load_assignment": {
+                            "cluster_name": cluster.name,
+                            "endpoints": [
+                                {
+                                    "lb_endpoints": [
+                                        {
+                                            "endpoint": {
+                                                "address": {
+                                                    "socket_address": {
+                                                        "address": result.hostname,
+                                                        "port_value": result.port,
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                        },
+                    }
+                    if (http_version := cluster.http_version) is not None:
+                        explicit_http_config = {}
+                        match http_version:
+                            case HTTPVersion.HTTP1:
+                                explicit_http_config["http_protocol_options"] = {}
+                            case HTTPVersion.HTTP2:
+                                explicit_http_config["http2_protocol_options"] = {}
+                            case HTTPVersion.HTTP3:
+                                explicit_http_config["http3_protocol_options"] = {}
+                        cluster_config["typed_extension_protocol_options"] = {
+                            "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
+                                "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
+                                "explicit_http_config": explicit_http_config,
+                            }
+                        }
+                    if (tls := cluster.tls) is not None:
+                        common_tls_context = {}
+                        tls_certificate = {}
+                        if tls.key:
+                            tls_certificate["private_key"] = _to_datasource(tls.key)
+                        if tls.cert:
+                            tls_certificate["certificate_chain"] = _to_datasource(
+                                tls.cert
+                            )
+                        if tls_certificate:
+                            common_tls_context["tls_certificates"] = [tls_certificate]
+                        if tls.ca_cert:
+                            common_tls_context["validation_context"] = {
+                                "trusted_ca": _to_datasource(tls.ca_cert)
+                            }
+                        cluster_config["transport_socket"] = {
+                            "name": "envoy.transport_sockets.tls",
+                            "typed_config": {
+                                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
+                                "common_tls_context": common_tls_context,
+                                "sni": result.hostname,
+                            },
+                        }
+                    clusters.append(cluster_config)
+                else:
+                    clusters.append(cluster)
+            static_resources["clusters"] = clusters
         return {
             "admin": {
                 "address": {"socket_address": {"address": "127.0.0.1", "port_value": 0}}
             },
-            "static_resources": {"listeners": listeners},
+            "static_resources": static_resources,
         }
 
 

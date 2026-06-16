@@ -2,16 +2,23 @@
 name = "pyvoy"
 version = "0.3.0"
 edition = "2024"
-license = "Apache-2.0"
 repository = "https://github.com/curioswitch/pyvoy"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+name = "pyvoy"
+path = "src/lib.rs"
 
 [dependencies]
 envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/anuraaga/envoy", rev = "c900e5fc89b30d7999cbb4079f1b1e191dec53b8" }
+url = "2.5.7"
 
 bytes = "1.11.1"
 crossbeam-channel = "0.5.15"
 encoding_rs = "0.8.35"
 http = "1.4.0"
+itoa = "1.0.18"
 pyo3 = { version = "0.28.0", features = ["bytes"] }
 tungstenite = "0.29.0"
 urlencoding = "2.1.3"
@@ -19,8 +26,3 @@ yaml-rust2 = "0.11.0"
 
 [build-dependencies]
 pyo3-build-config = { version = "0.28.0", features = ["resolve-config"] }
-
-[lib]
-name = "pyvoy"
-path = "src/lib.rs"
-crate-type = ["cdylib"]

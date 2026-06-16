@@ -15,6 +15,7 @@ pub(crate) fn new_scope_dict<'py>(
     typ: &Py<PyString>,
     asgi: &Py<PyDict>,
     extensions: &Py<PyDict>,
+    root_path: Option<&Py<PyString>>,
     state: &Option<Py<PyDict>>,
     constants: &Arc<Constants>,
 ) -> PyResult<Bound<'py, PyDict>> {
@@ -61,7 +62,9 @@ pub(crate) fn new_scope_dict<'py>(
     let decoded_path = urlencoding::decode_binary(raw_path);
     scope_dict.set_item(&constants.path, PyString::from_bytes(py, &decoded_path)?)?;
     scope_dict.set_item(&constants.raw_path, PyBytes::new(py, raw_path))?;
-    scope_dict.set_item(&constants.root_path, &constants.root_path_value)?;
+    if let Some(root_path) = root_path {
+        scope_dict.set_item(&constants.root_path, root_path)?;
+    }
     let headers = PyList::new(
         py,
         scope.headers.iter().map(|(k, v)| {

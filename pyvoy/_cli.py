@@ -13,6 +13,7 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
+    Cluster,
     Interface,
     LogLevel,
     Mount,
@@ -38,6 +39,7 @@ class CLIArgs:
     interface: Interface
     root_path: str
     additional_mount: list[str]
+    cluster: list[str]
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
@@ -122,6 +124,14 @@ async def amain() -> None:
     parser.add_argument(
         "--additional-mount",
         help="additional application mounts in the form 'app=path=interface'",
+        type=str,
+        nargs="+",
+        default=[],
+    )
+
+    parser.add_argument(
+        "--cluster",
+        help="upstream cluster to use with HTTPTransport in the form 'name=host:port'",
         type=str,
         nargs="+",
         default=[],
@@ -236,6 +246,18 @@ async def amain() -> None:
     else:
         app = args.app
 
+    clusters = []
+    for cluster_str in args.cluster:
+        try:
+            name, address = cluster_str.split("=", 1)
+        except ValueError:
+            print(  # noqa: T201
+                f"Invalid cluster format: {cluster_str}, expected 'name=host:port'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        clusters.append(Cluster(name=name, address=address))
+
     server = PyvoyServer(
         app,
         address=args.address,
@@ -255,6 +277,7 @@ async def amain() -> None:
         lifespan=args.lifespan,
         websockets=args.websockets,
         additional_envoy_args=additional_envoy_args,
+        clusters=clusters,
     )
 
     if args.print_envoy_config:
