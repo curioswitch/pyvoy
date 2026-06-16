@@ -43,7 +43,11 @@ async def backend_asgi(ca: trustme.CA) -> AsyncIterator[PyvoyServer]:
 async def runner_asgi(
     backend_asgi: PyvoyServer, ca: trustme.CA
 ) -> AsyncIterator[PyvoyServer]:
-    cert = ca.issue_cert("localhost")
+    cert = ca.issue_cert(
+        common_name="someclient",
+        organization_name="curioswitch",
+        organization_unit_name="tests",
+    )
     async with PyvoyServer(
         "tests.apps.asgi.httpclient.runner",
         lifespan=False,
