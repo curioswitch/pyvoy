@@ -6,6 +6,7 @@ use http::{HeaderName, HeaderValue, header};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
 use std::sync::Arc;
+use tungstenite::extensions::{Extensions, ExtensionsConfig, compression::deflate::DeflateConfig};
 use tungstenite::handshake::machine::{HandshakeMachine, RoundResult, StageResult};
 use tungstenite::handshake::server::{create_response, write_response};
 use tungstenite::protocol::frame::coding::CloseCode;
@@ -87,7 +88,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
 
 enum WebSocketState {
     StartHandshake(HandshakeMachine<EnvoyStream>),
-    FinishHandshake(EnvoyStream, http::Response<()>),
+    FinishHandshake(EnvoyStream, http::Response<()>, Extensions),
     Accepted(WebSocket<EnvoyStream>),
     NotWebSocket,
 
@@ -126,7 +127,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                 self.read_web_socket(envoy_filter);
                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
             }
-            WebSocketState::FinishHandshake(_, _) => {
+            WebSocketState::FinishHandshake(_, _, _) => {
                 // This is similar to junk after handshake request, which we handle above in tail.empty.
                 // As we've already executed the app, there isn't much to do but fail the request
                 envoy_filter.close_with_details(
@@ -162,7 +163,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                             tail,
                         } = finish
                         {
-                            let Ok(response) = create_response(&request) else {
+                            let Ok(mut response) = create_response(&request) else {
                                 // We get here if there's no upgrade header, etc.
                                 self.state = WebSocketState::NotWebSocket;
                                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
@@ -174,7 +175,16 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                                 );
                                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
                             }
-                            self.state = WebSocketState::FinishHandshake(stream, response);
+                            // Negotiate permessage-deflate against the client's offers,
+                            // writing the agreed extension header into the response. A
+                            // malformed extensions header falls back to no compression.
+                            let mut extensions_config = ExtensionsConfig::default();
+                            extensions_config.permessage_deflate = Some(DeflateConfig::default());
+                            let extensions = extensions_config
+                                .negotiate_response(request.headers(), response.headers_mut())
+                                .unwrap_or_default();
+                            self.state =
+                                WebSocketState::FinishHandshake(stream, response, extensions);
                             let (_, total_size) = envoy_filter.get_read_buffer_chunks();
                             envoy_filter.drain_read_buffer(total_size);
                             let scope = new_scope(request, envoy_filter);
@@ -206,7 +216,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
     fn on_scheduled(&mut self, envoy_filter: &mut ENF, event_id: u64) {
         if event_id == EVENT_ID_REQUEST {
             match &self.state {
-                WebSocketState::FinishHandshake(_, _) => {
+                WebSocketState::FinishHandshake(_, _, _) => {
                     let future = self.recv_bridge.get().unwrap();
                     self.executor.handle_recv_future_connect(future);
                 }
@@ -237,7 +247,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
 impl Filter {
     fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         match std::mem::replace(&mut self.state, WebSocketState::Done) {
-            WebSocketState::FinishHandshake(stream, mut response) => {
+            WebSocketState::FinishHandshake(stream, mut response, extensions) => {
                 let event = self.send_bridge.get().unwrap();
                 let event = match event {
                     SendEvent::Close { code, reason } => {
@@ -281,7 +291,12 @@ impl Filter {
                 let mut buffer = Vec::new();
                 write_response(&mut buffer, &response).unwrap();
                 envoy_filter.write(&buffer, false);
-                let websocket = WebSocket::from_raw_socket(stream, Role::Server, None);
+                let websocket = WebSocket::from_raw_socket_with_extensions(
+                    stream,
+                    Role::Server,
+                    None,
+                    extensions,
+                );
                 self.state = WebSocketState::Accepted(websocket);
                 // In case there were any recv tasks started before sending the acceptance.
                 envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);

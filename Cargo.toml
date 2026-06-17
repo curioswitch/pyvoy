@@ -29,3 +29,8 @@ yaml-rust2 = "0.11.0"
 
 [build-dependencies]
 pyo3-build-config = { version = "0.29.0", features = ["resolve-config"] }
+
+[patch.crates-io]
+# Fork of tungstenite with permessage-deflate (RFC 7692) support, enabled by
+# default. See https://github.com/curioswitch/tungstenite-rs.
+tungstenite = { git = "https://github.com/curioswitch/tungstenite-rs", branch = "v0.29.0-deflate" }
