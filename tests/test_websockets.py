@@ -45,13 +45,13 @@ async def server() -> AsyncIterator[PyvoyServer]:
 @pytest.mark.skipif(
     _is_docker_unavailable(), reason="requires Docker with Linux containers"
 )
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_autobahn(server: PyvoyServer) -> None:
     config = {
         "servers": [{"url": f"ws://host.docker.internal:{server.listener_port}"}],
         "outdir": "/reports",
         "cases": ["*"],
-        "exclude-cases": ["12.*", "13.*"],
+        "exclude-cases": [],
     }
 
     # Use repository root for temp directory for colima compatibility
