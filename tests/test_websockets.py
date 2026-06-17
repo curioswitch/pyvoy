@@ -42,15 +42,24 @@ async def server() -> AsyncIterator[PyvoyServer]:
         yield server
 
 
+cases = [
+    pytest.param(
+        ["1.*", "2.*", "3.*", "4.*", "5.*", "6.*", "7.*", "9.*", "10.*"], id="basic"
+    ),
+    pytest.param(["12.*", "13.*"], id="compression"),
+]
+
+
 @pytest.mark.skipif(
     _is_docker_unavailable(), reason="requires Docker with Linux containers"
 )
-# @pytest.mark.slow
-def test_autobahn(server: PyvoyServer) -> None:
+@pytest.mark.parametrize("cases", cases)
+@pytest.mark.slow
+def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
     config = {
         "servers": [{"url": f"ws://host.docker.internal:{server.listener_port}"}],
         "outdir": "/reports",
-        "cases": ["*"],
+        "cases": cases,
         "exclude-cases": [],
     }
 
@@ -70,6 +79,8 @@ def test_autobahn(server: PyvoyServer) -> None:
             [
                 "docker",
                 "run",
+                "--env",
+                "PYTHONUNBUFFERED=1",
                 "-v",
                 f"{config_dir}:/config",
                 "-v",
@@ -82,6 +93,7 @@ def test_autobahn(server: PyvoyServer) -> None:
                 "/config/config.json",
             ],
             check=True,
+            stdout=subprocess.DEVNULL,
         )
 
         report = json.loads((reports_dir / "index.json").read_text())
