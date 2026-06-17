@@ -13,12 +13,13 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
-    Cluster,
     Interface,
     LogLevel,
     Mount,
     PyvoyServer,
     StartupError,
+    TLSConfig,
+    Upstream,
     get_envoy_environ,
 )
 from ._watcher import watch
@@ -39,7 +40,7 @@ class CLIArgs:
     interface: Interface
     root_path: str
     additional_mount: list[str]
-    cluster: list[str]
+    upstream: list[str]
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
@@ -130,8 +131,8 @@ async def amain() -> None:
     )
 
     parser.add_argument(
-        "--cluster",
-        help="upstream cluster to use with HTTPTransport in the form 'name=host:port'",
+        "--upstream",
+        help="upstream cluster to use with HTTPTransport in the form 'name=http[s]://host:port'. If scheme is https, --tls-ca-cert must be provided, and --tls-key and --tls-cert will be used if provided for client certificate authentication.",
         type=str,
         nargs="+",
         default=[],
@@ -246,17 +247,38 @@ async def amain() -> None:
     else:
         app = args.app
 
-    clusters = []
-    for cluster_str in args.cluster:
+    tls_key = _cert_path_or_content(args.tls_key)
+    tls_cert = _cert_path_or_content(args.tls_cert)
+    tls_ca_cert = _cert_path_or_content(args.tls_ca_cert)
+    upstreams = []
+    for upstream_str in args.upstream:
+        tls_config = None
         try:
-            name, address = cluster_str.split("=", 1)
+            name, address = upstream_str.split("=", 1)
+            if address.startswith("https://"):
+                if not tls_ca_cert:
+                    print(  # noqa: T201
+                        f"Upstream '{upstream_str}' uses HTTPS but --tls-ca-cert is not provided",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                address = address[len("https://") :]
+                tls_config = TLSConfig(key=tls_key, cert=tls_cert, ca_cert=tls_ca_cert)
+            elif not address.startswith("http://"):
+                print(  # noqa: T201
+                    f"Invalid upstream address '{address}' for upstream '{upstream_str}', expected to start with 'http://' or 'https://'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            else:
+                address = address[len("http://") :]
         except ValueError:
             print(  # noqa: T201
-                f"Invalid cluster format: {cluster_str}, expected 'name=host:port'",
+                f"Invalid upstream format: {upstream_str}, expected 'name=http[s]://host:port'",
                 file=sys.stderr,
             )
             sys.exit(1)
-        clusters.append(Cluster(name=name, address=address))
+        upstreams.append(Upstream(name=name, address=address, tls=tls_config))
 
     server = PyvoyServer(
         app,
@@ -265,9 +287,9 @@ async def amain() -> None:
         stdout=None,
         stderr=None,
         tls_port=args.tls_port,
-        tls_key=_cert_path_or_content(args.tls_key),
-        tls_cert=_cert_path_or_content(args.tls_cert),
-        tls_ca_cert=_cert_path_or_content(args.tls_ca_cert),
+        tls_key=tls_key,
+        tls_cert=tls_cert,
+        tls_ca_cert=tls_ca_cert,
         tls_enable_http3=not args.tls_disable_http3,
         tls_require_client_certificate=args.tls_require_client_certificate,
         interface=args.interface,
@@ -277,7 +299,7 @@ async def amain() -> None:
         lifespan=args.lifespan,
         websockets=args.websockets,
         additional_envoy_args=additional_envoy_args,
-        clusters=clusters,
+        upstreams=upstreams,
     )
 
     if args.print_envoy_config:

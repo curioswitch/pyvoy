@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 import trustme
 
-from pyvoy import Cluster, HTTPVersion, PyvoyServer, TLSConfig
+from pyvoy import HTTPVersion, PyvoyServer, TLSConfig, Upstream
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -54,13 +54,13 @@ async def runner_asgi(
         env={
             "TEST_URL": f"http://{backend_asgi.listener_address}:{backend_asgi.listener_port}"
         },
-        clusters=[
-            Cluster(
+        upstreams=[
+            Upstream(
                 name="backend_h1c",
                 address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port}",
                 http_version=HTTPVersion.HTTP1,
             ),
-            Cluster(
+            Upstream(
                 name="backend_h1",
                 address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
                 http_version=HTTPVersion.HTTP1,
@@ -70,12 +70,12 @@ async def runner_asgi(
                     ca_cert=ca.cert_pem.bytes(),
                 ),
             ),
-            Cluster(
+            Upstream(
                 name="backend_h2c",
                 address=f"localhost:{backend_asgi.listener_port}",
                 http_version=HTTPVersion.HTTP2,
             ),
-            Cluster(
+            Upstream(
                 name="backend_h2",
                 address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
                 http_version=HTTPVersion.HTTP2,
@@ -85,7 +85,7 @@ async def runner_asgi(
                     ca_cert=ca.cert_pem.bytes(),
                 ),
             ),
-            Cluster(
+            Upstream(
                 name="backend_unavailable",
                 address="localhost:9999",
                 http_version=HTTPVersion.HTTP1,

@@ -69,9 +69,9 @@ class TLSConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class Cluster:
+class Upstream:
     name: str
-    """The name of the cluster. Must be passed to HTTPTransport."""
+    """The name of the upstream cluster. Must be passed to HTTPTransport."""
 
     address: str
     """The address to connect to as host:port."""
@@ -135,7 +135,7 @@ class PyvoyServer:
     _lifespan: bool | None
     _additional_envoy_args: list[str] | None
     _env: dict[str, str]
-    _clusters: list[dict[str, Any] | Cluster]
+    _upstreams: list[dict[str, Any] | Upstream]
 
     _admin_address: str | None
 
@@ -159,7 +159,7 @@ class PyvoyServer:
         websockets: bool = False,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
-        clusters: list[dict[str, Any] | Cluster] | None = None,
+        upstreams: list[dict[str, Any] | Upstream] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
     ) -> None:
@@ -187,7 +187,7 @@ class PyvoyServer:
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
-            clusters: A list of upstream clusters to add to the Envoy configuration.
+            upstreams: A list of upstream clusters to add to the Envoy configuration.
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """
@@ -210,7 +210,7 @@ class PyvoyServer:
         self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
         self._env = env if env is not None else {}
-        self._clusters = clusters if clusters is not None else []
+        self._upstreams = upstreams if upstreams is not None else []
 
         self._process = None
         self._listener_port_tls = None
@@ -628,21 +628,27 @@ class PyvoyServer:
             )
 
         static_resources = {"listeners": listeners}
-        if self._clusters:
+        if self._upstreams:
             clusters = []
-            for cluster in self._clusters:
-                if isinstance(cluster, Cluster):
+            for cluster in self._upstreams:
+                if isinstance(cluster, Upstream):
                     result = urlsplit(f"//{cluster.address}")
+                    if result.port is not None:
+                        port = result.port
+                    elif cluster.tls:
+                        port = 443
+                    else:
+                        port = 80
                     cluster_config = {
                         "name": cluster.name,
                         "connect_timeout": "5s",
                         "type": "STRICT_DNS",
-                        "dns_lookup_family": "V4_ONLY",
+                        "dns_lookup_family": "V4_PREFERRED",
                         "lb_policy": "ROUND_ROBIN",
                         "typed_extension_protocol_options": {
                             "envoy.extensions.upstreams.http.v3.HttpProtocolOptions": {
                                 "@type": "type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions",
-                                "explicit_http_config": {"http2_protocol_options": {}},
+                                "auto_config": {},
                             }
                         },
                         "load_assignment": {
@@ -655,7 +661,7 @@ class PyvoyServer:
                                                 "address": {
                                                     "socket_address": {
                                                         "address": result.hostname,
-                                                        "port_value": result.port,
+                                                        "port_value": port,
                                                     }
                                                 }
                                             }

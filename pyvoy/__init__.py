@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-__all__ = ["Cluster", "HTTPVersion", "Interface", "Mount", "PyvoyServer", "TLSConfig"]
+__all__ = ["HTTPVersion", "Interface", "Mount", "PyvoyServer", "TLSConfig", "Upstream"]
 
-from ._server import Cluster, HTTPVersion, Interface, Mount, PyvoyServer, TLSConfig
+from ._server import HTTPVersion, Interface, Mount, PyvoyServer, TLSConfig, Upstream
