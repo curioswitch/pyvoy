@@ -335,6 +335,7 @@ impl AppExecutor {
             &self.constants.websocket,
             &self.asgi,
             &self.extensions,
+            None,
             &self.state,
             &self.constants,
         )?;

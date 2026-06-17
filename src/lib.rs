@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -35,6 +33,7 @@ fn init() -> bool {
     let init_result: Result<_, PyErr> = Python::attach(|py| {
         let syspath = py.import("sys")?.getattr("path")?.cast_into::<PyList>()?;
         syspath.insert(0, ".")?;
+        asgi::register_py_modules(py)?;
 
         Ok(())
     });
@@ -100,12 +99,14 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
     let enable_lifespan = filter_config["lifespan"].as_bool();
 
-    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, root_path)));
+    let constants = Python::attach(types::Constants::get);
 
     match interface {
-        "asgi" => asgi::filter::Config::new(app, constants, worker_threads, enable_lifespan)
-            .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
-        "wsgi" => wsgi::filter::Config::new(app, constants, worker_threads)
+        "asgi" => {
+            asgi::filter::Config::new(app, root_path, constants, worker_threads, enable_lifespan)
+                .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>)
+        }
+        "wsgi" => wsgi::filter::Config::new(app, root_path, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
             envoy_log_error!("Unsupported python interface: {}", interface);
@@ -139,7 +140,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     let worker_threads = filter_config["worker_threads"].as_i64().unwrap_or(1) as usize;
     let enable_lifespan = filter_config["lifespan"].as_bool();
 
-    let constants = Arc::new(Python::attach(|py| types::Constants::new(py, "")));
+    let constants = Python::attach(types::Constants::get);
     asgi::websocket::Config::new(app, constants, worker_threads, enable_lifespan)
         .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
 }

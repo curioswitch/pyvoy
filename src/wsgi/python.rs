@@ -31,6 +31,7 @@ struct ExecuteAppEvent {
 #[derive(Clone)]
 struct ExecutorInner {
     app: Arc<Py<PyAny>>,
+    root_path: Arc<Py<PyString>>,
     constants: Arc<Constants>,
     rx: crossbeam_channel::Receiver<ExecuteAppEvent>,
 }
@@ -48,18 +49,21 @@ impl Executor {
     pub(crate) fn new(
         app_module: &str,
         app_attr: &str,
+        root_path: &str,
         num_threads: usize,
         constants: Arc<Constants>,
     ) -> PyResult<Self> {
-        let app = Python::attach(|py| {
+        let (app, root_path) = Python::attach(|py| {
             let module = py.import(app_module)?;
             let app = module.getattr(app_attr)?;
-            Ok::<_, PyErr>(app.unbind())
+            let root_path = PyString::new(py, root_path);
+            Ok::<_, PyErr>((app.unbind(), root_path.unbind()))
         })?;
 
         let (tx, rx) = crossbeam_channel::unbounded::<ExecuteAppEvent>();
         let inner = ExecutorInner {
             app: Arc::new(app),
+            root_path: Arc::new(root_path),
             constants,
             rx,
         };
@@ -171,7 +175,7 @@ impl ExecutorInner {
             &scope.method,
         )?;
 
-        environ.set_item(&self.constants.script_name, &self.constants.root_path_value)?;
+        environ.set_item(&self.constants.script_name, self.root_path.bind(py))?;
 
         let raw_path: &[u8] =
             if let Some(query_idx) = scope.raw_path.iter().position(|&b| b == b'?') {
@@ -192,7 +196,7 @@ impl ExecutorInner {
             };
 
         let decoded_path = urlencoding::decode_binary(raw_path);
-        let root_path = self.constants.root_path_value.bind(py).to_str()?;
+        let root_path = self.root_path.bind(py).to_str()?;
         let decoded_path_slice = if root_path.is_empty() {
             &decoded_path
         } else if decoded_path.starts_with(root_path.as_bytes()) {

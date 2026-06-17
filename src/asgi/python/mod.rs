@@ -4,14 +4,20 @@ use std::{
 };
 
 use crate::{
-    asgi::shared::{
-        ExecutorHandles,
-        app::load_app,
-        awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
-        eventloop::EventLoops,
-        get_gil_batch_size,
-        headers::extract_headers_from_event,
-        scope::new_scope_dict,
+    asgi::{
+        shared::{
+            ExecutorHandles,
+            app::load_app,
+            awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+            eventloop::EventLoops,
+            get_gil_batch_size,
+            headers::extract_headers_from_event,
+            scope::new_scope_dict,
+        },
+        transport::{
+            ReceivedResponseHeadersExecutor, RequestContent, ResetReason, ResponseContent,
+            SetResponseFutureException, TransportBridge, TransportEvent,
+        },
     },
     eventbridge::EventBridge,
     types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
@@ -20,6 +26,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     IntoPyObjectExt,
+    call::PyCallArgs,
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyNone, PyString},
@@ -31,6 +38,7 @@ struct ExecutorInner {
     app: Py<PyAny>,
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
+    root_path: Py<PyString>,
     loops: EventLoops,
     constants: Arc<Constants>,
     executor: Executor,
@@ -49,12 +57,14 @@ struct ExecutorInner {
 #[derive(Clone)]
 pub(crate) struct Executor {
     tx: Sender<Event>,
+    constants: Arc<Constants>,
 }
 
 impl Executor {
     pub(crate) fn new(
         app_module: &str,
         app_attr: &str,
+        root_path: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
@@ -67,19 +77,24 @@ impl Executor {
             enable_lifespan,
         )?;
 
-        let extensions = Python::attach(|py| {
+        let (extensions, root_path) = Python::attach(|py| {
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
-            Ok::<_, PyErr>(extensions.unbind())
+            let root_path = PyString::new(py, root_path);
+            Ok::<_, PyErr>((extensions.unbind(), root_path.unbind()))
         })?;
 
         let (tx, rx) = mpsc::channel::<Event>();
-        let executor = Self { tx };
+        let executor = Self {
+            tx,
+            constants: constants.clone(),
+        };
 
         let inner = ExecutorInner {
             app,
             asgi,
             extensions,
+            root_path,
             loops: loops.clone(),
             constants,
             executor: executor.clone(),
@@ -130,6 +145,7 @@ impl Executor {
         response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
+        transport_bridge: EventBridge<TransportEvent>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         self.tx
@@ -140,6 +156,7 @@ impl Executor {
                 response_closed,
                 recv_bridge,
                 send_bridge,
+                transport_bridge,
                 scheduler,
             }))
             .unwrap();
@@ -171,6 +188,58 @@ impl Executor {
             .unwrap();
     }
 
+    pub(crate) fn handle_transport_received_response_headers(
+        &self,
+        status: StatusCode,
+        response_headers: Vec<(HeaderName, HeaderValue)>,
+        response_content: ResponseContent,
+        response_future: Py<PyAny>,
+        request_content: Option<RequestContent>,
+        end_stream: bool,
+    ) {
+        let stream_start_executor = ReceivedResponseHeadersExecutor::new(
+            status,
+            response_headers,
+            response_future,
+            response_content,
+            request_content,
+            end_stream,
+            self.constants.clone(),
+        );
+        self.tx
+            .send(Event::HandleTransportReceivedResponseHeaders(
+                stream_start_executor,
+            ))
+            .unwrap();
+    }
+
+    pub(crate) fn set_response_future_exception(
+        &self,
+        future: Py<PyAny>,
+        reason: ResetReason,
+        response_content: ResponseContent,
+        request_content: Option<RequestContent>,
+    ) {
+        self.tx
+            .send(Event::SetResponseFutureException(
+                future,
+                reason,
+                response_content,
+                request_content,
+            ))
+            .unwrap();
+    }
+
+    pub(crate) fn notify_request(&self, request_content: RequestContent) {
+        self.tx.send(Event::NotifyRequest(request_content)).unwrap();
+    }
+
+    pub(crate) fn notify_response(&self, response_content: ResponseContent) {
+        self.tx
+            .send(Event::NotifyResponse(response_content))
+            .unwrap();
+    }
+
     pub(crate) fn shutdown(&self) {
         self.tx.send(Event::Shutdown).unwrap();
     }
@@ -187,6 +256,7 @@ impl ExecutorInner {
                     app: self.app.clone_ref(py),
                     asgi: self.asgi.clone_ref(py),
                     extensions: self.extensions.clone_ref(py),
+                    root_path: self.root_path.clone_ref(py),
                     event: Some(event),
                     constants: self.constants.clone(),
                     executor: self.executor.clone(),
@@ -223,13 +293,52 @@ impl ExecutorInner {
                     (dropped_recv_future_executor,),
                 )?;
             }
-            // No real logic in handling send futures so we don't bother with
+            // No real logic in handling send or canceled futures so we don't bother with
             // running on the event loop.
             Event::HandleSendFuture(future) => {
                 self.handle_send_future(py, future)?;
             }
             Event::HandleDroppedSendFuture(future) => {
                 self.handle_dropped_send_future(py, future)?;
+            }
+            Event::HandleTransportReceivedResponseHeaders(executor) => {
+                let loop_ = executor.response_content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (executor.into_py_any(py)?,),
+                )?;
+            }
+            Event::SetResponseFutureException(
+                future,
+                reason,
+                response_content,
+                request_content,
+            ) => {
+                let loop_ = response_content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (SetResponseFutureException {
+                        future,
+                        reason,
+                        exception: response_content.take_exception(),
+                        request_content,
+                        constants: self.constants.clone(),
+                    },),
+                )?;
+            }
+            Event::NotifyRequest(content) => {
+                let loop_ = content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (content.into_py_any(py)?,),
+                )?;
+            }
+            Event::NotifyResponse(content) => {
+                let loop_ = content.inner.loop_.bind(py).clone();
+                loop_.call_method1(
+                    &self.constants.call_soon_threadsafe,
+                    (content.into_py_any(py)?,),
+                )?;
             }
             Event::Shutdown => {
                 self.shutdown(py)?;
@@ -279,6 +388,7 @@ struct AppExecutor {
     app: Py<PyAny>,
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
+    root_path: Py<PyString>,
     event: Option<ExecuteAppEvent>,
     constants: Arc<Constants>,
     executor: Executor,
@@ -294,6 +404,7 @@ impl AppExecutor {
             response_closed,
             recv_bridge,
             send_bridge,
+            transport_bridge,
             scheduler,
         } = self.event.take().unwrap();
 
@@ -305,6 +416,7 @@ impl AppExecutor {
             &self.constants.http,
             &self.asgi,
             &self.extensions,
+            Some(&self.root_path),
             &self.state,
             &self.constants,
         )?;
@@ -343,7 +455,25 @@ impl AppExecutor {
                 constants: self.constants.clone(),
             },
         ))?;
-        let future = loop_.call_method1(&self.constants.create_task, (coro,))?;
+
+        let transport_bridge =
+            TransportBridge::new(loop_.clone().unbind(), transport_bridge, scheduler.clone())
+                .into_py_any(py)?;
+        let token = self
+            .constants
+            .transport_bridge_contextvar_set
+            .call1(py, (transport_bridge,))?;
+
+        let future = {
+            let _reset = RunOnDrop(
+                self.constants
+                    .transport_bridge_contextvar_reset
+                    .bind(py)
+                    .clone(),
+                Some((token,)),
+            );
+            loop_.call_method1(&self.constants.create_task, (coro,))?
+        };
         future.call_method1(
             &self.constants.add_done_callback,
             (AppFutureHandler {
@@ -403,6 +533,7 @@ struct ExecuteAppEvent {
     response_closed: Arc<AtomicBool>,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
+    transport_bridge: EventBridge<TransportEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
@@ -416,6 +547,15 @@ enum Event {
     HandleDroppedRecvFuture(LoopFuture),
     HandleSendFuture(SendFuture),
     HandleDroppedSendFuture(LoopFuture),
+    HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
+    SetResponseFutureException(
+        Py<PyAny>,
+        ResetReason,
+        ResponseContent,
+        Option<RequestContent>,
+    ),
+    NotifyRequest(RequestContent),
+    NotifyResponse(ResponseContent),
     Shutdown,
 }
 
@@ -471,7 +611,7 @@ impl EmptyRecvCallable {
         } else {
             self.constants.asgi_empty_recv.bind(py).copy()?
         };
-        ValueAwaitable::new_py(py, event.into_any().unbind())
+        ValueAwaitable::new_py(py, &event.into_any())
     }
 }
 
@@ -745,8 +885,8 @@ impl Drop for RecvFuture {
 
 /// A Python future with its associated event loop for easy access from Rust.
 pub(crate) struct LoopFuture {
-    future: Py<PyAny>,
-    loop_: Py<PyAny>,
+    pub(crate) future: Py<PyAny>,
+    pub(crate) loop_: Py<PyAny>,
 }
 
 /// A Python future to notify when a send completes.
@@ -763,7 +903,26 @@ impl Drop for SendFuture {
     }
 }
 
+struct RunOnDrop<'py, A>(Bound<'py, PyAny>, Option<A>)
+where
+    A: PyCallArgs<'py>;
+
+impl<'py, A> Drop for RunOnDrop<'py, A>
+where
+    A: PyCallArgs<'py>,
+{
+    fn drop(&mut self) {
+        if let Some(args) = self.1.take() {
+            let _ = self.0.call1(args);
+        } else {
+            let _ = self.0.call0();
+        }
+    }
+}
+
 /// The event ID to trigger the filter to process request events.
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
 /// The event ID to trigger the filter to process response events.
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
+/// The event ID to trigger an outgoing HTTP request.
+pub(crate) const EVENT_ID_OUTGOING_REQUEST: u64 = 3;

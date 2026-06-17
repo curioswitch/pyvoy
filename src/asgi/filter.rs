@@ -1,13 +1,17 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
 use crate::asgi::shared::ExecutorHandles;
+use crate::asgi::transport::{
+    RequestBody, ResetReason, SendStreamDataEvent, TransportEvent, TransportState,
+};
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::types::*;
@@ -20,25 +24,32 @@ pub struct Config {
 impl Config {
     pub fn new(
         app: &str,
+        root_path: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let (executor, handles) =
-            match python::Executor::new(module, attr, constants, worker_threads, enable_lifespan) {
-                Ok(executor) => executor,
-                Err(e) => {
-                    Python::attach(|py| {
-                        let tb = e
-                            .traceback(py)
-                            .and_then(|tb| tb.format().ok())
-                            .unwrap_or_default();
-                        envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
-                    });
-                    return None;
-                }
-            };
+        let (executor, handles) = match python::Executor::new(
+            module,
+            attr,
+            root_path,
+            constants,
+            worker_threads,
+            enable_lifespan,
+        ) {
+            Ok(executor) => executor,
+            Err(e) => {
+                Python::attach(|py| {
+                    let tb = e
+                        .traceback(py)
+                        .and_then(|tb| tb.format().ok())
+                        .unwrap_or_default();
+                    envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
+                });
+                return None;
+            }
+        };
         Some(Self {
             executor,
             handles: Some(handles),
@@ -62,6 +73,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_trailers: None,
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
+            transport_bridge: EventBridge::new(),
+            transport_responses: HashMap::new(),
             downstream_watermark_level: 0,
         })
     }
@@ -77,6 +90,9 @@ struct Filter {
 
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
+
+    transport_bridge: EventBridge<TransportEvent>,
+    transport_responses: HashMap<u64, TransportState>,
 
     downstream_watermark_level: usize,
 }
@@ -104,6 +120,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             self.response_closed.clone(),
             self.recv_bridge.clone(),
             self.send_bridge.clone(),
+            self.transport_bridge.clone(),
             Box::from(envoy_filter.new_scheduler()),
         );
         abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
@@ -138,15 +155,35 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.response_closed.store(true, Ordering::Relaxed);
         self.recv_bridge.close();
         self.send_bridge.close();
+
+        for (_, state) in self.transport_responses.drain() {
+            if let Some(response_future) = state.response_future {
+                self.executor.set_response_future_exception(
+                    response_future,
+                    ResetReason::ServerRequestDone,
+                    state.response_content,
+                    state.request_content,
+                );
+            } else if state.response_content.reset(ResetReason::ServerRequestDone) {
+                self.executor.notify_response(state.response_content);
+            }
+        }
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
-        if event_id == EVENT_ID_REQUEST {
-            self.handle_read(envoy_filter);
-            return;
-        }
-        if self.downstream_watermark_level == 0 {
-            self.process_send_events(envoy_filter);
+        match event_id {
+            EVENT_ID_REQUEST => {
+                self.handle_read(envoy_filter);
+            }
+            EVENT_ID_RESPONSE => {
+                if self.downstream_watermark_level == 0 {
+                    self.process_send_events(envoy_filter);
+                }
+            }
+            EVENT_ID_OUTGOING_REQUEST => {
+                self.process_transport_events(envoy_filter);
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -159,6 +196,143 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if self.downstream_watermark_level == 0 {
             envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         }
+    }
+
+    fn on_http_stream_headers(
+        &mut self,
+        envoy_filter: &mut EHF,
+        stream_handle: u64,
+        response_headers: &[(EnvoyBuffer, EnvoyBuffer)],
+        end_stream: bool,
+    ) {
+        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+            // Happens if there is a configuration bug for the upstream.
+            // TODO: Surface this.
+            unsafe { envoy_filter.reset_http_stream(stream_handle) };
+            return;
+        };
+        let mut headers: Vec<(HeaderName, HeaderValue)> =
+            Vec::with_capacity(response_headers.len());
+        let mut status = StatusCode::OK;
+        for (k, v) in response_headers {
+            if k.as_slice() == b":status" {
+                status = StatusCode::from_bytes(v.as_slice())
+                    // Should be validated by Envoy already so just fallback.
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                continue;
+            }
+            match (
+                HeaderName::from_bytes(k.as_slice()),
+                HeaderValue::from_bytes(v.as_slice()),
+            ) {
+                (Ok(name), Ok(value)) => headers.push((name, value)),
+                // Should be validated by Envoy already so shouldn't happen in practice.
+                _ => continue,
+            }
+        }
+        let Some(future) = state.response_future.take() else {
+            // Shouldn't happen in practice.
+            return;
+        };
+        self.executor.handle_transport_received_response_headers(
+            status,
+            headers,
+            state.response_content.clone(),
+            future,
+            state.request_content.clone(),
+            end_stream,
+        );
+    }
+
+    fn on_http_stream_data(
+        &mut self,
+        _envoy_filter: &mut EHF,
+        stream_handle: u64,
+        response_data: &[EnvoyBuffer],
+        end_stream: bool,
+    ) {
+        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+            // Can't happen in practice since we would have reset the stream in on_http_stream_headers,
+            // but avoid panic anyways.
+            return;
+        };
+        let len = response_data.iter().map(|b| b.as_slice().len()).sum();
+        let mut body = Vec::with_capacity(len);
+        for buffer in response_data {
+            body.extend_from_slice(buffer.as_slice());
+        }
+        if state.response_content.feed_response_data(body, end_stream) {
+            self.executor
+                .notify_response(state.response_content.clone());
+        }
+    }
+
+    fn on_http_stream_trailers(
+        &mut self,
+        _envoy_filter: &mut EHF,
+        stream_handle: u64,
+        response_trailers: &[(EnvoyBuffer, EnvoyBuffer)],
+    ) {
+        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+            return;
+        };
+        if state
+            .response_content
+            .feed_response_trailers(response_trailers)
+        {
+            self.executor
+                .notify_response(state.response_content.clone());
+        }
+    }
+
+    fn on_http_stream_reset(
+        &mut self,
+        _envoy_filter: &mut EHF,
+        stream_handle: u64,
+        reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
+    ) {
+        let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
+            return;
+        };
+
+        let reason = match reason {
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalReset
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::LocalRefusedStreamReset => {
+                ResetReason::Local
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteReset
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::RemoteRefusedStreamReset => {
+                ResetReason::Remote
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::ProtocolError => {
+                ResetReason::Protocol
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionFailure
+            | abi::envoy_dynamic_module_type_http_stream_reset_reason::ConnectionTermination => {
+                ResetReason::Connection
+            }
+            abi::envoy_dynamic_module_type_http_stream_reset_reason::Overflow => {
+                ResetReason::Overflow
+            }
+        };
+        if let Some(response_future) = state.response_future.take() {
+            // No response headers received before resetting.
+            self.executor.set_response_future_exception(
+                response_future,
+                reason,
+                state.response_content.clone(),
+                state.request_content,
+            );
+        }
+        if state.response_content.reset(reason) {
+            self.executor.notify_response(state.response_content);
+        }
+    }
+
+    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {
+        // Cleanup for a successful response. It may be more precise to do this on data with end_stream or
+        // trailers but simpler to just take care of it here.
+        self.transport_responses.remove(&stream_handle);
     }
 }
 
@@ -236,6 +410,93 @@ impl Filter {
                         Some(b"Internal Server Error"),
                         None,
                     );
+                }
+            }
+        });
+    }
+
+    fn process_transport_events(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        self.transport_bridge.process(|event| match event {
+            TransportEvent::Start(event) => {
+                let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
+                let mut has_content_length = false;
+                for (k, v) in event.headers.iter() {
+                    if k == http::header::CONTENT_LENGTH {
+                        has_content_length = true;
+                    }
+                    headers.push((k.as_str(), v.as_bytes()));
+                }
+                headers.push((":method", event.method.as_str().as_bytes()));
+                headers.push((
+                    ":path",
+                    event.url[url::Position::BeforePath..url::Position::AfterQuery].as_bytes(),
+                ));
+                headers.push((":scheme", event.url.scheme().as_bytes()));
+                headers.push((
+                    ":authority",
+                    event.url[url::Position::BeforeHost..url::Position::AfterPort].as_bytes(),
+                ));
+                let (body, end_stream, request_content) = match event.body {
+                    RequestBody::Buffered(body) => (Some(body), true, None),
+                    RequestBody::Iter(iter) => (None, false, Some(iter)),
+                };
+                let mut content_length_buffer = itoa::Buffer::new();
+                if let Some(body) = &body
+                    && !has_content_length
+                {
+                    headers.push((
+                        "content-length",
+                        content_length_buffer.format(body.len()).as_bytes(),
+                    ));
+                }
+                let (res, stream_handle) = envoy_filter.start_http_stream(
+                    &event.cluster_name,
+                    headers,
+                    body.as_deref(),
+                    end_stream,
+                    event.timeout_ms,
+                );
+                if res != abi::envoy_dynamic_module_type_http_callout_init_result::Success {
+                    self.executor.set_response_future_exception(
+                        event.response_future,
+                        ResetReason::InvalidUpstream,
+                        event.response_content,
+                        request_content,
+                    );
+                    return;
+                }
+                if let Some(request_content) = &request_content {
+                    request_content.set_stream_handle(stream_handle);
+                    self.executor.notify_request(request_content.clone());
+                }
+                event.response_content.set_stream_handle(stream_handle);
+                self.transport_responses.insert(
+                    stream_handle,
+                    TransportState {
+                        request_content,
+                        response_future: Some(event.response_future),
+                        response_content: event.response_content,
+                    },
+                );
+            }
+            TransportEvent::SendData(event) => {
+                let SendStreamDataEvent {
+                    stream_handle,
+                    data,
+                    end_stream,
+                } = event;
+                unsafe {
+                    envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
+                }
+            }
+            TransportEvent::Reset(mut event) => {
+                if let Some(state) = self.transport_responses.get(&event.stream_handle) {
+                    if let Some(exception) = event.exception.take() {
+                        state.response_content.set_exception(exception);
+                    }
+                    unsafe {
+                        envoy_filter.reset_http_stream(event.stream_handle);
+                    }
                 }
             }
         });

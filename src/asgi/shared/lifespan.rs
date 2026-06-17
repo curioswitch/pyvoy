@@ -236,7 +236,7 @@ impl RecvCallable {
                 self.next_event = NextLifespanEvent::Shutdown;
                 let event = PyDict::new(py);
                 event.set_item(&self.constants.typ, &self.constants.lifespan_startup)?;
-                ValueAwaitable::new_py(py, event.into_any().unbind())
+                ValueAwaitable::new_py(py, &event.into_any())
             }
             // https://asgi.readthedocs.io/en/latest/specs/lifespan.html#shutdown-receive-event
             NextLifespanEvent::Shutdown => {
