@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 envoy-proxy-dynamic-modules-rust-sdk = {
   git = "https://github.com/anuraaga/envoy",
-  rev = "c900e5fc89b30d7999cbb4079f1b1e191dec53b8"
+  rev = "c63a84f1d9b413dd85a6fb8dd00f77df5d701570"
 }
 url = "2.5.7"
 

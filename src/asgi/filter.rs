@@ -1,4 +1,7 @@
-use envoy_proxy_dynamic_modules_rust_sdk::*;
+use envoy_proxy_dynamic_modules_rust_sdk::{
+    EnvoyBuffer, EnvoyHttpFilter, EnvoyHttpFilterScheduler as _, HttpFilter, HttpFilterConfig, abi,
+    envoy_log_error,
+};
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
@@ -369,13 +372,13 @@ impl Filter {
                     }
                     if end_stream {
                         if body_event.body.is_empty() {
-                            envoy_filter.send_response_headers(headers, true);
+                            envoy_filter.send_response_headers(&headers, true);
                         } else {
-                            envoy_filter.send_response_headers(headers, false);
+                            envoy_filter.send_response_headers(&headers, false);
                             envoy_filter.send_response_data(&body_event.body, true);
                         }
                     } else {
-                        envoy_filter.send_response_headers(headers, false);
+                        envoy_filter.send_response_headers(&headers, false);
                         envoy_filter.send_response_data(&body_event.body, false);
                     }
                 }
@@ -395,7 +398,7 @@ impl Filter {
                                 .iter()
                                 .map(|(k, v)| (k.as_str(), v.as_bytes()))
                                 .collect();
-                            envoy_filter.send_response_trailers(trailers_ref);
+                            envoy_filter.send_response_trailers(&trailers_ref);
                         }
                     }
                 }
@@ -403,7 +406,7 @@ impl Filter {
                     // Will reset the stream if headers have already been sent.
                     envoy_filter.send_response(
                         500,
-                        vec![
+                        &[
                             ("content-type", b"text/plain; charset=utf-8"),
                             ("connection", b"close"),
                         ],
@@ -451,7 +454,7 @@ impl Filter {
                 }
                 let (res, stream_handle) = envoy_filter.start_http_stream(
                     &event.cluster_name,
-                    headers,
+                    &headers,
                     body.as_deref(),
                     end_stream,
                     event.timeout_ms,

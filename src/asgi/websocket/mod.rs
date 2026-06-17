@@ -1,4 +1,7 @@
-use envoy_proxy_dynamic_modules_rust_sdk::*;
+use envoy_proxy_dynamic_modules_rust_sdk::{
+    EnvoyNetworkFilter, EnvoyNetworkFilterScheduler as _, NetworkFilter, NetworkFilterConfig, abi,
+    envoy_log_error,
+};
 use http::{HeaderName, HeaderValue, header};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;

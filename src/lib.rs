@@ -1,3 +1,5 @@
+#![allow(unpredictable_function_pointer_comparisons)]
+
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
@@ -13,20 +15,7 @@ mod headernames;
 mod types;
 mod wsgi;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn envoy_dynamic_module_on_program_init() -> *const ::std::os::raw::c_char {
-    envoy_proxy_dynamic_modules_rust_sdk::NEW_HTTP_FILTER_CONFIG_FUNCTION
-        .get_or_init(|| new_http_filter_config_fn);
-    envoy_proxy_dynamic_modules_rust_sdk::NEW_NETWORK_FILTER_CONFIG_FUNCTION
-        .get_or_init(|| new_network_filter_config_fn);
-
-    if init() {
-        envoy_proxy_dynamic_modules_rust_sdk::abi::kAbiVersion.as_ptr()
-            as *const ::std::os::raw::c_char
-    } else {
-        ::std::ptr::null()
-    }
-}
+declare_all_init_functions!(init, http: new_http_filter_config_fn, network: new_network_filter_config_fn);
 
 fn init() -> bool {
     Python::initialize();

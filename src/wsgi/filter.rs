@@ -297,13 +297,13 @@ impl Filter {
                 }
                 if end_stream {
                     if body_event.body.is_empty() {
-                        envoy_filter.send_response_headers(headers, true);
+                        envoy_filter.send_response_headers(&headers, true);
                     } else {
-                        envoy_filter.send_response_headers(headers, false);
+                        envoy_filter.send_response_headers(&headers, false);
                         envoy_filter.send_response_data(&body_event.body, true);
                     }
                 } else {
-                    envoy_filter.send_response_headers(headers, false);
+                    envoy_filter.send_response_headers(&headers, false);
                     envoy_filter.send_response_data(&body_event.body, false);
                 }
             }
@@ -322,20 +322,20 @@ impl Filter {
                     for (k, v) in start_event.headers.iter() {
                         headers.push((k.as_str(), v.as_bytes()));
                     }
-                    envoy_filter.send_response_headers(headers, false);
+                    envoy_filter.send_response_headers(&headers, false);
                 }
                 let trailers_ref: Vec<(&str, &[u8])> = trailers
                     .iter()
                     .map(|(k, v)| (k.as_str(), v.as_bytes()))
                     .collect();
-                envoy_filter.send_response_trailers(trailers_ref);
+                envoy_filter.send_response_trailers(&trailers_ref);
             }
             ResponseEvent::Exception => {
                 if !self.response_closed {
                     self.response_closed = true;
                     envoy_filter.send_response(
                         500,
-                        vec![
+                        &[
                             ("content-type", b"text/plain; charset=utf-8"),
                             ("connection", b"close"),
                         ],
