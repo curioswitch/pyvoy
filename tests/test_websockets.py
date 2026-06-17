@@ -42,6 +42,9 @@ async def server() -> AsyncIterator[PyvoyServer]:
         yield server
 
 
+# Separate out heavyweight compression test cases. They perform extremely slowly
+# using rosetta on macOS so we allow targeting separately for websockets development
+# as needed.
 cases = [
     pytest.param(
         ["1.*", "2.*", "3.*", "4.*", "5.*", "6.*", "7.*", "9.*", "10.*"], id="basic"
