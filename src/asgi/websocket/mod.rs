@@ -14,7 +14,9 @@ use tungstenite::{Message, Utf8Bytes, WebSocket};
 
 use crate::asgi::python::EVENT_ID_REQUEST;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::websocket::executor::{Body, RecvFuture, SendEvent, WebSocketExecutor};
+use crate::asgi::websocket::executor::{
+    Body, EVENT_ID_RESPONSE, RecvFuture, SendEvent, WebSocketExecutor,
+};
 use crate::asgi::websocket::stream::EnvoyStream;
 use crate::eventbridge::EventBridge;
 use crate::types::*;
@@ -78,6 +80,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
             close_frame: None,
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
+            downstream_watermark_level: 0,
         })
     }
 }
@@ -99,6 +102,8 @@ struct Filter {
 
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
+
+    downstream_watermark_level: usize,
 }
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
@@ -110,21 +115,18 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
     fn on_read(
         &mut self,
         envoy_filter: &mut ENF,
-        data_length: usize,
-        end_stream: bool,
+        _data_length: usize,
+        _end_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_network_filter_data_status {
         match &self.state {
             WebSocketState::NotWebSocket => {
-                eprintln!("on_read: NotWebSocket");
                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
             }
             WebSocketState::Accepted(_) => {
-                eprintln!("on_read: Accepted");
                 self.read_web_socket(envoy_filter);
                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
             }
             WebSocketState::FinishHandshake(_, _) => {
-                eprintln!("on_read: FinishHandshake");
                 // This is similar to junk after handshake request, which we handle above in tail.empty.
                 // As we've already executed the app, there isn't much to do but fail the request
                 envoy_filter.close_with_details(
@@ -145,17 +147,10 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
         if let WebSocketState::StartHandshake(mut mach) =
             std::mem::replace(&mut self.state, WebSocketState::NotWebSocket)
         {
-            eprintln!("on_read: StartHandshake");
-            eprintln!(
-                "StartHandshake: data_length={}, end_stream={}",
-                data_length, end_stream
-            );
             mach.get_mut().read_from_buffered(envoy_filter);
             loop {
-                eprintln!("HandshakeMachine round");
                 mach = match mach.single_round::<http::Request<()>>() {
                     Ok(RoundResult::WouldBlock(m)) => {
-                        eprintln!("HandshakeMachine would block");
                         self.state = WebSocketState::StartHandshake(m);
                         return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
                     }
@@ -172,7 +167,6 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                                 self.state = WebSocketState::NotWebSocket;
                                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
                             };
-                            eprintln!("HandshakeMachine finished: tail_len={}", tail.len());
                             if !tail.is_empty() {
                                 envoy_filter.close_with_details(
                                     abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
@@ -210,23 +204,33 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
     }
 
     fn on_scheduled(&mut self, envoy_filter: &mut ENF, event_id: u64) {
-        eprintln!("on_scheduled: event_id={}", event_id);
         if event_id == EVENT_ID_REQUEST {
             match &self.state {
                 WebSocketState::FinishHandshake(_, _) => {
-                    eprintln!("send websocket.connect");
                     let future = self.recv_bridge.get().unwrap();
                     self.executor.handle_recv_future_connect(future);
                 }
                 WebSocketState::Accepted(_) => {
-                    eprintln!("read websocket");
                     self.read_web_socket(envoy_filter);
                 }
                 _ => {}
             }
             return;
         }
-        self.process_send_events(envoy_filter);
+        if self.downstream_watermark_level == 0 {
+            self.process_send_events(envoy_filter);
+        }
+    }
+
+    fn on_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut ENF) {
+        self.downstream_watermark_level += 1;
+    }
+
+    fn on_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut ENF) {
+        self.downstream_watermark_level -= 1;
+        if self.downstream_watermark_level == 0 {
+            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+        }
     }
 }
 
@@ -234,11 +238,9 @@ impl Filter {
     fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         match std::mem::replace(&mut self.state, WebSocketState::Done) {
             WebSocketState::FinishHandshake(stream, mut response) => {
-                eprintln!("processing send events: FinishHandshake");
                 let event = self.send_bridge.get().unwrap();
                 let event = match event {
                     SendEvent::Close { code, reason } => {
-                        eprintln!("Sending close during handshake");
                         let mut response = http::Response::new(());
                         *response.status_mut() = http::StatusCode::FORBIDDEN;
                         let mut buffer = Vec::new();
@@ -252,7 +254,6 @@ impl Filter {
                     }
                     SendEvent::Accept(e) => e,
                     SendEvent::Exception => {
-                        eprintln!("Exception during handshake");
                         // Follow uvicorn's behavior which returns 500 for exceptions before handshake.
                         let body = b"Internal Server Error";
                         let mut response = http::Response::new(body);
@@ -277,7 +278,6 @@ impl Filter {
                 for (name, value) in event.headers.iter() {
                     response.headers_mut().append(name, value.clone());
                 }
-                eprintln!("Sending handshake response");
                 let mut buffer = Vec::new();
                 write_response(&mut buffer, &response).unwrap();
                 envoy_filter.write(&buffer, false);
@@ -293,17 +293,13 @@ impl Filter {
             }
         }
 
-        eprintln!("processing send events: Accepted");
         self.send_bridge.process(|event| {
-            eprintln!("processing send event");
             match &mut self.state {
                 WebSocketState::Accepted(websocket) => match event {
                     SendEvent::SendMessage(event) => {
                         if self.close_frame.is_some() {
-                            eprintln!("ignoring send message after close");
                             return;
                         }
-                        eprintln!("Sending websocket message");
                         websocket
                             .send(match event.body {
                                 Body::Text(text) => Message::Text(text),
@@ -314,7 +310,6 @@ impl Filter {
                         self.executor.handle_send_future(event.future);
                     }
                     SendEvent::Close { code, reason } => {
-                        eprintln!("Sending close message");
                         let close_frame = CloseFrame {
                             code: CloseCode::from(code),
                             reason: reason.clone(),
@@ -324,7 +319,6 @@ impl Filter {
                         self.close_frame = Some(close_frame);
                     }
                     SendEvent::Exception => {
-                        eprintln!("exception");
                         let close_frame = CloseFrame {
                             code: CloseCode::Error,
                             reason: Utf8Bytes::default(),
@@ -335,11 +329,8 @@ impl Filter {
                     }
                     _ => unreachable!(),
                 },
-                WebSocketState::Done => {
-                    eprintln!("Sentinel");
-                }
+                WebSocketState::Done => {}
                 _ => {
-                    eprintln!("Other");
                     // Allow to drop to signal closed.
                 }
             }
@@ -352,7 +343,6 @@ impl Filter {
         };
 
         if let Some(close_frame) = &self.close_frame {
-            eprintln!("handling already closed");
             self.recv_bridge.process(|future| {
                 self.executor.handle_recv_future_disconnect(
                     close_frame.code.into(),
@@ -364,11 +354,9 @@ impl Filter {
         }
 
         if self.recv_bridge.is_empty() {
-            eprintln!("recv bridge empty");
             return;
         }
 
-        eprintln!("recv bridge not empty");
         // TODO: We should read in blocks until the first message is ready for backpressure but keep
         // simple for now.
         websocket.get_mut().read_from(envoy_filter);
@@ -377,7 +365,6 @@ impl Filter {
             websocket.get_mut().write_to(envoy_filter);
             match message {
                 Ok(msg) => {
-                    eprintln!("Reading message");
                     let body = match msg {
                         Message::Binary(bytes) => Body::Bytes(bytes),
                         Message::Text(text) => Body::Text(text),
@@ -399,7 +386,6 @@ impl Filter {
                         }
                         _ => continue,
                     };
-                    eprintln!("Sending read message");
                     if let Some(future) = self.recv_bridge.get() {
                         self.executor.handle_recv_future_message(body, future);
                     }
@@ -407,7 +393,6 @@ impl Filter {
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
                 {
-                    eprintln!("WouldBlock");
                     break;
                 }
                 Err(e) => {
@@ -461,7 +446,6 @@ fn finish_close(
     websocket: &mut WebSocket<EnvoyStream>,
     envoy_filter: &mut impl EnvoyNetworkFilter,
 ) {
-    eprintln!("finish_close");
     // Closing a websocket involves exchanging messages. This may cross network events,
     // so we read as much and write as much as we can. Eventually it will be done.
     websocket.get_mut().read_from(envoy_filter);

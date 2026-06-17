@@ -53,7 +53,6 @@ impl EnvoyStream {
         if total_size == 0 {
             return;
         }
-        eprintln!("total_size={}", total_size);
         inner.read_buffer.reserve(total_size);
         for buf in buffers {
             inner.read_buffer.put(buf.as_slice());

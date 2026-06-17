@@ -87,6 +87,9 @@ message = "Bump version: {current_version} → {new_version}"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+markers = [
+  "slow: slow test that is skipped by default",
+]
 testpaths = ["tests"]
 asyncio_default_fixture_loop_scope = "module"
 asyncio_default_test_loop_scope = "module"
