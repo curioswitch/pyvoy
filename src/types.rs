@@ -137,10 +137,6 @@ pub(crate) struct Constants {
     pub text: Py<PyString>,
     /// The string "websocket".
     pub websocket: Py<PyString>,
-    /// The string "websocket.accept".
-    pub websocket_accept: Py<PyString>,
-    /// The string "websocket.close".
-    pub websocket_close: Py<PyString>,
     /// The string "websocket.connect".
     pub websocket_connect: Py<PyString>,
     /// The string "websocket.disconnect".
@@ -354,8 +350,6 @@ impl Constants {
             reason: PyString::new(py, "reason").unbind(),
             text: PyString::new(py, "text").unbind(),
             websocket: PyString::new(py, "websocket").unbind(),
-            websocket_accept: PyString::new(py, "websocket.accept").unbind(),
-            websocket_close: PyString::new(py, "websocket.close").unbind(),
             websocket_connect: PyString::new(py, "websocket.connect").unbind(),
             websocket_disconnect: PyString::new(py, "websocket.disconnect").unbind(),
             websocket_receive: PyString::new(py, "websocket.receive").unbind(),
