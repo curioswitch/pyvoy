@@ -16,17 +16,18 @@ if TYPE_CHECKING:
 
 
 def _is_docker_unavailable() -> bool:
+    # Check docker CLI is available and supports Linux containers
     try:
-        subprocess.run(
-            ["docker", "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{.OSType}}"],
+            capture_output=True,
+            text=True,
             check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return True
     else:
-        return False
+        return result.stdout.strip() != "linux"
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -41,7 +42,9 @@ async def server() -> AsyncIterator[PyvoyServer]:
         yield server
 
 
-@pytest.mark.skipif(_is_docker_unavailable(), reason="requires Docker")
+@pytest.mark.skipif(
+    _is_docker_unavailable(), reason="requires Docker with Linux containers"
+)
 @pytest.mark.slow
 def test_autobahn(server: PyvoyServer) -> None:
     config = {
