@@ -34,6 +34,8 @@ def _is_docker_unavailable() -> bool:
 async def server() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.websockets.echo",
+        # Bind all interfaces for access from Docker
+        address="0.0.0.0",  # noqa: S104
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
         websockets=True,
@@ -82,6 +84,9 @@ def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
             [
                 "docker",
                 "run",
+                # Needed for Linux
+                "--add-host",
+                "host.docker.internal:host-gateway",
                 "--env",
                 "PYTHONUNBUFFERED=1",
                 "-v",
@@ -100,6 +105,9 @@ def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
         )
 
         report = json.loads((reports_dir / "index.json").read_text())
+        # wstest always exits 0 — even when it cannot reach the server
+        ran = sum(len(results) for results in report.values())
+        assert ran > 0, "autobahn ran no cases; server unreachable from the container?"
         for _, results in report.items():
             for case, result in results.items():
                 assert result["behavior"] in ("OK", "INFORMATIONAL", "NON-STRICT"), (
