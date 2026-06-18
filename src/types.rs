@@ -135,6 +135,10 @@ pub(crate) struct Constants {
     pub reason: Py<PyString>,
     /// The string "text".
     pub text: Py<PyString>,
+    /// The string "subprotocol".
+    pub subprotocol: Py<PyString>,
+    /// The string "subprotocols".
+    pub subprotocols: Py<PyString>,
     /// The string "websocket".
     pub websocket: Py<PyString>,
     /// The string "websocket.connect".
@@ -349,6 +353,8 @@ impl Constants {
             code: PyString::new(py, "code").unbind(),
             reason: PyString::new(py, "reason").unbind(),
             text: PyString::new(py, "text").unbind(),
+            subprotocol: PyString::new(py, "subprotocol").unbind(),
+            subprotocols: PyString::new(py, "subprotocols").unbind(),
             websocket: PyString::new(py, "websocket").unbind(),
             websocket_connect: PyString::new(py, "websocket.connect").unbind(),
             websocket_disconnect: PyString::new(py, "websocket.disconnect").unbind(),
