@@ -62,6 +62,7 @@ dev = [
   "trustme",
   "uvicorn[standard]",
   "watchfiles",
+  "websockets",
   "wheel",
 ]
 

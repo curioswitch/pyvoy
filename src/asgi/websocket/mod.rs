@@ -108,11 +108,6 @@ struct Filter {
 }
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
-    fn on_destroy(&mut self, _envoy_filter: &mut ENF) {
-        self.recv_bridge.close();
-        self.send_bridge.close();
-    }
-
     fn on_read(
         &mut self,
         envoy_filter: &mut ENF,
@@ -242,6 +237,10 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
             envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         }
     }
+
+    fn on_destroy(&mut self, _envoy_filter: &mut ENF) {
+        self.cleanup();
+    }
 }
 
 impl Filter {
@@ -263,6 +262,12 @@ impl Filter {
                         return;
                     }
                     SendEvent::Accept(e) => e,
+                    SendEvent::Abort => {
+                        envoy_filter.close(
+                            abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
+                        );
+                        return;
+                    }
                     SendEvent::Exception => {
                         // Follow uvicorn's behavior which returns 500 for exceptions before handshake.
                         let body = b"Internal Server Error";
@@ -342,6 +347,14 @@ impl Filter {
                         websocket.get_mut().write_to(envoy_filter);
                         self.close_frame = Some(close_frame);
                     }
+                    SendEvent::Abort => {
+                        // Don't abort if we're already closing gracefully.
+                        if self.close_frame.is_none() {
+                            envoy_filter.close(
+                                abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
+                            );
+                        }
+                    }
                     _ => unreachable!(),
                 },
                 WebSocketState::Done => {}
@@ -366,6 +379,8 @@ impl Filter {
                 );
             });
             finish_close(websocket, envoy_filter);
+            self.send_bridge.close();
+            self.recv_bridge.close();
         }
 
         if self.recv_bridge.is_empty() {
@@ -397,6 +412,7 @@ impl Filter {
                                     future,
                                 );
                             });
+                            self.cleanup();
                             return;
                         }
                         _ => continue,
@@ -429,6 +445,7 @@ impl Filter {
                         websocket,
                         envoy_filter,
                     );
+                    self.cleanup();
                     return;
                 }
             }
@@ -436,6 +453,11 @@ impl Filter {
                 break;
             }
         }
+    }
+
+    fn cleanup(&self) {
+        self.recv_bridge.close();
+        self.send_bridge.close();
     }
 }
 

@@ -459,6 +459,13 @@ async def _client_closed_before_response(
     if msg["type"] != "http.disconnect":
         msg = f'{msg["type"]} != "http.disconnect"'
         raise RuntimeError(msg)
+    # Receiving again after the disconnect must not hang; it returns another
+    # disconnect (idempotent), the same as the websocket path.
+    again = await recv()
+    if again["type"] != "http.disconnect":
+        msg = f'second recv {again["type"]} != "http.disconnect"'
+        raise RuntimeError(msg)
+    print("recv-after-disconnect returned disconnect", file=sys.stderr)  # noqa: T201
     try:
         await _send_success(send)
     except OSError:

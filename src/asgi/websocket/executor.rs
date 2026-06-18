@@ -556,6 +556,11 @@ impl AppFutureHandler {
             if self.send_bridge.send(SendEvent::Exception).is_ok() {
                 self.scheduler.commit(EVENT_ID_RESPONSE);
             }
+        } else if self.send_bridge.send(SendEvent::Abort).is_ok() {
+            // The application returned without closing the connection. Match
+            // uvicorn: drop the connection rather than sending a close frame,
+            // since a compliant app is expected to close explicitly.
+            self.scheduler.commit(EVENT_ID_RESPONSE);
         }
         Ok(())
     }
@@ -731,6 +736,8 @@ pub(super) enum SendEvent {
     Close { code: u16, reason: Utf8Bytes },
     /// Complete the response with failure due to an application exception.
     Exception,
+    /// The application returned without closing; drop the connection.
+    Abort,
 }
 
 /// A Python future to notify when a receive completes.

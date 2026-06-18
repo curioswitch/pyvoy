@@ -1870,6 +1870,7 @@ dev = [
     { name = "trustme" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
+    { name = "websockets" },
     { name = "wheel" },
 ]
 docs = [
@@ -1905,6 +1906,7 @@ dev = [
     { name = "trustme" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "watchfiles" },
+    { name = "websockets" },
     { name = "wheel" },
 ]
 docs = [

@@ -312,6 +312,7 @@ async def test_client_closed_before_response(
     read_lines = await assert_logs_contains(
         logs_asgi,
         [
+            "recv-after-disconnect returned disconnect",
             "send raised OSError as expected",
             "client-closed-before-response assertions passed",
         ],

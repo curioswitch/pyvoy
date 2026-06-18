@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -8,8 +9,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+import websockets
+from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
 from pyvoy import PyvoyServer
+
+from ._util import assert_logs_contains
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -31,7 +36,7 @@ def _is_docker_unavailable() -> bool:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server() -> AsyncIterator[PyvoyServer]:
+async def echo_server() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.websockets.echo",
         # Bind all interfaces for access from Docker
@@ -78,9 +83,9 @@ cases = [
     _is_docker_unavailable(), reason="requires Docker with Linux containers"
 )
 @pytest.mark.parametrize("cases", cases)
-def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
+def test_autobahn(cases: list[str], echo_server: PyvoyServer) -> None:
     config = {
-        "servers": [{"url": f"ws://host.docker.internal:{server.listener_port}"}],
+        "servers": [{"url": f"ws://host.docker.internal:{echo_server.listener_port}"}],
         "outdir": "/reports",
         "cases": cases,
         "exclude-cases": [],
@@ -131,3 +136,169 @@ def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
                 assert result["behavior"] in ("OK", "INFORMATIONAL", "NON-STRICT"), (
                     f"{case} failed with behavior {result['behavior']}"
                 )
+
+
+@pytest_asyncio.fixture(scope="module")
+async def server() -> AsyncIterator[PyvoyServer]:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        websockets=True,
+        lifespan=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as server:
+        yield server
+
+
+def _url(server: PyvoyServer, path: str) -> str:
+    return f"ws://127.0.0.1:{server.listener_port}{path}"
+
+
+def _close_code(exc: ConnectionClosed) -> int | None:
+    # None when the peer closed without a close frame (abnormal closure).
+    rcvd = getattr(exc, "rcvd", None)
+    return rcvd.code if rcvd is not None else None
+
+
+@pytest.mark.asyncio
+async def test_echo_and_clean_close(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/echo")) as ws:
+        await ws.send("hello")
+        assert await ws.recv() == "hello"
+        await ws.send(b"\x00\x01\x02")
+        assert await ws.recv() == b"\x00\x01\x02"
+
+
+@pytest.mark.asyncio
+async def test_server_initiated_close(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/close")) as ws:
+        with pytest.raises(ConnectionClosed) as ei:
+            await ws.recv()
+    assert _close_code(ei.value) == 1001
+
+
+@pytest.mark.asyncio
+async def test_reject_before_accept(server: PyvoyServer) -> None:
+    with pytest.raises(InvalidStatus) as ei:
+        await websockets.connect(_url(server, "/reject"))
+    assert ei.value.response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_app_error_before_accept(server: PyvoyServer) -> None:
+    with pytest.raises(InvalidStatus) as ei:
+        await websockets.connect(_url(server, "/raise-before"))
+    assert ei.value.response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_app_error_after_accept(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/raise-after")) as ws:
+        with pytest.raises(ConnectionClosed) as ei:
+            await ws.recv()
+    assert _close_code(ei.value) == 1011
+
+
+@pytest.mark.asyncio
+async def test_bad_send_closes(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/bad-send")) as ws:
+        with pytest.raises(ConnectionClosed):
+            await ws.recv()
+
+
+@pytest.mark.asyncio
+async def test_double_accept_closes(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/double-accept")) as ws:
+        with pytest.raises(ConnectionClosed):
+            await ws.recv()
+
+
+@pytest.mark.asyncio
+async def test_close_without_code(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/close-nocode")) as ws:
+        with pytest.raises(ConnectionClosed):
+            await ws.recv()
+
+
+@pytest.mark.asyncio
+async def test_return_before_accept(server: PyvoyServer) -> None:
+    # The app returns before accepting (and without closing); the server drops
+    # the connection mid-handshake rather than completing the upgrade.
+    with pytest.raises(InvalidHandshake):
+        await asyncio.wait_for(
+            websockets.connect(_url(server, "/return-before-accept")), timeout=5
+        )
+
+
+@pytest.mark.asyncio
+async def test_return_without_close(server: PyvoyServer) -> None:
+    # The app returns after accepting without sending a close.
+    # We match uvicorn behavior, aborting the connection.
+    async with websockets.connect(_url(server, "/return")) as ws:
+        with pytest.raises(ConnectionClosed) as ei:
+            await asyncio.wait_for(ws.recv(), timeout=5)
+    assert _close_code(ei.value) != 1000
+
+
+@pytest.mark.asyncio
+async def test_send_after_close(server: PyvoyServer) -> None:
+    # The app closes then sends again; the second send raises
+    # ClientDisconnectedError server-side, which is swallowed cleanly.
+    async with websockets.connect(_url(server, "/close-then-send")) as ws:
+        with pytest.raises(ConnectionClosed) as ei:
+            await ws.recv()
+    assert _close_code(ei.value) == 1000
+
+
+@pytest.mark.asyncio
+async def test_unknown_event(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/bad-event")) as ws:
+        with pytest.raises(ConnectionClosed):
+            await ws.recv()
+
+
+@pytest.mark.asyncio
+async def test_recv_after_disconnect() -> None:
+    # Start a new PyvoyServer since we need to check its logs for confirming
+    # the app exited.
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        websockets=True,
+        lifespan=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        async with websockets.connect(_url(srv, "/recv-after-disconnect")) as ws:
+            await ws.send("hi")
+        assert srv.stdout is not None
+        await assert_logs_contains(
+            srv.stdout, ["recv-after-disconnect: second=websocket.disconnect"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_response_backpressure(server: PyvoyServer) -> None:
+    async with websockets.connect(
+        _url(server, "/backpressure"), max_size=None, max_queue=1, compression=None
+    ) as ws:
+        # Pause reading messages to cause the server side to back up and pause.
+        await asyncio.sleep(0.3)
+        waits: list[int] | None = None
+        while True:
+            msg = await ws.recv()
+            if isinstance(msg, str):
+                waits = [int(w) for w in msg.split(",")]
+                break
+    assert waits is not None
+    assert len(waits) == 100
+    assert max(waits) >= 50_000_000
+
+
+@pytest.mark.asyncio
+async def test_abrupt_drop(server: PyvoyServer) -> None:
+    # Drop the TCP connection without a close handshake -> server delivers a
+    # disconnect with code 1005 and the stream sees EOF.
+    ws = await websockets.connect(_url(server, "/echo"))
+    await ws.send("x")
+    assert await ws.recv() == "x"
+    ws.transport.close()
