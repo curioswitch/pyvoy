@@ -182,9 +182,11 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                                 WebSocketState::FinishHandshake(stream, response, extensions);
                             let (_, total_size) = envoy_filter.get_read_buffer_chunks();
                             envoy_filter.drain_read_buffer(total_size);
+                            let subprotocols = parse_subprotocols(request.headers());
                             let scope = new_scope(request, envoy_filter);
                             self.executor.execute_app(
                                 scope,
+                                subprotocols,
                                 self.recv_bridge.clone(),
                                 self.send_bridge.clone(),
                                 Box::from(envoy_filter.new_scheduler()),
@@ -290,6 +292,13 @@ impl Filter {
                     }
                     _ => unreachable!(), // SendCallable ensures
                 };
+                if let Some(subprotocol) = &event.subprotocol {
+                    if let Ok(value) = HeaderValue::from_bytes(subprotocol.as_bytes()) {
+                        response
+                            .headers_mut()
+                            .append(header::SEC_WEBSOCKET_PROTOCOL, value);
+                    }
+                }
                 for (name, value) in event.headers.iter() {
                     response.headers_mut().append(name, value.clone());
                 }
@@ -387,9 +396,6 @@ impl Filter {
             return;
         }
 
-        // TODO: We should read in blocks until the first message is ready for backpressure but keep
-        // simple for now.
-        websocket.get_mut().read_from(envoy_filter);
         loop {
             let message = websocket.read();
             websocket.get_mut().write_to(envoy_filter);
@@ -424,7 +430,11 @@ impl Filter {
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
                 {
-                    break;
+                    // Need more bytes to parse a frame. Pull the next block from
+                    // Envoy if available, or wait otherwise.
+                    if websocket.get_mut().read_block(envoy_filter) == 0 {
+                        break;
+                    }
                 }
                 Err(e) => {
                     let code = match e {
@@ -513,6 +523,20 @@ fn finish_close(
             _ => {}
         }
     }
+}
+
+/// Parses the comma-separated subprotocols offered by the client across any
+/// number of `Sec-WebSocket-Protocol` headers, in offer order.
+fn parse_subprotocols(headers: &http::HeaderMap) -> Vec<String> {
+    headers
+        .get_all(header::SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|protocol| !protocol.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn new_scope(request: http::Request<()>, _envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {

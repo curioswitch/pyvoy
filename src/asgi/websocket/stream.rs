@@ -61,6 +61,34 @@ impl EnvoyStream {
         envoy_filter.drain_read_buffer(total_size);
     }
 
+    /// Reads up to one block from the Envoy buffer into our read buffer,
+    /// draining only what we take so any remainder stays buffered in Envoy.
+    /// Leaving data in Envoy's buffer is what lets it apply request backpressure
+    /// once the application stops consuming.
+    pub(super) fn read_block(&self, envoy_filter: &mut impl EnvoyNetworkFilter) -> usize {
+        const READ_BLOCK_SIZE: usize = 256 * 1024;
+        let mut inner = self.inner.lock().unwrap();
+        let (buffers, total_size) = envoy_filter.get_read_buffer_chunks();
+        if total_size == 0 {
+            return 0;
+        }
+        let to_read = total_size.min(READ_BLOCK_SIZE);
+        inner.read_buffer.reserve(to_read);
+        let mut remaining = to_read;
+        for buf in buffers {
+            if remaining == 0 {
+                break;
+            }
+            let slice = buf.as_slice();
+            let take = slice.len().min(remaining);
+            inner.read_buffer.put(&slice[..take]);
+            remaining -= take;
+        }
+        inner.total_read += to_read;
+        envoy_filter.drain_read_buffer(to_read);
+        to_read
+    }
+
     pub(super) fn write_to(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
         let mut inner = self.inner.lock().unwrap();
         if inner.write_buffer.is_empty() {

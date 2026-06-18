@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import perf_counter_ns
 from typing import TYPE_CHECKING
 
 import pytest
@@ -170,6 +172,15 @@ async def test_echo_and_clean_close(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_subprotocol(server: PyvoyServer) -> None:
+    async with websockets.connect(
+        _url(server, "/subprotocol"), subprotocols=["chat", "superchat"]
+    ) as ws:
+        assert ws.subprotocol == "chat"
+        assert await ws.recv() == "chat,superchat"
+
+
+@pytest.mark.asyncio
 async def test_server_initiated_close(server: PyvoyServer) -> None:
     async with websockets.connect(_url(server, "/close")) as ws:
         with pytest.raises(ConnectionClosed) as ei:
@@ -292,6 +303,24 @@ async def test_response_backpressure(server: PyvoyServer) -> None:
     assert waits is not None
     assert len(waits) == 100
     assert max(waits) >= 50_000_000
+
+
+@pytest.mark.asyncio
+async def test_request_backpressure(server: PyvoyServer) -> None:
+    # The opposite of response backpressure: the app stalls before reading, so a
+    # client flooding 1 MiB messages fills the buffer and the server applies
+    # request backpressure -- the client's send() pauses (websockets pauses
+    # rather than failing) until the app drains.
+    waits: list[int] = []
+    async with websockets.connect(
+        _url(server, "/slow-recv"), max_size=None, compression=None
+    ) as ws:
+        for _ in range(40):
+            chunk = os.urandom(1024 * 1024)
+            start = perf_counter_ns()
+            await ws.send(chunk)
+            waits.append(perf_counter_ns() - start)
+    assert max(waits) >= 100_000_000
 
 
 @pytest.mark.asyncio

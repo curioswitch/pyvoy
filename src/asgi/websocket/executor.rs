@@ -14,8 +14,8 @@ use pyo3::{
     exceptions::PyRuntimeError,
     pyclass, pymethods,
     types::{
-        PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyString, PyStringMethods as _,
-        PyTracebackMethods as _,
+        PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyList, PyString,
+        PyStringMethods as _, PyTracebackMethods as _,
     },
 };
 use tungstenite::Utf8Bytes;
@@ -117,6 +117,7 @@ impl WebSocketExecutor {
     pub(crate) fn execute_app(
         &self,
         scope: Scope,
+        subprotocols: Vec<String>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
         scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
@@ -125,7 +126,7 @@ impl WebSocketExecutor {
             .send(Event::ExecuteApp(ExecuteAppEvent {
                 scope: WebSocketScope {
                     scope,
-                    subprotocols: vec![],
+                    subprotocols,
                 },
                 recv_bridge,
                 send_bridge,
@@ -338,6 +339,10 @@ impl AppExecutor {
             None,
             &self.state,
             &self.constants,
+        )?;
+        scope_dict.set_item(
+            &self.constants.subprotocols,
+            PyList::new(py, scope.subprotocols)?,
         )?;
 
         let scheduler = Arc::new(scheduler);
@@ -604,6 +609,12 @@ impl SendCallable {
             "websocket.accept" => match &self.state {
                 SendState::Started => {
                     let headers = extract_headers_from_event(py, &self.constants, &event)?;
+                    let subprotocol = match event.get_item(&self.constants.subprotocol)? {
+                        Some(value) if !value.is_none() => {
+                            Some(value.cast::<PyString>()?.to_str()?.into())
+                        }
+                        _ => None,
+                    };
                     self.state = SendState::Accepted;
                     let ret = self
                         .loop_
@@ -613,7 +624,7 @@ impl SendCallable {
                     if self
                         .send_bridge
                         .send(SendEvent::Accept(AcceptEvent {
-                            subprotocol: None,
+                            subprotocol,
                             headers,
                             future: SendFuture {
                                 future: Some(LoopFuture {

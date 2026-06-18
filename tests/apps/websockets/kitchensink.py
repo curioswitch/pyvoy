@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from time import perf_counter_ns
@@ -30,6 +31,17 @@ async def app(
     if path == "/return-before-accept":
         # Return after connect without accepting or closing -> the server drops
         # the connection mid-handshake.
+        return
+    if path == "/subprotocol":
+        offered = list(scope["subprotocols"])
+        await send(
+            {
+                "type": "websocket.accept",
+                "headers": (),
+                "subprotocol": offered[0] if offered else None,
+            }
+        )
+        await send({"type": "websocket.send", "text": ",".join(offered)})
         return
 
     await send(ACCEPT)
@@ -68,6 +80,15 @@ async def app(
             waits.append(perf_counter_ns() - start)
         await send({"type": "websocket.send", "text": ",".join(str(w) for w in waits)})
         return
+    if path == "/slow-recv":
+        # Stall before reading so a flooding client fills the buffer and the
+        # server applies request backpressure; the client's send() then pauses
+        # until we start draining.
+        await asyncio.sleep(0.5)
+        while True:
+            m = await receive()
+            if m["type"] == "websocket.disconnect":
+                return
     if path == "/close-then-send":
         # Sending after close raises ClientDisconnectedError
         await send({"type": "websocket.close", "code": 1000})
