@@ -181,6 +181,47 @@ async def test_subprotocol(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_compression_enabled_by_default(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/echo")) as ws:
+        assert ws.response.headers["Sec-WebSocket-Extensions"] == "permessage-deflate"
+
+
+@pytest.mark.asyncio
+async def test_compression_disabled() -> None:
+    async with (
+        PyvoyServer(
+            "tests.apps.websockets.kitchensink",
+            websockets=True,
+            lifespan=False,
+            websockets_compression=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) as srv,
+        websockets.connect(_url(srv, "/echo")) as ws,
+    ):
+        assert "Sec-WebSocket-Extensions" not in ws.response.headers
+        await ws.send("hello")
+        assert await ws.recv() == "hello"
+
+
+@pytest.mark.asyncio
+async def test_max_message_size() -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        websockets=True,
+        lifespan=False,
+        websockets_max_message_size=1024,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        async with websockets.connect(_url(srv, "/echo"), max_size=None) as ws:
+            await ws.send(os.urandom(2048))
+            with pytest.raises(ConnectionClosed) as ei:
+                await ws.recv()
+        assert _close_code(ei.value) == 1009
+
+
+@pytest.mark.asyncio
 async def test_server_initiated_close(server: PyvoyServer) -> None:
     async with websockets.connect(_url(server, "/close")) as ws:
         with pytest.raises(ConnectionClosed) as ei:

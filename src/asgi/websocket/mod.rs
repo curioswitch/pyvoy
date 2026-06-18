@@ -10,7 +10,7 @@ use tungstenite::extensions::{Extensions, ExtensionsConfig, compression::deflate
 use tungstenite::handshake::machine::{HandshakeMachine, RoundResult, StageResult};
 use tungstenite::handshake::server::{create_response, write_response};
 use tungstenite::protocol::frame::coding::CloseCode;
-use tungstenite::protocol::{CloseFrame, Role};
+use tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
 use tungstenite::{Message, Utf8Bytes, WebSocket};
 
 use crate::asgi::python::EVENT_ID_REQUEST;
@@ -28,6 +28,8 @@ mod stream;
 pub struct Config {
     executor: WebSocketExecutor,
     handles: Option<ExecutorHandles>,
+    max_message_size: usize,
+    compression: bool,
 }
 
 impl Config {
@@ -36,6 +38,8 @@ impl Config {
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
+        max_message_size: usize,
+        compression: bool,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match WebSocketExecutor::new(
@@ -60,6 +64,8 @@ impl Config {
         Some(Self {
             executor,
             handles: Some(handles),
+            max_message_size,
+            compression,
         })
     }
 }
@@ -82,6 +88,8 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
             downstream_watermark_level: 0,
+            max_message_size: self.max_message_size,
+            compression: self.compression,
         })
     }
 }
@@ -105,6 +113,9 @@ struct Filter {
     send_bridge: EventBridge<SendEvent>,
 
     downstream_watermark_level: usize,
+
+    max_message_size: usize,
+    compression: bool,
 }
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
@@ -174,7 +185,10 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                             // writing the agreed extension header into the response. A
                             // malformed extensions header falls back to no compression.
                             let mut extensions_config = ExtensionsConfig::default();
-                            extensions_config.permessage_deflate = Some(DeflateConfig::default());
+                            if self.compression {
+                                extensions_config.permessage_deflate =
+                                    Some(DeflateConfig::default());
+                            }
                             let extensions = extensions_config
                                 .negotiate_response(request.headers(), response.headers_mut())
                                 .unwrap_or_default();
@@ -292,12 +306,12 @@ impl Filter {
                     }
                     _ => unreachable!(), // SendCallable ensures
                 };
-                if let Some(subprotocol) = &event.subprotocol {
-                    if let Ok(value) = HeaderValue::from_bytes(subprotocol.as_bytes()) {
-                        response
-                            .headers_mut()
-                            .append(header::SEC_WEBSOCKET_PROTOCOL, value);
-                    }
+                if let Some(subprotocol) = &event.subprotocol
+                    && let Ok(value) = HeaderValue::from_bytes(subprotocol.as_bytes())
+                {
+                    response
+                        .headers_mut()
+                        .append(header::SEC_WEBSOCKET_PROTOCOL, value);
                 }
                 for (name, value) in event.headers.iter() {
                     response.headers_mut().append(name, value.clone());
@@ -305,10 +319,12 @@ impl Filter {
                 let mut buffer = Vec::new();
                 write_response(&mut buffer, &response).unwrap();
                 envoy_filter.write(&buffer, false);
+                let ws_config =
+                    WebSocketConfig::default().max_message_size(Some(self.max_message_size));
                 let websocket = WebSocket::from_raw_socket_with_extensions(
                     stream,
                     Role::Server,
-                    None,
+                    Some(ws_config),
                     extensions,
                 );
                 self.state = WebSocketState::Accepted(websocket);

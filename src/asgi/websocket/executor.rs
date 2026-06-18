@@ -14,8 +14,8 @@ use pyo3::{
     exceptions::PyRuntimeError,
     pyclass, pymethods,
     types::{
-        PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyList, PyString,
-        PyStringMethods as _, PyTracebackMethods as _,
+        PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyList, PyString, PyStringMethods as _,
+        PyTracebackMethods as _,
     },
 };
 use tungstenite::Utf8Bytes;

@@ -136,6 +136,9 @@ class PyvoyServer:
     _additional_envoy_args: list[str] | None
     _env: dict[str, str]
     _upstreams: list[dict[str, Any] | Upstream]
+    _websockets: bool
+    _websockets_max_message_size: int | None
+    _websockets_compression: bool
 
     _admin_address: str | None
 
@@ -157,6 +160,8 @@ class PyvoyServer:
         worker_threads: int | None = None,
         lifespan: bool | None = None,
         websockets: bool = False,
+        websockets_max_message_size: int | None = None,
+        websockets_compression: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
         upstreams: list[dict[str, Any] | Upstream] | None = None,
@@ -185,6 +190,11 @@ class PyvoyServer:
             log_level: The log level for Envoy.
             worker_threads: The number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
+            websockets: Whether to enable ASGI WebSocket support.
+            websockets_max_message_size: The maximum WebSocket message size in bytes.
+                Unset uses the default of 64 MiB.
+            websockets_compression: Whether to enable WebSocket per-message deflate
+                compression.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
             upstreams: A list of upstream clusters to add to the Envoy configuration.
@@ -202,6 +212,8 @@ class PyvoyServer:
         self._tls_require_client_certificate = tls_require_client_certificate
         self._interface = interface
         self._websockets = websockets
+        self._websockets_max_message_size = websockets_max_message_size
+        self._websockets_compression = websockets_compression
         self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
@@ -382,6 +394,12 @@ class PyvoyServer:
             base_pyvoy_config["worker_threads"] = self._worker_threads
         if self._lifespan is not None:
             base_pyvoy_config["lifespan"] = self._lifespan
+        if self._websockets_max_message_size is not None:
+            base_pyvoy_config["websockets_max_message_size"] = (
+                self._websockets_max_message_size
+            )
+        if not self._websockets_compression:
+            base_pyvoy_config["websockets_compression"] = False
         virtual_host_config = {"name": "local_service", "domains": ["*"]}
         if isinstance(self._app, str):
             pyvoy_config: dict[str, str | int | bool] = {

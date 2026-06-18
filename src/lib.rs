@@ -128,8 +128,22 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     };
     let worker_threads = filter_config["worker_threads"].as_i64().unwrap_or(1) as usize;
     let enable_lifespan = filter_config["lifespan"].as_bool();
+    let max_message_size = filter_config["websockets_max_message_size"]
+        .as_i64()
+        .map(|size| size as usize)
+        .unwrap_or(64 << 20); // Default to 64 MiB
+    let compression = filter_config["websockets_compression"]
+        .as_bool()
+        .unwrap_or(true);
 
     let constants = Python::attach(types::Constants::get);
-    asgi::websocket::Config::new(app, constants, worker_threads, enable_lifespan)
-        .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
+    asgi::websocket::Config::new(
+        app,
+        constants,
+        worker_threads,
+        enable_lifespan,
+        max_message_size,
+        compression,
+    )
+    .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
 }
