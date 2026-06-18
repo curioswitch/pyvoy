@@ -304,7 +304,7 @@ async def test_client_closed_before_response(
 ) -> None:
     # Before response headers, the way to close is timeout.
     with pytest.raises(TimeoutError):
-        async with asyncio.timeout(0.001):
+        async with asyncio.timeout(0.1):
             async with client.stream(
                 "GET", f"{url_asgi}/client-closed-before-response", content=content
             ) as response:
