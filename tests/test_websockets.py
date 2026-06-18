@@ -44,14 +44,33 @@ async def server() -> AsyncIterator[PyvoyServer]:
         yield server
 
 
-# Separate out heavyweight compression test cases. They perform extremely slowly
-# using rosetta on macOS so we allow targeting separately for websockets development
-# as needed.
+# Higher compression cases deal with huge payloads that are very slow with autobahn's
+# Docker runner. We keep them opt-in only for now.
 cases = [
     pytest.param(
-        ["1.*", "2.*", "3.*", "4.*", "5.*", "6.*", "7.*", "9.*", "10.*"], id="basic"
+        [
+            "1.*",
+            "2.*",
+            "3.*",
+            "4.*",
+            "5.*",
+            "6.*",
+            "7.*",
+            "9.*",
+            "10.*",
+            "12.1.11",
+            "12.2.1",
+            "13.1.1",
+            "13.2.1",
+            "13.3.1",
+            "13.4.1",
+            "13.5.1",
+            "13.6.1",
+            "13.7.1",
+        ],
+        id="fast",
     ),
-    pytest.param(["12.*", "13.*"], id="compression"),
+    pytest.param(["12.*", "13.*"], id="slow", marks=pytest.mark.slow),
 ]
 
 
@@ -59,7 +78,6 @@ cases = [
     _is_docker_unavailable(), reason="requires Docker with Linux containers"
 )
 @pytest.mark.parametrize("cases", cases)
-@pytest.mark.slow
 def test_autobahn(cases: list[str], server: PyvoyServer) -> None:
     config = {
         "servers": [{"url": f"ws://host.docker.internal:{server.listener_port}"}],
