@@ -41,7 +41,8 @@ pub(crate) fn new_scope_dict<'py>(
     scope_dict.set_item(&constants.extensions, extensions)?;
 
     if let Some(state) = state {
-        scope_dict.set_item(&constants.state, state)?;
+        // ASGI requires shallow copy of state.
+        scope_dict.set_item(&constants.state, state.bind(py).copy()?)?;
     }
 
     scope_dict.set_http_version(constants, &scope.http_version)?;
