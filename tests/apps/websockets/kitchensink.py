@@ -34,8 +34,6 @@ async def app(
         # the connection mid-handshake.
         return
     if path == "/send-before-accept":
-        # Sending data before accepting -> server raises in the app, which
-        # before the handshake completes surfaces as an HTTP 500.
         await send({"type": "websocket.send", "text": "too early"})
         return
     if path == "/subprotocol":

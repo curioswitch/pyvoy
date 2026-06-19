@@ -2,7 +2,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::{
     EnvoyNetworkFilter, EnvoyNetworkFilterScheduler as _, NetworkFilter, NetworkFilterConfig, abi,
     envoy_log_error,
 };
-use http::{HeaderName, HeaderValue, header};
+use http::{HeaderName, HeaderValue, header, uri};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
 use std::sync::Arc;
@@ -571,13 +571,10 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
     Scope {
         http_version: head.version,
         method: head.method,
-        // The ASGI WebSocket scope requires a "ws"/"wss" scheme, not the
-        // "http"/"https" of the upgrade request. The handshake URI is relative
-        // so it carries no scheme; derive it from the connection's TLS state.
         scheme: if is_ssl {
-            http::uri::Scheme::try_from("wss").unwrap()
+            uri::Scheme::try_from("wss").unwrap()
         } else {
-            http::uri::Scheme::try_from("ws").unwrap()
+            uri::Scheme::try_from("ws").unwrap()
         },
         raw_path: head
             .uri

@@ -273,8 +273,6 @@ async def test_peer_address(server: PyvoyServer) -> None:
 
 @pytest.mark.asyncio
 async def test_send_before_accept(server: PyvoyServer) -> None:
-    # Sending before accepting raises in the app; before the handshake completes
-    # this surfaces as an HTTP 500, matching other pre-accept app errors.
     with pytest.raises(InvalidStatus) as ei:
         await websockets.connect(_url(server, "/send-before-accept"))
     assert ei.value.response.status_code == 500

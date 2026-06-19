@@ -543,8 +543,7 @@ impl PyDictExt for Bound<'_, PyDict> {
 }
 
 pub(crate) struct TlsInfo {
-    /// The ASGI "tls" extension's tls_version. Mandatory but nullable: None when
-    /// the transport can't report the negotiated version.
+    /// The ASGI "tls" extension's tls_version.
     pub tls_version: Option<usize>,
     pub client_cert_name: Option<Box<str>>,
 }
