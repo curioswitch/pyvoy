@@ -84,7 +84,9 @@ impl ResponseSender {
                         e.call_method1(&inner.constants.with_traceback, (exc_info.get_item(2)?,))?;
                         return Err(PyErr::from_value(e));
                     }
-                } else if inner.start_event.is_some() {
+                } else if inner.start_event.is_some() || inner.headers_sent {
+                    // Without exc_info, calling start_response again is an error
+                    // whether the headers are still pending or already sent
                     return Err(PyRuntimeError::new_err(
                         "start_response called twice without exc_info",
                     ));

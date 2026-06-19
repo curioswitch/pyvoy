@@ -20,13 +20,13 @@ use crate::{
         },
     },
     eventbridge::EventBridge,
+    ondrop::RunOnDrop,
     types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
 };
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     IntoPyObjectExt,
-    call::PyCallArgs,
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyDict, PyNone, PyString},
@@ -899,23 +899,6 @@ impl Drop for SendFuture {
     fn drop(&mut self) {
         if let Some(future) = self.future.take() {
             self.executor.handle_dropped_send_future(future);
-        }
-    }
-}
-
-struct RunOnDrop<'py, A>(Bound<'py, PyAny>, Option<A>)
-where
-    A: PyCallArgs<'py>;
-
-impl<'py, A> Drop for RunOnDrop<'py, A>
-where
-    A: PyCallArgs<'py>,
-{
-    fn drop(&mut self) {
-        if let Some(args) = self.1.take() {
-            let _ = self.0.call1(args);
-        } else {
-            let _ = self.0.call0();
         }
     }
 }

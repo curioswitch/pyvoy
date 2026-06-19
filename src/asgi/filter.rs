@@ -488,8 +488,11 @@ impl Filter {
                     data,
                     end_stream,
                 } = event;
-                unsafe {
-                    envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
+                // Possible stream was reset before we process this event, so check for liveness.
+                if self.transport_responses.contains_key(&stream_handle) {
+                    unsafe {
+                        envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
+                    }
                 }
             }
             TransportEvent::Reset(mut event) => {

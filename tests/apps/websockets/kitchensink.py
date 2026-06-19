@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from time import perf_counter_ns
@@ -32,6 +33,9 @@ async def app(
         # Return after connect without accepting or closing -> the server drops
         # the connection mid-handshake.
         return
+    if path == "/send-before-accept":
+        await send({"type": "websocket.send", "text": "too early"})
+        return
     if path == "/subprotocol":
         offered = list(scope["subprotocols"])
         await send(
@@ -51,6 +55,34 @@ async def app(
         raise RuntimeError(msg)
     if path == "/close":
         await send({"type": "websocket.close", "code": 1001, "reason": "bye"})
+        return
+    if path == "/invalid-close-code":
+        try:
+            await send({"type": "websocket.close", "code": 1005})
+        except ValueError:
+            await send({"type": "websocket.send", "text": "rejected"})
+            await send({"type": "websocket.close", "code": 1000})
+        return
+    if path == "/scheme":
+        await send({"type": "websocket.send", "text": scope["scheme"]})
+        return
+    if path == "/tls":
+        await send(
+            {
+                "type": "websocket.send",
+                "text": json.dumps(scope.get("extensions", {}).get("tls")),
+            }
+        )
+        return
+    if path == "/peer":
+        client = scope["client"]
+        server_addr = scope["server"]
+        await send(
+            {
+                "type": "websocket.send",
+                "text": f"{client[0]}:{client[1]}|{server_addr[0]}:{server_addr[1]}",
+            }
+        )
         return
     if path == "/bad-send":
         # Neither text nor bytes -> server raises.

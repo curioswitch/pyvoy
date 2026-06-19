@@ -42,6 +42,19 @@ async def test_normal(client: Client):
 
 
 @pytest.mark.asyncio
+async def test_state_isolation(client: Client):
+    async with PyvoyServer(
+        "tests.apps.asgi.lifespan:state_isolation",
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        url = f"http://{server.listener_address}:{server.listener_port}"
+        bodies = [(await client.get(url)).text() for _ in range(3)]
+
+    assert bodies == ["1,1", "2,1", "3,1"], bodies
+
+
+@pytest.mark.asyncio
 async def test_normal_lifespan_disabled(client: Client):
     logs: list[str] = []
     async with PyvoyServer(

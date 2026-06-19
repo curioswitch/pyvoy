@@ -10,6 +10,14 @@ if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
 
 
+class _Counter:
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __str__(self) -> str:
+        return str(self.count)
+
+
 async def _send_success(send: ASGISendCallable) -> None:
     await send(
         {
@@ -48,7 +56,7 @@ async def normal(
         while True:
             msg = await recv()
             if msg["type"] == "lifespan.startup":
-                scope.get("state", {})["counter"] = 0
+                scope.get("state", {})["counter"] = _Counter()
                 with _assert_raises(
                     RuntimeError,
                     "Expected lifespan message 'lifespan.startup.complete' or 'lifespan.startup.failed'",
@@ -76,8 +84,38 @@ async def normal(
                     await send({"type": "lifespan.shutdown.complete"})
                 return
 
-    scope.get("state", {"counter": 0})["counter"] += 1
+    scope.get("state", {"counter": _Counter()})["counter"].count += 1
     await _send_success(send)
+
+
+async def state_isolation(
+    scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    if scope["type"] == "lifespan":
+        while True:
+            msg = await recv()
+            if msg["type"] == "lifespan.startup":
+                scope["state"]["shared"] = _Counter()
+                scope["state"]["isolated"] = 0
+                await send({"type": "lifespan.startup.complete"})
+            elif msg["type"] == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    state = scope["state"]
+    state["shared"].count += 1
+    # Updates our copied state, not shared.
+    state["isolated"] += 1
+    body = f"{state['shared'].count},{state['isolated']}".encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
 async def startup_failed(
@@ -104,7 +142,7 @@ async def startup_failed(
                 await send({"type": "lifespan.shutdown.complete"})
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 
@@ -127,7 +165,7 @@ async def startup_failed_no_msg(
                 await send({"type": "lifespan.shutdown.complete"})
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 
@@ -142,7 +180,7 @@ async def shutdown_failed(
         while True:
             msg = await recv()
             if msg["type"] == "lifespan.startup":
-                scope.get("state", {})["counter"] = 0
+                scope.get("state", {})["counter"] = _Counter()
                 await send({"type": "lifespan.startup.complete"})
             elif msg["type"] == "lifespan.shutdown":
                 await send(
@@ -153,7 +191,7 @@ async def shutdown_failed(
                 )
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 
@@ -168,13 +206,13 @@ async def shutdown_failed_no_msg(
         while True:
             msg = await recv()
             if msg["type"] == "lifespan.startup":
-                scope.get("state", {})["counter"] = 0
+                scope.get("state", {})["counter"] = _Counter()
                 await send({"type": "lifespan.startup.complete"})
             elif msg["type"] == "lifespan.shutdown":
                 await send(cast("Any", {"type": "lifespan.shutdown.failed"}))
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 
@@ -202,13 +240,13 @@ async def exception_during_shutdown(
         while True:
             msg = await recv()
             if msg["type"] == "lifespan.startup":
-                scope.get("state", {})["counter"] = 0
+                scope.get("state", {})["counter"] = _Counter()
                 await send({"type": "lifespan.startup.complete"})
             elif msg["type"] == "lifespan.shutdown":
                 msg = "Failing hard during shutdown"
                 raise RuntimeError(msg)
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 
@@ -223,12 +261,12 @@ async def return_without_events_during_shutdown(
         while True:
             msg = await recv()
             if msg["type"] == "lifespan.startup":
-                scope.get("state", {})["counter"] = 0
+                scope.get("state", {})["counter"] = _Counter()
                 await send({"type": "lifespan.startup.complete"})
             elif msg["type"] == "lifespan.shutdown":
                 return
 
-    scope.get("state", {})["counter"] += 1
+    scope.get("state", {})["counter"].count += 1
     await _send_success(send)
 
 

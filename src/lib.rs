@@ -12,6 +12,7 @@ mod envoy;
 mod eventbridge;
 /// Python constants for header names.
 mod headernames;
+mod ondrop;
 mod types;
 mod wsgi;
 

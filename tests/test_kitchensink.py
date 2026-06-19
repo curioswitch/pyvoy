@@ -275,6 +275,15 @@ async def test_exception_after_response_body(
     )
 
 
+@pytest.mark.asyncio
+async def test_response_close_on_error(
+    url_wsgi: str, client: Client, logs_wsgi: StreamReader
+) -> None:
+    with pytest.raises(ReadError):
+        await client.get(f"{url_wsgi}/close-on-error")
+    await assert_logs_contains(logs_wsgi, ["body closed"])
+
+
 # Not possible to model with WSGI
 @pytest.mark.asyncio
 async def test_exception_after_response_complete(
@@ -621,6 +630,13 @@ async def test_wsgi_errors_output(
 async def test_wsgi_multiple_start_response(url_wsgi: str, client: Client) -> None:
     response = await client.get(f"{url_wsgi}/multiple-start-response")
     assert response.status == 200, response.text()
+
+
+@pytest.mark.asyncio
+async def test_wsgi_start_response_after_headers(url_wsgi: str, client: Client) -> None:
+    response = await client.get(f"{url_wsgi}/start-response-after-headers")
+    assert response.status == 200, response.text()
+    assert response.text() == "chunk|ok"
 
 
 @pytest.mark.asyncio

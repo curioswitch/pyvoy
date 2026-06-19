@@ -336,8 +336,14 @@ async def amain() -> None:
         return
 
     if args.reload:
+        if sys.platform != "win32":
+            reload_task = asyncio.current_task()
+            asyncio.get_running_loop().add_signal_handler(
+                signal.SIGTERM,
+                lambda: reload_task.cancel() if reload_task is not None else None,
+            )
         while True:
-            server_task = asyncio.create_task(_run_server(server))
+            server_task = asyncio.create_task(_run_server(server, handle_sigterm=False))
             try:
                 async for changed_files in watch(
                     [Path(d) for d in args.reload_dirs],
@@ -349,7 +355,9 @@ async def amain() -> None:
                     )
                     server_task.cancel()
                     await server_task
-                    server_task = asyncio.create_task(_run_server(server))
+                    server_task = asyncio.create_task(
+                        _run_server(server, handle_sigterm=False)
+                    )
             except asyncio.CancelledError:
                 server_task.cancel()
                 await server_task
@@ -358,7 +366,7 @@ async def amain() -> None:
         await _run_server(server)
 
 
-async def _run_server(server: PyvoyServer) -> None:
+async def _run_server(server: PyvoyServer, *, handle_sigterm: bool = True) -> None:
     try:
         async with server:
             print(  # noqa: T201
@@ -370,15 +378,16 @@ async def _run_server(server: PyvoyServer) -> None:
                 print("Shutting down pyvoy...")  # noqa: T201
                 await server.stop()
 
-            if sys.platform != "win32":
-                asyncio.get_event_loop().add_signal_handler(
+            install_handler = handle_sigterm and sys.platform != "win32"
+            if install_handler:
+                asyncio.get_running_loop().add_signal_handler(
                     signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
                 )
             try:
                 await server.wait()
             except asyncio.CancelledError:
-                if sys.platform != "win32":
-                    asyncio.get_event_loop().remove_signal_handler(signal.SIGTERM)
+                if install_handler:
+                    asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
                 await shutdown()
     except StartupError:
         print(  # noqa: T201

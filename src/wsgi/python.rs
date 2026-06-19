@@ -10,7 +10,7 @@ use pyo3::{
 };
 
 use super::types::*;
-use crate::{eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
+use crate::{eventbridge::EventBridge, ondrop::RunOnDrop, wsgi::response::ResponseSenderEvent};
 use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
 use std::thread::JoinHandle;
 use std::{
@@ -281,10 +281,12 @@ impl ExecutorInner {
         environ.set_item(&self.constants.wsgi_run_once, false)?;
 
         if let Some(tls_info) = scope.tls_info {
-            environ.set_item(
-                &self.constants.wsgi_ext_tls_version,
-                tls_info.tls_version.to_string(),
-            )?;
+            if let Some(tls_version) = tls_info.tls_version {
+                environ.set_item(
+                    &self.constants.wsgi_ext_tls_version,
+                    tls_version.to_string(),
+                )?;
+            }
             if let Some(client_cert) = tls_info.client_cert_name {
                 environ.set_item(
                     &self.constants.wsgi_ext_tls_client_cert_name,
@@ -306,6 +308,11 @@ impl ExecutorInner {
                 response_sender: response_sender.clone(),
             },
         ))?;
+
+        let _close = response
+            .getattr(&self.constants.close)
+            .ok()
+            .map(|close| RunOnDrop(close, Some(())));
 
         // We ignore all send errors here since they only happen if the filter was dropped meaning
         // the request was closed, usually by the client. In WSGI is not an application error, and we just need
@@ -356,10 +363,6 @@ impl ExecutorInner {
                     None,
                 )?;
             }
-        }
-
-        if let Ok(close) = response.getattr(&self.constants.close) {
-            close.call0()?;
         }
 
         Ok(())
