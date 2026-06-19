@@ -10,7 +10,7 @@ use pyo3::{
 };
 
 use super::types::*;
-use crate::{eventbridge::EventBridge, wsgi::response::ResponseSenderEvent};
+use crate::{eventbridge::EventBridge, ondrop::RunOnDrop, wsgi::response::ResponseSenderEvent};
 use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
 use std::thread::JoinHandle;
 use std::{
@@ -309,6 +309,11 @@ impl ExecutorInner {
             },
         ))?;
 
+        let _close = response
+            .getattr(&self.constants.close)
+            .ok()
+            .map(|close| RunOnDrop(close, Some(())));
+
         // We ignore all send errors here since they only happen if the filter was dropped meaning
         // the request was closed, usually by the client. In WSGI is not an application error, and we just need
         // to make sure a close() method for a generator is called before returning.
@@ -358,10 +363,6 @@ impl ExecutorInner {
                     None,
                 )?;
             }
-        }
-
-        if let Ok(close) = response.getattr(&self.constants.close) {
-            close.call0()?;
         }
 
         Ok(())

@@ -275,6 +275,15 @@ async def test_exception_after_response_body(
     )
 
 
+@pytest.mark.asyncio
+async def test_response_close_on_error(
+    url_wsgi: str, client: Client, logs_wsgi: StreamReader
+) -> None:
+    with pytest.raises(ReadError):
+        await client.get(f"{url_wsgi}/close-on-error")
+    await assert_logs_contains(logs_wsgi, ["body closed"])
+
+
 # Not possible to model with WSGI
 @pytest.mark.asyncio
 async def test_exception_after_response_complete(

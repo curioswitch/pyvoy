@@ -253,6 +253,31 @@ def _exception_after_response_body(
     raise RuntimeError(msg)
 
 
+class _CloseLoggingBody:
+    def __init__(self) -> None:
+        self._sent = False
+
+    def __iter__(self) -> _CloseLoggingBody:
+        return self
+
+    def __next__(self) -> bytes:
+        if not self._sent:
+            self._sent = True
+            return b"chunk"
+        msg = "boom during iteration"
+        raise RuntimeError(msg)
+
+    def close(self) -> None:
+        print("body closed", file=sys.stderr, flush=True)  # noqa: T201
+
+
+def _close_on_error(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    start_response("200 OK", [("content-type", "text/plain")])
+    return _CloseLoggingBody()
+
+
 def _controlled(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -760,6 +785,8 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _exception_after_response_headers(environ, start_response)
         case "/exception-after-response-body":
             return _exception_after_response_body(environ, start_response)
+        case "/close-on-error":
+            return _close_on_error(environ, start_response)
         case "/controlled":
             return _controlled(environ, start_response)
         case "/bad-app-invalid-status":
