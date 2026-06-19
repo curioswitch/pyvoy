@@ -1,6 +1,6 @@
 [package]
 name = "pyvoy"
-version = "0.3.0"
+version = "0.0.0"
 edition = "2024"
 repository = "https://github.com/curioswitch/pyvoy"
 license = "Apache-2.0"
@@ -33,4 +33,7 @@ pyo3-build-config = { version = "0.29.0", features = ["resolve-config"] }
 [patch.crates-io]
 # Fork of tungstenite with permessage-deflate (RFC 7692) support, enabled by
 # default. See https://github.com/curioswitch/tungstenite-rs.
-tungstenite = { git = "https://github.com/curioswitch/tungstenite-rs", branch = "v0.29.0-deflate" }
+tungstenite = {
+  git = "https://github.com/curioswitch/tungstenite-rs",
+  branch = "v0.29.0-deflate"
+}
