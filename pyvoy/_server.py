@@ -89,7 +89,7 @@ class Upstream:
 def get_envoy_environ() -> dict[str, str]:
     env = {
         "PYTHONPATH": os.pathsep.join(sys.path),
-        "PYTHONHOME": f"{sys.prefix}${os.pathsep}{sys.exec_prefix}",
+        "PYTHONHOME": f"{sys.prefix}{os.pathsep}{sys.exec_prefix}",
         "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": str(get_pyvoy_dir_path()),
     }
     if len(args := _maybe_patch_args_with_debug([sys.executable, __file__])) > 2:
