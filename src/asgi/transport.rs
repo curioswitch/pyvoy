@@ -124,16 +124,21 @@ struct HTTPTransport {
 impl HTTPTransport {
     #[new]
     #[pyo3(signature = (cluster_name, *, timeout=None))]
-    fn py_new(py: Python<'_>, cluster_name: String, timeout: Option<f64>) -> Self {
+    fn py_new(py: Python<'_>, cluster_name: String, timeout: Option<f64>) -> PyResult<Self> {
         let timeout_ms = match timeout {
-            Some(timeout) => (timeout * 1000.0) as u64,
+            Some(timeout) => {
+                if !timeout.is_finite() || timeout < 0.0 {
+                    return Err(PyValueError::new_err("timeout must be non-negative"));
+                }
+                (timeout * 1000.0) as u64
+            }
             None => DEFAULT_TIMEOUT_MS,
         };
-        Self {
+        Ok(Self {
             cluster_name: Arc::new(cluster_name),
             timeout_ms,
             constants: Constants::get(py),
-        }
+        })
     }
 
     fn execute<'py>(

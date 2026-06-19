@@ -201,7 +201,7 @@ class PyvoyServer:
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """
-        self._app = app
+        self._app = app if isinstance(app, str) else list(app)
         self._address = address
         self._port = port
         self._tls_port = tls_port
@@ -272,6 +272,9 @@ class PyvoyServer:
                 stderr=self._stderr,
                 env=env,
             )
+            # Reset so a reused server doesn't observe a previous run's address
+            self._admin_address = None
+            started = False
             try:
                 for _ in range(100):
                     if self._process.returncode is not None:
@@ -307,9 +310,10 @@ class PyvoyServer:
                                     self._listener_port_quic = socket_address_quic[
                                         "port_value"
                                     ]
+                            started = True
                             break
                     await asyncio.sleep(0.1)
-                if self._admin_address is None:
+                if not started:
                     msg = "Failed to resolve Envoy admin address."
                     raise StartupError(msg)  # noqa: TRY301
             except BaseException:
@@ -401,6 +405,7 @@ class PyvoyServer:
         if not self._websockets_compression:
             base_pyvoy_config["websockets_compression"] = False
         virtual_host_config = {"name": "local_service", "domains": ["*"]}
+        ws_pyvoy_config: dict[str, str | int | bool] | None = None
         if isinstance(self._app, str):
             pyvoy_config: dict[str, str | int | bool] = {
                 "app": self._app,
@@ -408,6 +413,7 @@ class PyvoyServer:
                 "root_path": self._root_path,
                 **base_pyvoy_config,
             }
+            ws_pyvoy_config = pyvoy_config
 
             http_filters = [
                 {
@@ -425,6 +431,9 @@ class PyvoyServer:
                 }
             ]
         else:
+            if not self._app:
+                msg = "at least one mount is required"
+                raise ValueError(msg)
             matcher_map = {}
             for mount in self._app:
                 pyvoy_config = {
@@ -433,6 +442,9 @@ class PyvoyServer:
                     "root_path": mount.path,
                     **base_pyvoy_config,
                 }
+                # We always use the first app to serve websockets, for CLI usage the main app.
+                if ws_pyvoy_config is None:
+                    ws_pyvoy_config = pyvoy_config
                 matcher_map[mount.path] = {
                     "action": {
                         "name": "composite_action",
@@ -510,6 +522,7 @@ class PyvoyServer:
             http_config["http3_protocol_options"] = {}
         network_filters: list[dict] = []
         if self._websockets:
+            assert ws_pyvoy_config is not None  # noqa: S101
             network_filters.append(
                 {
                     "name": "pyvoy-ws",
@@ -519,7 +532,7 @@ class PyvoyServer:
                         "filter_name": "pyvoy-ws",
                         "filter_config": {
                             "@type": "type.googleapis.com/google.protobuf.StringValue",
-                            "value": json.dumps(pyvoy_config),
+                            "value": json.dumps(ws_pyvoy_config),
                         },
                     },
                 }

@@ -566,13 +566,15 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
         headers.push((current_name.as_ref().unwrap().clone(), value));
     }
 
+    let is_ssl = envoy_filter.is_ssl();
+
     Scope {
         http_version: head.version,
         method: head.method,
         // The ASGI WebSocket scope requires a "ws"/"wss" scheme, not the
         // "http"/"https" of the upgrade request. The handshake URI is relative
         // so it carries no scheme; derive it from the connection's TLS state.
-        scheme: if envoy_filter.is_ssl() {
+        scheme: if is_ssl {
             http::uri::Scheme::try_from("wss").unwrap()
         } else {
             http::uri::Scheme::try_from("ws").unwrap()
@@ -583,9 +585,23 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
             .map(|pq| Box::from(pq.as_str().as_bytes()))
             .unwrap_or_default(),
         headers,
-        // TODO
-        client: None,
-        server: None,
-        tls_info: None,
+        client: address_to_scope(envoy_filter.get_remote_address()),
+        server: address_to_scope(envoy_filter.get_local_address()),
+        // Network filter doesn't expose tls_version but we can report the rest.
+        tls_info: is_ssl.then(|| TlsInfo {
+            tls_version: None,
+            client_cert_name: envoy_filter
+                .get_ssl_subject()
+                .map(|s| Box::from(String::from_utf8_lossy(s.as_slice()))),
+        }),
     }
+}
+
+/// Converts an Envoy `(address, port)` pair into an ASGI scope address, dropping
+/// any port suffix on the host and treating an empty host as "no address".
+fn address_to_scope((address, port): (String, u32)) -> Option<(Box<str>, i64)> {
+    if address.is_empty() {
+        return None;
+    }
+    Some((Box::from(strip_port(&address)), i64::from(port)))
 }

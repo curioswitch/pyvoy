@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import ssl
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+import trustme
 import websockets
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
@@ -253,10 +255,20 @@ async def test_app_error_after_accept(server: PyvoyServer) -> None:
 
 @pytest.mark.asyncio
 async def test_scheme(server: PyvoyServer) -> None:
-    # The WebSocket scope scheme must be "ws"/"wss" per the ASGI spec, not the
-    # "http"/"https" of the underlying upgrade request.
     async with websockets.connect(_url(server, "/scheme")) as ws:
         assert await ws.recv() == "ws"
+
+
+@pytest.mark.asyncio
+async def test_peer_address(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/peer")) as ws:
+        client, srv = (await ws.recv()).split("|")
+        client_host, client_port = client.rsplit(":", 1)
+        server_host, server_port = srv.rsplit(":", 1)
+    assert client_host == "127.0.0.1"
+    assert int(client_port) > 0
+    assert server_host == "127.0.0.1"
+    assert int(server_port) == server.listener_port
 
 
 @pytest.mark.asyncio
@@ -389,3 +401,51 @@ async def test_abrupt_drop(server: PyvoyServer) -> None:
     await ws.send("x")
     assert await ws.recv() == "x"
     ws.transport.close()
+
+
+@pytest.fixture(scope="module")
+def tls_certs() -> tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert]:
+    ca = trustme.CA()
+    server_cert = ca.issue_cert("localhost")
+    client_cert = ca.issue_cert(
+        common_name="someclient",
+        organization_name="pyvoy",
+        organization_unit_name="tests",
+    )
+    return ca, server_cert, client_cert
+
+
+@pytest_asyncio.fixture(scope="module")
+async def tls_server(
+    tls_certs: tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert],
+) -> AsyncIterator[PyvoyServer]:
+    ca, server_cert, _ = tls_certs
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        websockets=True,
+        lifespan=False,
+        tls_key=server_cert.private_key_pem.bytes(),
+        tls_cert=server_cert.cert_chain_pems[0].bytes(),
+        tls_ca_cert=ca.cert_pem.bytes(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as server:
+        yield server
+
+
+@pytest.mark.asyncio
+async def test_tls_scope(
+    tls_certs: tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert],
+    tls_server: PyvoyServer,
+) -> None:
+    ca, _, client_cert = tls_certs
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.load_verify_locations(cadata=ca.cert_pem.bytes().decode())
+    client_cert.configure_cert(ssl_ctx)
+    async with websockets.connect(
+        f"wss://localhost:{tls_server.listener_port}/tls", ssl=ssl_ctx
+    ) as ws:
+        tls = json.loads(await ws.recv())
+    assert tls is not None
+    assert tls["tls_version"] is None
+    assert tls["client_cert_name"] == "CN=someclient,OU=tests,O=pyvoy"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from time import perf_counter_ns
@@ -58,9 +59,25 @@ async def app(
         await send({"type": "websocket.close", "code": 1001, "reason": "bye"})
         return
     if path == "/scheme":
-        # Echo the scope scheme so the test can assert it is "ws"/"wss", not
-        # the "http"/"https" of the upgrade request.
         await send({"type": "websocket.send", "text": scope["scheme"]})
+        return
+    if path == "/tls":
+        await send(
+            {
+                "type": "websocket.send",
+                "text": json.dumps(scope.get("extensions", {}).get("tls")),
+            }
+        )
+        return
+    if path == "/peer":
+        client = scope["client"]
+        server_addr = scope["server"]
+        await send(
+            {
+                "type": "websocket.send",
+                "text": f"{client[0]}:{client[1]}|{server_addr[0]}:{server_addr[1]}",
+            }
+        )
         return
     if path == "/bad-send":
         # Neither text nor bytes -> server raises.

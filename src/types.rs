@@ -543,7 +543,9 @@ impl PyDictExt for Bound<'_, PyDict> {
 }
 
 pub(crate) struct TlsInfo {
-    pub tls_version: usize,
+    /// The ASGI "tls" extension's tls_version. Mandatory but nullable: None when
+    /// the transport can't report the negotiated version.
+    pub tls_version: Option<usize>,
     pub client_cert_name: Option<Box<str>>,
 }
 
@@ -608,7 +610,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
                 )
                 .map(|s| Box::from(str::from_utf8(s.as_slice()).unwrap_or("")));
             Some(TlsInfo {
-                tls_version,
+                tls_version: Some(tls_version),
                 client_cert_name,
             })
         }
@@ -649,7 +651,7 @@ fn get_address<EHF: EnvoyHttpFilter>(
     }
 }
 
-fn strip_port(s: &str) -> &str {
+pub(crate) fn strip_port(s: &str) -> &str {
     if let Some(rest) = s.strip_prefix('[') {
         // IPv6 address with brackets
         if let Some(end) = rest.find(']') {

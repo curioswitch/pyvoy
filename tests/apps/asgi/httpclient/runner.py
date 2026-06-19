@@ -7,7 +7,7 @@ from pyqwest import Client, HTTPVersion
 
 from pyvoy.asgi.httpclient import HTTPTransport
 
-from .cases import client, errors, tls
+from .cases import client, errors, tls, validation
 
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
@@ -102,6 +102,8 @@ async def app(
                 await errors.connection_error(client_unavailable, url)
             case "tls_mtls":
                 await tls.mtls(http_client, url)
+            case "transport_invalid_option":
+                validation.transport_invalid_option()
             case _:
                 msg = f"Unknown test case: {headers['x-test-case']}"
                 raise RuntimeError(msg)  # noqa: TRY301
