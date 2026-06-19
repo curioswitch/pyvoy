@@ -40,7 +40,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         let (request_body_tx, request_body_rx) = mpsc::channel::<RequestBody>();
         let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
-        Box::new(CatchUnwind::new(Filter {
+        Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
             response_closed: false,
@@ -53,7 +53,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_written_tx,
             response_written_rx: Some(response_written_rx),
             downstream_watermark_level: 0,
-        }))
+        })
     }
 }
 

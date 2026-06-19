@@ -1,6 +1,6 @@
 use envoy_proxy_dynamic_modules_rust_sdk::{
-    CatchUnwind, EnvoyNetworkFilter, EnvoyNetworkFilterScheduler as _, NetworkFilter,
-    NetworkFilterConfig, abi, envoy_log_error,
+    EnvoyNetworkFilter, EnvoyNetworkFilterScheduler as _, NetworkFilter, NetworkFilterConfig, abi,
+    envoy_log_error,
 };
 use http::{HeaderName, HeaderValue, header};
 use pyo3::Python;
@@ -79,7 +79,7 @@ impl Drop for Config {
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
     fn new_network_filter(&self, _envoy: &mut ENF) -> Box<dyn NetworkFilter<ENF>> {
-        Box::new(CatchUnwind::new(Filter {
+        Box::new(Filter {
             executor: self.executor.clone(),
             state: WebSocketState::StartHandshake(HandshakeMachine::start_read(
                 EnvoyStream::default(),
@@ -90,7 +90,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
             downstream_watermark_level: 0,
             max_message_size: self.max_message_size,
             compression: self.compression,
-        }))
+        })
     }
 }
 

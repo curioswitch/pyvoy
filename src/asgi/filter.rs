@@ -1,6 +1,6 @@
 use envoy_proxy_dynamic_modules_rust_sdk::{
-    CatchUnwind, EnvoyBuffer, EnvoyHttpFilter, EnvoyHttpFilterScheduler as _, HttpFilter,
-    HttpFilterConfig, abi, envoy_log_error,
+    EnvoyBuffer, EnvoyHttpFilter, EnvoyHttpFilterScheduler as _, HttpFilter, HttpFilterConfig, abi,
+    envoy_log_error,
 };
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
@@ -69,7 +69,7 @@ impl Drop for Config {
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
-        Box::new(CatchUnwind::new(Filter {
+        Box::new(Filter {
             executor: self.executor.clone(),
             request_closed: false,
             response_closed: Arc::new(AtomicBool::new(false)),
@@ -79,7 +79,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             transport_bridge: EventBridge::new(),
             transport_responses: HashMap::new(),
             downstream_watermark_level: 0,
-        }))
+        })
     }
 }
 
