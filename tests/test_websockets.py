@@ -252,6 +252,23 @@ async def test_app_error_after_accept(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheme(server: PyvoyServer) -> None:
+    # The WebSocket scope scheme must be "ws"/"wss" per the ASGI spec, not the
+    # "http"/"https" of the underlying upgrade request.
+    async with websockets.connect(_url(server, "/scheme")) as ws:
+        assert await ws.recv() == "ws"
+
+
+@pytest.mark.asyncio
+async def test_send_before_accept(server: PyvoyServer) -> None:
+    # Sending before accepting raises in the app; before the handshake completes
+    # this surfaces as an HTTP 500, matching other pre-accept app errors.
+    with pytest.raises(InvalidStatus) as ei:
+        await websockets.connect(_url(server, "/send-before-accept"))
+    assert ei.value.response.status_code == 500
+
+
+@pytest.mark.asyncio
 async def test_bad_send_closes(server: PyvoyServer) -> None:
     async with websockets.connect(_url(server, "/bad-send")) as ws:
         with pytest.raises(ConnectionClosed):

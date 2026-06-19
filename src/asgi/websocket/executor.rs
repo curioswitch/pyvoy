@@ -648,6 +648,14 @@ impl SendCallable {
                 SendState::Closed => unreachable!(),
             },
             "websocket.send" => {
+                if matches!(self.state, SendState::Started) {
+                    return ErrorAwaitable::new_py(
+                        py,
+                        PyRuntimeError::new_err(
+                            "Expected ASGI message 'websocket.accept', but got 'websocket.send'.",
+                        ),
+                    );
+                }
                 let bytes = event
                     .get_item(&self.constants.bytes)?
                     .unwrap_or_else(|| py.None().bind(py).clone());

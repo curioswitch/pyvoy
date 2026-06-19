@@ -555,7 +555,7 @@ fn parse_subprotocols(headers: &http::HeaderMap) -> Vec<String> {
         .collect()
 }
 
-fn new_scope(request: http::Request<()>, _envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {
+fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {
     let (head, _) = request.into_parts();
     let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(head.headers.len());
     let mut current_name: Option<HeaderName> = None;
@@ -569,11 +569,14 @@ fn new_scope(request: http::Request<()>, _envoy_filter: &mut impl EnvoyNetworkFi
     Scope {
         http_version: head.version,
         method: head.method,
-        scheme: head
-            .uri
-            .scheme()
-            .cloned()
-            .unwrap_or(http::uri::Scheme::HTTP),
+        // The ASGI WebSocket scope requires a "ws"/"wss" scheme, not the
+        // "http"/"https" of the upgrade request. The handshake URI is relative
+        // so it carries no scheme; derive it from the connection's TLS state.
+        scheme: if envoy_filter.is_ssl() {
+            http::uri::Scheme::try_from("wss").unwrap()
+        } else {
+            http::uri::Scheme::try_from("ws").unwrap()
+        },
         raw_path: head
             .uri
             .path_and_query()

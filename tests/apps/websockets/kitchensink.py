@@ -32,6 +32,11 @@ async def app(
         # Return after connect without accepting or closing -> the server drops
         # the connection mid-handshake.
         return
+    if path == "/send-before-accept":
+        # Sending data before accepting -> server raises in the app, which
+        # before the handshake completes surfaces as an HTTP 500.
+        await send({"type": "websocket.send", "text": "too early"})
+        return
     if path == "/subprotocol":
         offered = list(scope["subprotocols"])
         await send(
@@ -51,6 +56,11 @@ async def app(
         raise RuntimeError(msg)
     if path == "/close":
         await send({"type": "websocket.close", "code": 1001, "reason": "bye"})
+        return
+    if path == "/scheme":
+        # Echo the scope scheme so the test can assert it is "ws"/"wss", not
+        # the "http"/"https" of the upgrade request.
+        await send({"type": "websocket.send", "text": scope["scheme"]})
         return
     if path == "/bad-send":
         # Neither text nor bytes -> server raises.
