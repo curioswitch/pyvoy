@@ -633,6 +633,13 @@ async def test_wsgi_multiple_start_response(url_wsgi: str, client: Client) -> No
 
 
 @pytest.mark.asyncio
+async def test_wsgi_start_response_after_headers(url_wsgi: str, client: Client) -> None:
+    response = await client.get(f"{url_wsgi}/start-response-after-headers")
+    assert response.status == 200, response.text()
+    assert response.text() == "chunk|ok"
+
+
+@pytest.mark.asyncio
 async def test_wsgi_no_start_response(
     url_wsgi: str, client: Client, logs_wsgi: asyncio.StreamReader
 ) -> None:

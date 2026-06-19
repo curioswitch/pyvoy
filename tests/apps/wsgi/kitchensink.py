@@ -752,6 +752,20 @@ def _multiple_start_response(
     return [b" Yes"]
 
 
+def _start_response_after_headers(
+    _environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    write = start_response("200 OK", [("content-type", "text/plain")])
+    write(b"chunk")
+    try:
+        start_response("200 OK", [("content-type", "text/plain")])
+    except RuntimeError as e:
+        if str(e) == "start_response called twice without exc_info":
+            return [b"|ok"]
+        return [b"|wrong:" + str(e).encode()]
+    return [b"|noerror"]
+
+
 def _no_start_response(
     _environ: WSGIEnvironment, _start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -816,6 +830,8 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _errors_output(environ, start_response)
         case "/multiple-start-response":
             return _multiple_start_response(environ, start_response)
+        case "/start-response-after-headers":
+            return _start_response_after_headers(environ, start_response)
         case "/no-start-response":
             return _no_start_response(environ, start_response)
         case _:
