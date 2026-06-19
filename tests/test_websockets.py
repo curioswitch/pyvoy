@@ -293,6 +293,12 @@ async def test_double_accept_closes(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
+async def test_invalid_close_code(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/invalid-close-code")) as ws:
+        assert await ws.recv() == "rejected"
+
+
+@pytest.mark.asyncio
 async def test_close_without_code(server: PyvoyServer) -> None:
     async with websockets.connect(_url(server, "/close-nocode")) as ws:
         with pytest.raises(ConnectionClosed):

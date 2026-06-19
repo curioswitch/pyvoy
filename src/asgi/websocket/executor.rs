@@ -11,14 +11,14 @@ use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilterScheduler;
 use http::{HeaderName, HeaderValue};
 use pyo3::{
     Bound, IntoPyObjectExt as _, Py, PyAny, PyErr, PyResult, Python,
-    exceptions::PyRuntimeError,
+    exceptions::{PyRuntimeError, PyValueError},
     pyclass, pymethods,
     types::{
         PyAnyMethods, PyBytes, PyDict, PyDictMethods as _, PyList, PyString, PyStringMethods as _,
         PyTracebackMethods as _,
     },
 };
-use tungstenite::Utf8Bytes;
+use tungstenite::{Utf8Bytes, protocol::frame::coding::CloseCode};
 
 use crate::{
     asgi::shared::{
@@ -698,12 +698,18 @@ impl SendCallable {
                 Ok(ret)
             }
             "websocket.close" => {
-                self.state = SendState::Closed;
                 let code = if let Some(code) = event.get_item(&self.constants.code)? {
                     code.extract::<u16>()?
                 } else {
                     1000
                 };
+                if !CloseCode::from(code).is_allowed() {
+                    return ErrorAwaitable::new_py(
+                        py,
+                        PyValueError::new_err(format!("invalid WebSocket close code: {code}")),
+                    );
+                }
+                self.state = SendState::Closed;
                 let reason: Utf8Bytes =
                     if let Some(reason) = event.get_item(&self.constants.reason)? {
                         if reason.is_none() {

@@ -56,6 +56,13 @@ async def app(
     if path == "/close":
         await send({"type": "websocket.close", "code": 1001, "reason": "bye"})
         return
+    if path == "/invalid-close-code":
+        try:
+            await send({"type": "websocket.close", "code": 1005})
+        except ValueError:
+            await send({"type": "websocket.send", "text": "rejected"})
+            await send({"type": "websocket.close", "code": 1000})
+        return
     if path == "/scheme":
         await send({"type": "websocket.send", "text": scope["scheme"]})
         return
