@@ -55,7 +55,7 @@ async def url_wsgi(server_wsgi: PyvoyServer) -> AsyncIterator[str]:
 
 @pytest.mark.asyncio
 async def test_scope_content(url: str, client: Client) -> None:
-    port = url.split(":")[-1]
+    port = url.rsplit(":", maxsplit=1)[-1]
     response = await client.get(f"{url}/echo-scope")
     assert response.status == 200, response.text()
     assert response.headers["x-scope-server-address"] == "::1"
