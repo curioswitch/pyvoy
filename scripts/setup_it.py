@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -10,7 +11,11 @@ from zipfile import ZipFile
 from pyqwest import SyncClient
 
 
-def setup(name: str, repo: str, revision: str) -> None:
+def setup() -> None:
+    name = "connect"
+    repo = "connectrpc/connect-python"
+    revision = f"v{version('connectrpc')}"
+
     dest = Path(__file__).parent.parent / "out" / "integration" / name
     dest_path = Path(dest)
     # For now, don't try to be incremental since syncing Python version changes
@@ -20,7 +25,7 @@ def setup(name: str, repo: str, revision: str) -> None:
 
     dest_path.mkdir(parents=True)
 
-    url = f"https://github.com/{repo}/archive/{revision}.zip"
+    url = f"https://github.com/{repo}/archive/refs/tags/{revision}.zip"
 
     response = SyncClient().get(url)
     if response.status != 200:
