@@ -35,10 +35,10 @@ sequence = ["fix-python", "fix-rust", "format-python", "format-rust"]
 help = "Run the connect-python conformance tests"
 deps = ["build"]
 sequence = [
-    { script = "scripts.setup_it:setup('connect', 'connectrpc/connect-python', '0efb7b06693c9f4ce53bb45d0c5f357fb85a4947')" },
-    { cmd = "uv add ../../..", cwd = "out/integration/connect" },
-    # Make sure the pyvoy venv isn't used by specifying uv run.
-    { cmd = "uv run pytest -k [pyvoy]", cwd = "out/integration/connect/conformance" },
+  { script = "scripts.setup_it:setup('connect', 'connectrpc/connect-python', 'v0.10.1')" },
+  { cmd = "uv add ../../..", cwd = "out/integration/connect" },
+  # Make sure the pyvoy venv isn't used by specifying uv run.
+  { cmd = "uv run pytest -k [pyvoy]", cwd = "out/integration/connect/conformance" },
 ]
 
 [tasks.lint-python]
