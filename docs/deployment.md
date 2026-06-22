@@ -36,6 +36,6 @@ CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml"]
 
 This example runs `--print-envoy-config` to generate an Envoy config transparently within the Docker
 container, however it can be a good idea to instead run that locally to bootstrap an Envoy config
-that you `ADD` to the container instead and check-in to your codebase. This allows you to fully
+that you `ADD` to the container instead and check it in to your codebase. This allows you to fully
 customize Envoy using all of its features. You can refer to the [Envoy documentation](https://www.envoyproxy.io/docs/envoy/latest/configuration/configuration)
 to find all the options it supports.

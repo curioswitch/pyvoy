@@ -1,8 +1,8 @@
 # Design
 
-pyvoy takes advantage of Envoy's dynamic modules rust SDK and PyO3's excellent Rust bindings
+pyvoy takes advantage of Envoy's dynamic modules Rust SDK and PyO3's excellent Rust bindings
 to Python to integrate the Python interpreter into the Envoy request lifecycle. The actual
-execution of Python code withon Envoy "just works" with normal usage of the Rust SDK.
+execution of Python code within Envoy "just works" with normal usage of the Rust SDK.
 
 It is not enough though to just execute Python code, and we have to design around concepts
 like the GIL and asyncio event loops.
@@ -50,7 +50,7 @@ is guaranteed to be dropped, completing the future.
 
 Unlike ASGI, the Python execution under WSGI blocks on I/O. This simplifies the implementation
 compared to ASGI - because of blocking, it is not enough to have a single Python thread, and we need
-to have at least as much as the expected concurrency of the server - we default to 200 to match
+to have at least as many as the expected concurrency of the server - we default to 200 to match
 the Java server Tomcat, but this is a user-workload driven parameter. These threads can directly
 block on channels to receive events from the Envoy threads, meaning there is no additional GIL
 thread. When issuing I/O such as receiving or sending payload, the I/O event is passed to Envoy

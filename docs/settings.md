@@ -1,7 +1,7 @@
 # Settings
 
 The following options can be used to configure pyvoy when using the pyvoy CLI. Most parameters have a corresponding
-keyword argument when using `PyvoyServer` programmatically. Envoy can also be [invoked directoy](#envoy) with
+keyword argument when using `PyvoyServer` programmatically. Envoy can also be [invoked directly](#envoy) with
 pyvoy for even further customization.
 
 ## Application
@@ -17,7 +17,7 @@ pyvoy for even further customization.
   fail to start. If disabled, lifespan will not be run at all.
 - `--additional-mount` - Can be specified any number of times to mount additional applications in the server. Takes
   a value in the format `app=path=interface`, with the path being where the application is mounted. For more
-  complicated routing, it is recommended to invoke Envoy [directly](#envoy) wth a full config.
+  complicated routing, it is recommended to invoke Envoy [directly](#envoy) with a full config.
 
 ## Server
 
@@ -27,11 +27,24 @@ pyvoy for even further customization.
 - `--tls-key` / `--tls-cert` - Paths to the TLS key and cert files to enable listening with TLS.
 - `--tls-ca-cert` - Path to the TLS cert to verify client certificates with.
 - `--tls-require-client-certificate` - Whether a valid TLS client certificate must be present to connect, for mTLS.
-  has no effect if `--tls-ca-cert` is not provided.
+  Has no effect if `--tls-ca-cert` is not provided.
 - `--tls-port` - Must be used with `--tls-key` / `--tls-cert`. If set, `--port` will listen with plaintext
   and this port will in addition listen with TLS.
 - `--tls-disable-http3` - By default, if TLS is enabled, the port will also listen on UDP for HTTP/3 connections.
   Set to disable support for HTTP/3 connections.
+
+## HTTP Client
+
+- `--upstream` - Defines an upstream that can be used with the pyvoy [HTTP Client](./http-client.md). Every upstream
+  defines a name and its URL, for example `auth-service=http://auth.svc:8080`. To enable TLS, specify `https://`
+  instead - the server's CA cert will be used to authenticate backends, and if TLS key / cert are provided, they
+  will be sent for mTLS.
+
+## WebSockets
+
+- `--websockets` - Enables support for ASGI WebSockets. Not enabled by default.
+- `--websockets-max-message-size` - Sets the maximum WebSocket message size in bytes. **Default**: _64 MiB_.
+- `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
 
 ## Development
 
