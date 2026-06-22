@@ -187,6 +187,8 @@ ignore = [
   "W191",
   # Low signal-to-noise ratio
   "PLR",
+  # Code is native only so we need docstrings in the stubs
+  "PYI021",
 ]
 
 typing-extensions = false
