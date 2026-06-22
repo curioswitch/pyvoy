@@ -47,6 +47,8 @@ pyvoy = "pyvoy._cli:main"
 [dependency-groups]
 dev = [
   "asgiref==3.11.1",
+  # Used in setup_it.py, not directly, keeping it here allows renovate for free.
+  "connectrpc==0.10.1",
   "granian==2.7.6",
   "gunicorn==26.0.0",
   "hypercorn==0.18.0",
