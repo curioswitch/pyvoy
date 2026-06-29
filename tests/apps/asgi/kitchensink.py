@@ -530,6 +530,28 @@ async def _client_closed_after_trailers_start(
     print("client-closed-after-trailers-start assertions passed", file=sys.stderr)  # noqa: T201
 
 
+async def _stream_tight(
+    _scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    # Stream small chunks in a tight loop (no sleeps) to keep the worker thread busy
+    # committing Envoy events.
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    chunk = b"x" * 256
+    try:
+        while True:
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+    except OSError:
+        # Expected once the client goes away.
+        pass
+
+
 async def _controlled(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1139,6 +1161,8 @@ async def http_app(
             await _client_closed_after_response_start(scope, recv, send)
         case "/client-closed-after-trailers-start":
             await _client_closed_after_trailers_start(scope, recv, send)
+        case "/stream-tight":
+            await _stream_tight(scope, recv, send)
         case "/controlled":
             await _controlled(scope, recv, send)
         case "/bad-app-missing-type":
