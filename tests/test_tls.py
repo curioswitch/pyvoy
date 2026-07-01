@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
 import ssl
 import subprocess
 from dataclasses import dataclass
@@ -128,3 +131,52 @@ async def test_scope_content(
         case HTTPVersion.HTTP1, "wsgi":
             expected = "HTTP/1.1"
     assert response.headers["x-scope-http-version"] == expected
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "version", [HTTPVersion.HTTP1, HTTPVersion.HTTP2], ids=["http1", "http2"]
+)
+@pytest.mark.xfail(reason="waiting for release of envoyproxy/envoy#44841", strict=False)
+async def test_client_cancel_storm(
+    server_asgi: PyvoyServer, certs: Certs, version: HTTPVersion
+) -> None:
+    """Regression test for pyvoy 0.4.0 release Envoy crash bug. The bug can occur when
+    filter is torn down while a background thread schedules events on it concurrently.
+    We hammer an endpoint that continuously schedules events with client disconnects.
+    This still only reproduces sometimes but we keep it to flake the CI if a bug
+    resurfaces.
+    """
+    url = f"https://localhost:{server_asgi.listener_port_tls}"
+    # Overridable so the race can be hammered much harder ad hoc if needed
+    rounds = int(os.getenv("PYVOY_HAMMER_ROUNDS", "200"))
+    concurrency = int(os.getenv("PYVOY_HAMMER_CONCURRENCY", "48"))
+
+    async with HTTPTransport(tls_ca_cert=certs.ca, http_version=version) as transport:
+        client = Client(transport)
+
+        async def cancel_once(jitter: int) -> None:
+            with contextlib.suppress(Exception):
+                async with client.stream("GET", f"{url}/stream-tight") as response:
+                    read = 0
+                    async for _ in response.content:
+                        read += 1
+                        # Abandon mid-stream (0..63 chunks) so resets land at varied
+                        # points.
+                        if read >= jitter % 64:
+                            break
+
+        seq = 0
+        for _ in range(rounds):
+            await asyncio.gather(
+                *(cancel_once(seq + j) for j in range(concurrency)),
+                return_exceptions=True,
+            )
+            seq += concurrency
+
+        proc = server_asgi._process
+        assert proc is not None
+        assert proc.returncode is None, f"Envoy process exited (code {proc.returncode})"
+        sentinel = await client.get(f"{url}/response-body")
+        assert sentinel.status == 200, "server unresponsive after cancel storm"
