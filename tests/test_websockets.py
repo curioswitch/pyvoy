@@ -85,7 +85,11 @@ cases = [
 @pytest.mark.parametrize("cases", cases)
 @pytest.mark.asyncio
 async def test_kosoku(cases: list[str], echo_server: PyvoyServer) -> None:
-    await run_fuzzingclient(f"ws://localhost:{echo_server.listener_port}", cases=cases)
+    await run_fuzzingclient(
+        f"ws://localhost:{echo_server.listener_port}",
+        cases=cases,
+        concurrency=os.cpu_count() or 1,
+    )
 
 
 @pytest_asyncio.fixture(scope="module")
