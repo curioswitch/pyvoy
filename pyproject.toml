@@ -10,7 +10,6 @@ keywords = ["asgi", "envoy", "wsgi"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS :: MacOS X",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python",
@@ -52,6 +51,7 @@ dev = [
   "granian==2.7.7",
   "gunicorn==26.0.0",
   "hypercorn==0.18.0",
+  "kosoku==0.1.0",
   "poethepoet==0.47.0",
   "psutil==7.2.2",
   "pyright[nodejs]==1.1.411",

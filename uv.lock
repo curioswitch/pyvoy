@@ -166,7 +166,7 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/66/54/eb9bfc647b19f2009dd5c7f5ec51c4e6ca831725f1aea7a993034f483147/contourpy-1.3.2.tar.gz", hash = "sha256:b6945942715a034c671b7fc54f9588126b0b8bf23db2696e3ca8328f3ff0ab54", size = 13466130, upload-time = "2025-04-15T17:47:53.79Z" }
 wheels = [
@@ -237,7 +237,7 @@ resolution-markers = [
     "python_full_version == '3.11.*'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/01/1253e6698a07380cd31a736d248a3f2a50a7c88779a1813da27503cadc2a/contourpy-1.3.3.tar.gz", hash = "sha256:083e12155b210502d0bca491432bb04d56dc3432f95a979b429f2848c3dbe880", size = 13466174, upload-time = "2025-07-26T12:03:12.549Z" }
 wheels = [
@@ -517,7 +517,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -969,6 +969,32 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/33/01/a8ea7c5ea32a9b45ceeaee051a04c8ed4320f5add3c51bfa20879b765b70/kiwisolver-1.4.9-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:85b5352f94e490c028926ea567fc569c52ec79ce131dadb968d3853e809518c2", size = 80281, upload-time = "2025-08-10T21:27:45.369Z" },
     { url = "https://files.pythonhosted.org/packages/da/e3/dbd2ecdce306f1d07a1aaf324817ee993aab7aee9db47ceac757deabafbe/kiwisolver-1.4.9-pp311-pypy311_pp73-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:464415881e4801295659462c49461a24fb107c140de781d55518c4b80cb6790f", size = 78009, upload-time = "2025-08-10T21:27:46.376Z" },
     { url = "https://files.pythonhosted.org/packages/da/e9/0d4add7873a73e462aeb45c036a2dead2562b825aa46ba326727b3f31016/kiwisolver-1.4.9-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:fb940820c63a9590d31d88b815e7a3aa5915cad3ce735ab45f0c730b39547de1", size = 73929, upload-time = "2025-08-10T21:27:48.236Z" },
+]
+
+[[package]]
+name = "kosoku"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/36/8c238b62585349e4f0b521fd77e00de0bfd330653c90d128c783050d3f0e/kosoku-0.1.0.tar.gz", hash = "sha256:24eb5293a4be841c32fcbc4834c7935cc880657e253ab1555cbac65e654594ee", size = 1279740, upload-time = "2026-06-26T08:25:54.632Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/b8/bd948f91ca1b0f73fc8adeddedb3c02d7124dd6a3962960c08929c64baaf/kosoku-0.1.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:398e2a5cd5bf1eaa95d4342540a87f9c58edf5200478eccfaf07ee21fb80244a", size = 2798312, upload-time = "2026-06-26T08:25:25.314Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/ac/7bae145dd1e908ad7e12623e232f4b782dd266cf4a8c673a856efda9ab17/kosoku-0.1.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:911610fc6d21e9d8b5b53936ea134b2b4ab58cd6252e9ad7c7f69c540a028027", size = 2975844, upload-time = "2026-06-26T08:25:27.325Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/0a/53bf4f5e994a080b1c058fecea041132013301076f8cdbc6a5cb915ef3b0/kosoku-0.1.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a9b34e593defe29d931e346c88947b58a015495f09dd13643e4cc952c75602ac", size = 2988335, upload-time = "2026-06-26T08:25:29.019Z" },
+    { url = "https://files.pythonhosted.org/packages/53/d6/9990dddc7f701dc1933214895fab86c3715abe561f27d222056bb2ce2249/kosoku-0.1.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:25f03225006c1cf1eb65509e7819d0dee892fd5e269043be9b4d3b302f7bfd9f", size = 3154041, upload-time = "2026-06-26T08:25:30.813Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/8d/5be240dd6bb8c7bac120d4ec442189b398e869870fe19579069dff4e2f93/kosoku-0.1.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:af492185ce47ea705d23bef2c30df8574e95d81766c6eac661f544dfc8443c8b", size = 3240495, upload-time = "2026-06-26T08:25:32.289Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/86/eb84e5d44afdfbee4b91d38cdaf3cbf11c389f8f814a5b5bff94bbec0241/kosoku-0.1.0-cp310-abi3-win_amd64.whl", hash = "sha256:bc6aa2dd6ec67491a3cdd86302e67907f52ad50043735b457714329676bf3b8e", size = 2687746, upload-time = "2026-06-26T08:25:33.697Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/51/e71abbf477ef51a1a3835a32582d86aacdceaec756edee059084d7b77c8e/kosoku-0.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:df48ec9b67965839c312b3470b9fd27184a9f7770147ea2d54d4ee7f5c15b594", size = 2787288, upload-time = "2026-06-26T08:25:35.405Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/86/3f2c4e746deb9106403f56cbe33e35d42cc06f1409cda13e6ccfdc9032da/kosoku-0.1.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:65137d2002643df911c42c640d9433de828f864fed42820617ec867fe237ce35", size = 2969038, upload-time = "2026-06-26T08:25:36.827Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/69/57543061040db7d685fd4b0dc89f79a6f3c419d8c0d28fac5e070d5bea29/kosoku-0.1.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f7aee4ccf730201f89aed4c2672ec51217d2a662135d163d772c893972e28a1d", size = 2979417, upload-time = "2026-06-26T08:25:38.436Z" },
+    { url = "https://files.pythonhosted.org/packages/69/a7/35836f00855e61da6d9987cd5c264887e877eac80da9f3407dd95721d799/kosoku-0.1.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:6e75b5a31acb063ede373259e07d80a7647937c4a5139190a9e969656610800e", size = 3146925, upload-time = "2026-06-26T08:25:39.885Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/eb/bf385518f43048baf427ded22c284616dc4130128240e9ff3c5280d36bd8/kosoku-0.1.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:bbe3e332e0bcbcefb2f34f9b4417aa7edc507b32704247a2db345c08a93e1a4b", size = 3229910, upload-time = "2026-06-26T08:25:41.369Z" },
+    { url = "https://files.pythonhosted.org/packages/38/f5/7c4518b512f8c71d6f8f51ac914f7331b903f6c2dbb129c2da38535edb1c/kosoku-0.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:86bc5a7e117babf09d7242220b740eaa4b426351f7b5c8c06eb7e8e87b3c3804", size = 2679391, upload-time = "2026-06-26T08:25:42.846Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/72/cf832bd0e0fb64e82e42a2101342d32866e6bf5f1167c844840b8c2702f1/kosoku-0.1.0-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:c68b49fae920cdd120e96b9475d3f51edc566ca8ce96afce85fe7181e93a1804", size = 2804404, upload-time = "2026-06-26T08:25:44.319Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/67/385f7655bb256f249aa35a981a8e9ba2f54686a4615b4d12d33376f56fdd/kosoku-0.1.0-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:10fa65f249c56b31fcc5a77571033d53cfbcff631aa2ae3cb68443fff05f8857", size = 2984740, upload-time = "2026-06-26T08:25:45.874Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/e0/4b9c054c5b74d420ee76af60b6714ae85cb21010088eeaadebab6b0f2172/kosoku-0.1.0-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:132e1e89d3f7b4779b60c7fbc0740fd168724e31bfb694119063380c2c80a685", size = 2989681, upload-time = "2026-06-26T08:25:47.567Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/b1/84eef32343f9ac5632391f59d9bdd9c3fea7c0c9b86770c2af88e35a95b0/kosoku-0.1.0-pp311-pypy311_pp73-musllinux_1_2_aarch64.whl", hash = "sha256:1fb5d43950b155a1f73ea173fa9d302c5b9ba0a43f0905f4b17633bb53a11909", size = 3162562, upload-time = "2026-06-26T08:25:49.416Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/34/c1b5b503dfd270151975407cc11fecb8055c49b5f9023f66ecf735fa03a4/kosoku-0.1.0-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:bd613360297baf3664fe6a6c80a5c806fffa454957ca3f94d578a2b3970b6723", size = 3243553, upload-time = "2026-06-26T08:25:51.072Z" },
+    { url = "https://files.pythonhosted.org/packages/da/f4/968af657dfe809e4e91d86a1246f7748bba17e8b84f7eb87dfbd04a4a08d/kosoku-0.1.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:e6caa15f5180590a3a98029f31c12d322faa6ca62105ed50c04fe0e2cf015b50", size = 2694311, upload-time = "2026-06-26T08:25:53.034Z" },
 ]
 
 [[package]]
@@ -1923,6 +1949,7 @@ dev = [
     { name = "granian" },
     { name = "gunicorn" },
     { name = "hypercorn" },
+    { name = "kosoku" },
     { name = "poethepoet" },
     { name = "psutil" },
     { name = "pyright", extra = ["nodejs"] },
@@ -1959,6 +1986,7 @@ dev = [
     { name = "granian", specifier = "==2.7.7" },
     { name = "gunicorn", specifier = "==26.0.0" },
     { name = "hypercorn", specifier = "==0.18.0" },
+    { name = "kosoku", specifier = "==0.1.0" },
     { name = "poethepoet", specifier = "==0.47.0" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pyright", extras = ["nodejs"], specifier = "==1.1.411" },
@@ -2108,8 +2136,8 @@ name = "taskgroup"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "exceptiongroup" },
-    { name = "typing-extensions" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f0/8d/e218e0160cc1b692e6e0e5ba34e8865dbb171efeb5fc9a704544b3020605/taskgroup-0.2.2.tar.gz", hash = "sha256:078483ac3e78f2e3f973e2edbf6941374fbea81b9c5d0a96f51d297717f4752d", size = 11504, upload-time = "2025-01-03T09:24:13.761Z" }
 wheels = [

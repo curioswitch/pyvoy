@@ -5,8 +5,6 @@ import json
 import os
 import ssl
 import subprocess
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from time import perf_counter_ns
 from typing import TYPE_CHECKING
 
@@ -14,6 +12,7 @@ import pytest
 import pytest_asyncio
 import trustme
 import websockets
+from kosoku import run_fuzzingclient
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
 from pyvoy import PyvoyServer
@@ -83,63 +82,12 @@ cases = [
 ]
 
 
-@pytest.mark.skipif(
-    _is_docker_unavailable(), reason="requires Docker with Linux containers"
-)
 @pytest.mark.parametrize("cases", cases)
-def test_autobahn(cases: list[str], echo_server: PyvoyServer) -> None:
-    config = {
-        "servers": [{"url": f"ws://host.docker.internal:{echo_server.listener_port}"}],
-        "outdir": "/reports",
-        "cases": cases,
-        "exclude-cases": [],
-    }
-
-    # Use repository root for temp directory for colima compatibility
-    temp_root = Path(__file__).parent.parent / "out"
-    temp_root.mkdir(exist_ok=True)
-    with TemporaryDirectory(dir=temp_root) as tempdir:
-        config_dir = Path(tempdir) / "config"
-        config_dir.mkdir(exist_ok=True)
-        config_path = config_dir / "config.json"
-        config_path.write_text(json.dumps(config))
-
-        reports_dir = Path(tempdir) / "reports"
-        reports_dir.mkdir(exist_ok=True)
-
-        subprocess.run(
-            [
-                "docker",
-                "run",
-                # Needed for Linux
-                "--add-host",
-                "host.docker.internal:host-gateway",
-                "--env",
-                "PYTHONUNBUFFERED=1",
-                "-v",
-                f"{config_dir}:/config",
-                "-v",
-                f"{reports_dir}:/reports",
-                "crossbario/autobahn-testsuite:25.10.1",
-                "wstest",
-                "-m",
-                "fuzzingclient",
-                "--spec",
-                "/config/config.json",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-
-        report = json.loads((reports_dir / "index.json").read_text())
-        # wstest always exits 0 — even when it cannot reach the server
-        ran = sum(len(results) for results in report.values())
-        assert ran > 0, "autobahn ran no cases; server unreachable from the container?"
-        for _, results in report.items():
-            for case, result in results.items():
-                assert result["behavior"] in ("OK", "INFORMATIONAL", "NON-STRICT"), (
-                    f"{case} failed with behavior {result['behavior']}"
-                )
+@pytest.mark.asyncio
+async def test_kosoku(cases: list[str], echo_server: PyvoyServer) -> None:
+    await run_fuzzingclient(
+        f"ws://{echo_server.listener_address}:{echo_server.listener_port}", cases=cases
+    )
 
 
 @pytest_asyncio.fixture(scope="module")
