@@ -138,7 +138,6 @@ async def test_scope_content(
 @pytest.mark.parametrize(
     "version", [HTTPVersion.HTTP1, HTTPVersion.HTTP2], ids=["http1", "http2"]
 )
-@pytest.mark.xfail(reason="waiting for release of envoyproxy/envoy#44841", strict=False)
 async def test_client_cancel_storm(
     server_asgi: PyvoyServer, certs: Certs, version: HTTPVersion
 ) -> None:

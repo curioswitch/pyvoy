@@ -503,13 +503,11 @@ wheels = [
 
 [[package]]
 name = "envoy-server"
-version = "1.38.2"
+version = "1.38.3"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/2a/61411537eee281ef1ec7f9f1bb3ad5eca597d6ddb5d4d736dee5e053fb10/envoy_server-1.38.2-py3-none-macosx_15_0_arm64.whl", hash = "sha256:68b245187023786a4c74be3f57c494442482512bd2449e299ef170c5816db17b", size = 34199998, upload-time = "2026-06-17T05:29:38.616Z" },
-    { url = "https://files.pythonhosted.org/packages/45/6d/cd5d85a0894dca0250ead9eca2a8cf289d402532e21ce139955cbffe3d5c/envoy_server-1.38.2-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:8b1b1bea393578e886a26350e3ab8738a066372869e82f54be464f4a914c9df4", size = 33130103, upload-time = "2026-06-17T05:29:42.721Z" },
-    { url = "https://files.pythonhosted.org/packages/96/d6/3c616c0a4c9833605b4e931cadd9f45149894b557d17d0e7df5bc75b6f92/envoy_server-1.38.2-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:c1e2e293364686e3ee79b32f9743bb1f7fd40c196945cb9062fbb25655d35188", size = 34996584, upload-time = "2026-06-17T05:29:46.832Z" },
-    { url = "https://files.pythonhosted.org/packages/03/8e/4d6967af64c47f078952ab489df1bfa5009427f53263b5cb37152eec1930/envoy_server-1.38.2-py3-none-win_amd64.whl", hash = "sha256:f1dc9e3589c0df939cba59615790b7ff62405d91bf4b3e4db1cbaad151cbdf2f", size = 19559475, upload-time = "2026-06-17T05:29:50.478Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/e7/43c8d7458076a7a3315e85adab5102eb70027c52e09e48a4478a1113e79a/envoy_server-1.38.3-py3-none-macosx_15_0_arm64.whl", hash = "sha256:b88faee9b672f65b9d11fb5842d8fc3b8b3b0ae66cfae2a264e21f0906c58eb6", size = 34684887, upload-time = "2026-07-03T05:29:52.236Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/66/c1a0a58c9edb90d2eacdc08a83ee485a4b951d65abcb3860c67c6a0f520a/envoy_server-1.38.3-py3-none-manylinux_2_31_aarch64.whl", hash = "sha256:f94e4feef98323f4f56aff8859d8d108df59b38cc92f63043f8cb182ab0dcd42", size = 104529855, upload-time = "2026-07-03T05:29:55.88Z" },
 ]
 
 [[package]]
@@ -1971,7 +1969,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "envoy-server", specifier = "==1.38.2" },
+    { name = "envoy-server", specifier = "==1.38.3" },
     { name = "find-libpython", specifier = ">=0.5.1" },
     { name = "pyqwest", specifier = ">=0.6.2" },
     { name = "pyyaml", specifier = ">=6.0" },
