@@ -5,6 +5,7 @@ import contextlib
 import os
 import ssl
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -137,6 +138,9 @@ async def test_scope_content(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "version", [HTTPVersion.HTTP1, HTTPVersion.HTTP2], ids=["http1", "http2"]
+)
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Lack of reuseport makes this unreliable on Windows"
 )
 async def test_client_cancel_storm(
     server_asgi: PyvoyServer, certs: Certs, version: HTTPVersion

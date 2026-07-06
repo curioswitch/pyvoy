@@ -70,7 +70,9 @@ jobs:
         run: uv run poe lint
 
       - name: run tests
-        run: uv run poe test ${{ github.event_name == 'push' && '--full' || '' }}
+        # Coverage instrumentation slows websockets compression down too much while the integration test has
+        # relatively tight timeouts.
+        run: uv run poe test ${{ github.event_name == 'push' && matrix.coverage != 'cov' && '--full' || '' }}
 
       # Needed for connect integration tests runner
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
