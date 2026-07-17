@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "envoy-server==1.38.3",
+  "envoy-server==1.39.0",
   "find-libpython>=0.5.1",
   "pyqwest>=0.6.2",
   "pyyaml>=6.0",
