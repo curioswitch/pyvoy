@@ -75,7 +75,7 @@ jobs:
         run: uv run poe test ${{ github.event_name == 'push' && matrix.coverage != 'cov' && '--full' || '' }}
 
       # Needed for connect integration tests runner
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: github.event_name == 'push' && matrix.python != '3.14t' && !startsWith(matrix.os, 'windows-')
         with:
           go-version: stable
