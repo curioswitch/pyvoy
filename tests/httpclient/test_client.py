@@ -168,18 +168,22 @@ async def test_json_content_existing_content_type(
     )
 
 
+# close_no_read and close_pending_read rely on asyncio-specific request
+# generators and _read_pending so are only exercised against ASGI.
 @pytest.mark.asyncio
 async def test_close_no_read(
-    url: str, client: Client, http_scheme: str, http_version: str
+    url_asgi: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
-    await _run_test("client_close_no_read", url, client, http_scheme, http_version)
+    await _run_test("client_close_no_read", url_asgi, client, http_scheme, http_version)
 
 
 @pytest.mark.asyncio
 async def test_close_pending_read(
-    url: str, client: Client, http_scheme: str, http_version: str
+    url_asgi: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
-    await _run_test("client_close_pending_read", url, client, http_scheme, http_version)
+    await _run_test(
+        "client_close_pending_read", url_asgi, client, http_scheme, http_version
+    )
 
 
 @pytest.mark.asyncio

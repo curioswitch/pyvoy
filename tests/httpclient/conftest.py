@@ -95,14 +95,80 @@ async def runner_asgi(
         yield server
 
 
+@pytest_asyncio.fixture(scope="module")
+async def runner_wsgi(
+    backend_asgi: PyvoyServer, ca: trustme.CA
+) -> AsyncIterator[PyvoyServer]:
+    cert = ca.issue_cert(
+        common_name="someclient",
+        organization_name="curioswitch",
+        organization_unit_name="tests",
+    )
+    async with PyvoyServer(
+        "tests.apps.wsgi.httpclient.runner",
+        interface="wsgi",
+        env={
+            "TEST_URL": f"http://{backend_asgi.listener_address}:{backend_asgi.listener_port}"
+        },
+        upstreams=[
+            Upstream(
+                name="backend_h1c",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port}",
+                http_version=HTTPVersion.HTTP1,
+            ),
+            Upstream(
+                name="backend_h1",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
+                http_version=HTTPVersion.HTTP1,
+                tls=TLSConfig(
+                    key=cert.private_key_pem.bytes(),
+                    cert=cert.cert_chain_pems[0].bytes(),
+                    ca_cert=ca.cert_pem.bytes(),
+                ),
+            ),
+            Upstream(
+                name="backend_h2c",
+                address=f"localhost:{backend_asgi.listener_port}",
+                http_version=HTTPVersion.HTTP2,
+            ),
+            Upstream(
+                name="backend_h2",
+                address=f"{backend_asgi.listener_address}:{backend_asgi.listener_port_tls}",
+                http_version=HTTPVersion.HTTP2,
+                tls=TLSConfig(
+                    key=cert.private_key_pem.bytes(),
+                    cert=cert.cert_chain_pems[0].bytes(),
+                    ca_cert=ca.cert_pem.bytes(),
+                ),
+            ),
+            Upstream(
+                name="backend_unavailable",
+                address="localhost:9999",
+                http_version=HTTPVersion.HTTP1,
+            ),
+        ],
+    ) as server:
+        yield server
+
+
 @pytest_asyncio.fixture
 async def url_asgi(runner_asgi: PyvoyServer) -> AsyncIterator[str]:
     yield f"http://{runner_asgi.listener_address}:{runner_asgi.listener_port}"
 
 
+@pytest_asyncio.fixture
+async def url_wsgi(runner_wsgi: PyvoyServer) -> AsyncIterator[str]:
+    yield f"http://{runner_wsgi.listener_address}:{runner_wsgi.listener_port}"
+
+
+@pytest.fixture(params=["asgi", "wsgi"])
+def interface(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
 @pytest.fixture
-def url(url_asgi: str) -> str:
-    return url_asgi
+def url(request: pytest.FixtureRequest, interface: str) -> str:
+    return request.getfixturevalue(f"url_{interface}")
 
 
 @pytest.fixture(params=["http", "https"])

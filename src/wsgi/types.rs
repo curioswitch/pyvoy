@@ -6,6 +6,9 @@ pub(crate) const EVENT_ID_REQUEST: u64 = 1;
 /// The event ID to trigger the filter to process response events.
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
 
+/// The event ID to trigger an outgoing HTTP client request.
+pub(crate) const EVENT_ID_OUTGOING_REQUEST: u64 = 3;
+
 /// An event to read request the body, called from the WSGI input stream,
 /// read by the filter when scheduling [`EVENT_ID_REQUEST`].
 ///

@@ -1,13 +1,13 @@
 # HTTP Client
 
 While pyvoy is primarily a Python application server, it also provides an HTTP client
-implementation using Envoy, which is commonly required by apps. It is an implementation of
-pyqwest's [Transport](https://pyqwest.dev/reference/async/#pyqwest.Transport), which
+implementation using Envoy, which is commonly required by apps. For ASGI, it is an implementation of
+pyqwest's [Transport](https://pyqwest.dev/reference/async/#pyqwest.Transport), and for WSGI, of
+pyqwest's [SyncTransport](https://pyqwest.dev/reference/sync/#pyqwest.SyncTransport), which
 means it can be slotted into a pyqwest [Client](https://pyqwest.dev/reference/async/#pyqwest.Client)
-as-is. Envoy's HTTP client implementation provides many advanced features such as DNS
-load balancing and circuit breakers needed for advanced production applications.
-
-HTTP client is currently only implemented for ASGI. WSGI support will come soon.
+or [SyncClient](https://pyqwest.dev/reference/sync/#pyqwest.SyncClient) as-is. Envoy's HTTP client
+implementation provides many advanced features such as DNS load balancing and circuit breakers
+needed for advanced production applications.
 
 Envoy HTTP client depends on specifying upstream addresses in configuration; this means
 the pyvoy HTTP client is not appropriate for accessing arbitrary servers. In practice,
@@ -35,6 +35,20 @@ user_client = Client(transport=HTTPTransport("user-svc"))
 async def app(scope, recv, send):
     res = await auth_client.post("/fetch-token")
     user = await user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
+```
+
+For WSGI, use `pyvoy.wsgi.httpclient.HTTPTransport` with a pyqwest `SyncClient` instead.
+
+```python
+from pyqwest import SyncClient
+from pyvoy.wsgi.httpclient import HTTPTransport
+
+auth_client = SyncClient(transport=HTTPTransport("auth-svc"))
+user_client = SyncClient(transport=HTTPTransport("user-svc"))
+
+def app(environ, start_response):
+    res = auth_client.post("/fetch-token")
+    user = user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
 ```
 
 ## Limitations

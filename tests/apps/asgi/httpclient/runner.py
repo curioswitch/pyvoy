@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 from pyqwest import Client, HTTPVersion
 
 from pyvoy.asgi.httpclient import HTTPTransport
-
-from .cases import client, errors, tls, validation
+from tests.apps.httpclient.cases import client, errors, tls, validation
 
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope

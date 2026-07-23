@@ -24,6 +24,7 @@ fn init() -> bool {
         let syspath = py.import("sys")?.getattr("path")?.cast_into::<PyList>()?;
         syspath.insert(0, ".")?;
         asgi::register_py_modules(py)?;
+        wsgi::register_py_modules(py)?;
 
         Ok(())
     });
