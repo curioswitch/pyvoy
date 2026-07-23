@@ -64,31 +64,24 @@ class Mount:
 
 @dataclass(frozen=True, slots=True)
 class StaticMount:
-    """A mount that serves static files from the local filesystem.
-
-    Backed by the envoy-files dynamic module (https://github.com/curioswitch/envoy-files).
-    """
+    """A mount that serves static files from the local filesystem."""
 
     path: str
-    """The URL path prefix to mount at, for example '/assets' or '/'."""
+    """The URL path prefix to mount at, for example '/assets' or '/'.
 
-    root: str
-    """The filesystem directory to serve files from."""
-
-    strip_prefix: str | None = None
-    """The URL prefix to strip before resolving files under `root`.
-
-    If unset, defaults to `path` (so '/assets/app.js' mounted at '/assets' resolves
-    to '<root>/app.js'), unless `path` is '/', in which case no prefix is stripped.
-    Pass an empty string to explicitly disable stripping.
+    The prefix is stripped when resolving files, so '/assets/app.js' mounted at
+    '/assets' resolves to '<root>/app.js'.
     """
+
+    root: Path
+    """The filesystem directory to serve files from."""
 
     index_files: list[str] | None = None
     """Files attempted in order when a directory is requested. Defaults to
     ['index.html']."""
 
-    directory: Directory | None = None
-    """Behavior when a directory has no matching index file. Defaults to 'index'."""
+    directory: Directory = "deny"
+    """Behavior when a directory has no matching index file. Defaults to 'deny'."""
 
     precompressed: list[Precompressed] | None = None
     """Precompressed variants to serve when available, in preference order.
@@ -816,17 +809,15 @@ class PyvoyServer:
         }
 
     def _static_mount_config(self, mount: StaticMount) -> dict[str, Any]:
-        """Builds the envoy-files filter config for a static mount."""
-        config: dict[str, Any] = {"root": str(Path(mount.root).expanduser().resolve())}
-        strip_prefix = mount.strip_prefix
-        if strip_prefix is None and mount.path != "/":
-            strip_prefix = mount.path
-        if strip_prefix:
-            config["strip_prefix"] = strip_prefix
+        config: dict[str, Any] = {
+            "root": str(mount.root.expanduser().resolve()),
+            "directory": mount.directory,
+        }
+        # The mount prefix is always stripped before resolving files under root.
+        if mount.path != "/":
+            config["strip_prefix"] = mount.path
         if mount.index_files is not None:
             config["index_files"] = mount.index_files
-        if mount.directory is not None:
-            config["directory"] = mount.directory
         if mount.precompressed is not None:
             config["precompressed"] = mount.precompressed
         if mount.cache_control is not None:
@@ -841,11 +832,7 @@ class PyvoyServer:
 
 
 def _dynamic_module_action(name: str, config: dict) -> dict:
-    """Builds a composite ExecuteFilterAction wrapping a terminal dynamic-module filter.
-
-    Used for both the pyvoy application filter and the envoy_files static file filter,
-    which share the same filter and dynamic module name.
-    """
+    """Builds a composite ExecuteFilterAction wrapping a terminal dynamic-module filter."""
     return {
         "action": {
             "name": "composite_action",

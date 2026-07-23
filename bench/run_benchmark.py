@@ -339,12 +339,6 @@ class StaticConfig:
 
 
 def static_configs(static_dir: Path) -> tuple[StaticConfig, ...]:
-    """The four static file serving configurations to compare.
-
-    Each serves the files at /static/<name>.bin so the load is identical; the
-    "static" variants let the server serve files natively while the "starlette"
-    variants route each request through a Python ASGI app.
-    """
     static_app = "bench.static_app:app"
     noop_app = "bench.static_app:noop"
     return (

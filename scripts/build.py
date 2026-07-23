@@ -11,8 +11,10 @@ from pyqwest import SyncClient
 
 bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 
-# The envoy-files dynamic module used to serve static mounts. Bump when a new
-# release is available; renovate can track this like the Envoy version.
+# Marker recording the envoy-files version currently downloaded into _bin, so we
+# can skip re-downloading (and the network entirely) on unchanged builds.
+version_marker = Path(__file__).parent.parent / "out" / "envoy-files-version.txt"
+
 ENVOY_FILES_VERSION = "v0.1.1"
 
 
@@ -49,21 +51,24 @@ def download_envoy_files() -> None:
     else:
         dest = bin_dir / "libenvoy_files.so"
 
+    if (
+        dest.exists()
+        and version_marker.exists()
+        and version_marker.read_text().strip() == ENVOY_FILES_VERSION
+    ):
+        print(f"envoy-files {ENVOY_FILES_VERSION} already downloaded.")  # noqa: T201
+        return
+
     asset = envoy_files_asset()
     base_url = (
         "https://github.com/curioswitch/envoy-files/releases/download/"
         f"{ENVOY_FILES_VERSION}/{asset}"
     )
 
+    print(f"Downloading envoy-files {ENVOY_FILES_VERSION}...")  # noqa: T201
     client = SyncClient()
     expected_sha = _get(client, f"{base_url}.sha256").split()[0].lower()
-
-    if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() == expected_sha:
-        print(f"envoy-files {ENVOY_FILES_VERSION} already downloaded.")  # noqa: T201
-        return
-
-    print(f"Downloading envoy-files {ENVOY_FILES_VERSION}...")  # noqa: T201
-    response = SyncClient().get(base_url)
+    response = client.get(base_url)
     if response.status != 200:
         msg = f"Failed to download {base_url}: {response.status} {response.text()}"
         raise RuntimeError(msg)
@@ -75,6 +80,8 @@ def download_envoy_files() -> None:
         )
         raise RuntimeError(msg)
     dest.write_bytes(content)
+    version_marker.parent.mkdir(parents=True, exist_ok=True)
+    version_marker.write_text(ENVOY_FILES_VERSION)
 
 
 def _get(client: SyncClient, url: str) -> str:

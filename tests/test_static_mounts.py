@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from pyqwest import Client
 
-STATIC_DIR = str(Path(__file__).parent / "apps" / "static")
+STATIC_DIR = Path(__file__).parent / "apps" / "static"
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -46,19 +46,12 @@ async def test_static_file_served(url: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_strip_prefix_default(url: str, client: Client) -> None:
-    # Mounted at /static with the default strip_prefix, so /static/sub/nested.txt
+async def test_prefix_stripped(url: str, client: Client) -> None:
+    # Mounted at /static, so the prefix is stripped and /static/sub/nested.txt
     # resolves to <root>/sub/nested.txt.
     response = await client.get(f"{url}/static/sub/nested.txt")
     assert response.status == 200, response.text()
     assert response.text().strip() == "nested content"
-
-
-@pytest.mark.asyncio
-async def test_directory_index(url: str, client: Client) -> None:
-    response = await client.get(f"{url}/static/")
-    assert response.status == 200, response.text()
-    assert "index" in response.text()
 
 
 @pytest.mark.asyncio
@@ -75,22 +68,35 @@ async def test_app_serves_non_static(url: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_directory_deny(client: Client) -> None:
+async def test_directory_default_deny(client: Client) -> None:
+    # directory defaults to deny, so a directory request is refused while an
+    # explicit file is still served.
     async with PyvoyServer(
         [],
-        static_mounts=[StaticMount(path="/", root=STATIC_DIR, directory="deny")],
+        static_mounts=[StaticMount(path="/", root=STATIC_DIR)],
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        base = f"http://{server.listener_address}:{server.listener_port}"
+        response = await client.get(f"{base}/")
+        assert response.status in (403, 404), response.text()
+        response = await client.get(f"{base}/app.js")
+        assert response.status == 200, response.text()
+
+
+@pytest.mark.asyncio
+async def test_directory_index(client: Client) -> None:
+    async with PyvoyServer(
+        [],
+        static_mounts=[StaticMount(path="/", root=STATIC_DIR, directory="index")],
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
         response = await client.get(
             f"http://{server.listener_address}:{server.listener_port}/"
         )
-        assert response.status in (403, 404), response.text()
-        # An explicit file is still served with directory listing denied.
-        response = await client.get(
-            f"http://{server.listener_address}:{server.listener_port}/app.js"
-        )
         assert response.status == 200, response.text()
+        assert "index" in response.text()
 
 
 def test_websockets_static_only_rejected() -> None:

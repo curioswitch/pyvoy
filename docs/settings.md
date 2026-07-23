@@ -22,16 +22,16 @@ pyvoy for even further customization.
 ## Static files
 
 pyvoy can serve static files from disk alongside your application, backed by the
-[envoy-files](https://github.com/curioswitch/envoy-files) dynamic module. The common case is serving a single-page
-app bundle next to an API - the application acts as the catch-all and static mounts, at longer path prefixes, win.
+[envoy-files](https://github.com/curioswitch/envoy-files) dynamic module. This can be useful for example to serve a
+single-page app bundle along with an API in the same server. Using a static mount will be several times faster
+than serving in Python with e.g., Starlette.
 
 - `--static-mount` - Can be specified any number of times to serve a directory of static files. Takes a value in
   the format `prefix=root[=opt:val,opt:val,...]`, where `prefix` is the URL path prefix to mount at and `root` is the
-  directory to serve (`~` is expanded). By default the `prefix` is stripped before resolving files under `root`, so
+  directory to serve (`~` is expanded). The `prefix` is stripped before resolving files under `root`, so
   `--static-mount /assets=./dist` serves `./dist/app.js` at `/assets/app.js`. Supported options:
-    - `directory:index|listing|deny` - Behavior when a directory has no matching index file. **Default**: _index_.
+    - `directory:index|listing|deny` - Behavior when a directory has no matching index file. **Default**: _deny_.
     - `index:a.html;b.html` - Files (`;`-separated) attempted in order for directory requests. **Default**: _index.html_.
-    - `strip_prefix:/foo` - Override the prefix stripped before file resolution. Pass an empty value to disable.
     - `precompressed:br;gzip;zstd` - Precompressed variants (`;`-separated) served when available. **Default**: _br;gzip_.
     - `dotfiles:true|false` - Whether to serve path segments beginning with a dot. **Default**: _false_.
 

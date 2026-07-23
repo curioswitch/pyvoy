@@ -141,7 +141,7 @@ async def amain() -> None:
         help=(
             "serve a static file tree, in the form 'prefix=root[=opt:val,opt:val,...]'. "
             "Options: directory:index|listing|deny, index:a.html;b.html, "
-            "strip_prefix:/foo, precompressed:br;gzip;zstd, dotfiles:true|false. "
+            "precompressed:br;gzip;zstd, dotfiles:true|false. "
             "For cache_control and mime_overrides use PyvoyServer directly."
         ),
         type=str,
@@ -424,7 +424,7 @@ def _parse_static_mount(mount_str: str) -> StaticMount:
         )
         sys.exit(1)
     prefix = parts[0]
-    root = str(Path(parts[1]).expanduser())
+    root = Path(parts[1]).expanduser()
     kwargs: dict[str, object] = {}
     if len(parts) == 3 and parts[2]:
         for opt in parts[2].split(","):
@@ -440,8 +440,6 @@ def _parse_static_mount(mount_str: str) -> StaticMount:
                     kwargs["directory"] = value
                 case "index":
                     kwargs["index_files"] = value.split(";")
-                case "strip_prefix":
-                    kwargs["strip_prefix"] = value
                 case "precompressed":
                     variants = value.split(";")
                     for variant in variants:

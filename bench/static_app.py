@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -20,9 +20,20 @@ _STATIC_DIR = os.environ.get("BENCH_STATIC_DIR", ".")
 
 # A Starlette application that serves the benchmark files at /static, so a
 # request goes through the full Python ASGI stack per file.
-app = Starlette(
+_files = Starlette(
     routes=[Mount("/static", app=StaticFiles(directory=_STATIC_DIR), name="static")]
 )
+
+
+async def app(
+    scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    # Our benchmark is comparing pure python serving to native mounting so
+    # force-disable pathsend to always use pure python.
+    extensions = cast("dict[str, Any]", scope).get("extensions")
+    if isinstance(extensions, dict):
+        extensions.pop("http.response.pathsend", None)
+    await _files(scope, receive, send)
 
 
 async def noop(
