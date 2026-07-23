@@ -225,6 +225,8 @@ pub(crate) struct Constants {
     // Misc
     /// The string "close".
     pub close: Py<PyString>,
+    /// The string "total_seconds".
+    pub total_seconds: Py<PyString>,
     /// The string "with_traceback".
     pub with_traceback: Py<PyString>,
     /// An empty bytes object.
@@ -249,8 +251,12 @@ pub(crate) struct Constants {
     pub class_pyqwest_headers: Py<PyAny>,
     /// The class pyqwest.Response.
     pub class_pyqwest_response: Py<PyAny>,
+    /// The class pyqwest.SyncResponse.
+    pub class_pyqwest_sync_response: Py<PyAny>,
     /// The class pyqwest.ReadError.
     pub class_pyqwest_read_error: Py<PyAny>,
+    /// The class pyqwest.WriteError.
+    pub class_pyqwest_write_error: Py<PyAny>,
 
     /// The function get on the ContextVar used for transport bridging.
     pub transport_bridge_contextvar_get: Py<PyAny>,
@@ -259,8 +265,21 @@ pub(crate) struct Constants {
     /// The function reset on the ContextVar used for transport bridging.
     pub transport_bridge_contextvar_reset: Py<PyAny>,
 
+    /// The function get on the ContextVar used for WSGI transport bridging.
+    pub wsgi_transport_bridge_contextvar_get: Py<PyAny>,
+    /// The function set on the ContextVar used for WSGI transport bridging.
+    pub wsgi_transport_bridge_contextvar_set: Py<PyAny>,
+    /// The function reset on the ContextVar used for WSGI transport bridging.
+    pub wsgi_transport_bridge_contextvar_reset: Py<PyAny>,
+
     /// The function `pyvoy._glue.forward_bytes`.
     pub glue_forward_bytes: Py<PyAny>,
+    /// The function `pyvoy._glue.close_request_iterator`.
+    pub glue_close_request_iterator: Py<PyAny>,
+
+    /// The function `pyqwest._pyqwest.get_sync_timeout`, returning the per-request
+    /// timeout set by a synchronous client as a `timedelta`, or `None`.
+    pub get_sync_timeout: Py<PyAny>,
 
     /// A singleton ClientDisconnectedError exception instance.
     /// The traceback is not important since it is caused by the client,
@@ -295,9 +314,15 @@ impl Constants {
         let transport_bridge_contextvar = mod_contextvars
             .getattr("ContextVar")?
             .call1(("pyvoy.asgi.transport_bridge",))?;
+        let wsgi_transport_bridge_contextvar = mod_contextvars
+            .getattr("ContextVar")?
+            .call1(("pyvoy.wsgi.transport_bridge",))?;
 
         let mod_glue = py.import("pyvoy._glue")?;
         let glue_forward_bytes = mod_glue.getattr("forward_bytes")?;
+        let glue_close_request_iterator = mod_glue.getattr("close_request_iterator")?;
+
+        let get_sync_timeout = py.import("pyqwest._pyqwest")?.getattr("get_sync_timeout")?;
 
         Ok(Self {
             asgi: PyString::new(py, "asgi").unbind(),
@@ -403,6 +428,7 @@ impl Constants {
             wsgi_ext_http_send_trailers: PyString::new(py, "wsgi.ext.http.send_trailers").unbind(),
 
             close: PyString::new(py, "close").unbind(),
+            total_seconds: PyString::new(py, "total_seconds").unbind(),
             with_traceback: PyString::new(py, "with_traceback").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
             empty_string: PyString::new(py, "").unbind(),
@@ -416,13 +442,28 @@ impl Constants {
             url: PyString::new(py, "url").unbind(),
             class_pyqwest_headers: mod_pyqwest.getattr("Headers")?.unbind(),
             class_pyqwest_response: mod_pyqwest.getattr("Response")?.unbind(),
+            class_pyqwest_sync_response: mod_pyqwest.getattr("SyncResponse")?.unbind(),
             class_pyqwest_read_error: mod_pyqwest.getattr("ReadError")?.unbind(),
+            class_pyqwest_write_error: mod_pyqwest.getattr("WriteError")?.unbind(),
 
             glue_forward_bytes: glue_forward_bytes.unbind(),
+            glue_close_request_iterator: glue_close_request_iterator.unbind(),
+
+            get_sync_timeout: get_sync_timeout.unbind(),
 
             transport_bridge_contextvar_get: transport_bridge_contextvar.getattr("get")?.unbind(),
             transport_bridge_contextvar_set: transport_bridge_contextvar.getattr("set")?.unbind(),
             transport_bridge_contextvar_reset: transport_bridge_contextvar
+                .getattr("reset")?
+                .unbind(),
+
+            wsgi_transport_bridge_contextvar_get: wsgi_transport_bridge_contextvar
+                .getattr("get")?
+                .unbind(),
+            wsgi_transport_bridge_contextvar_set: wsgi_transport_bridge_contextvar
+                .getattr("set")?
+                .unbind(),
+            wsgi_transport_bridge_contextvar_reset: wsgi_transport_bridge_contextvar
                 .getattr("reset")?
                 .unbind(),
 

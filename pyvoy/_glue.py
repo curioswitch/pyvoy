@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import inspect
+import types
 from typing import TYPE_CHECKING
 
 from pyqwest import WriteError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+
+
+def close_request_iterator(itr: Iterator[bytes]) -> None:
+    # Used to unblock a streaming request body iterator that is still being read,
+    # for example when the request times out. Running generators cannot be closed
+    # reliably (on some Python versions it can hang), so leave them be.
+    if (
+        isinstance(itr, types.GeneratorType)
+        and inspect.getgeneratorstate(itr) == inspect.GEN_RUNNING
+    ):
+        return
+    try:
+        close = itr.close  # type: ignore[attr-defined]
+    except AttributeError:
+        pass
+    else:
+        with contextlib.suppress(Exception):
+            close()
 
 
 async def forward_bytes(

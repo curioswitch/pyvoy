@@ -16,8 +16,12 @@ from pyqwest import (
     WriteError,
 )
 
+from ._util import SyncRequestBody
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
+
+    from pyqwest import Response, SyncResponse
 
 
 def supports_trailers(http_version: HTTPVersion | None, url: str) -> bool:
@@ -135,32 +139,72 @@ async def empty_request(client: Client | SyncClient, url: str) -> None:
 
 
 async def test_bidi(
-    async_client: Client, url: str, http_version: HTTPVersion | None
+    client: Client | SyncClient, url: str, http_version: HTTPVersion | None
 ) -> None:
-    client = async_client
-    queue = asyncio.Queue()
+    headers = Headers({"content-type": "text/plain", "te": "trailers"})
+    if isinstance(client, SyncClient):
 
-    async with client.stream(
-        "POST",
-        f"{url}/echo",
-        headers=Headers({"content-type": "text/plain", "te": "trailers"}),
-        content=request_body(queue),
-    ) as resp:
-        assert resp.status == 200
-        content = resp.content
-        await queue.put(b"Hello!")
-        chunk = await anext(content)
-        assert chunk == b"Hello!"
-        await queue.put(b" World!")
-        chunk = await anext(content)
-        assert chunk == b" World!"
-        await queue.put(None)
-        chunk = await anext(content, None)
-        assert chunk is None
-        if supports_trailers(http_version, url):
-            assert resp.trailers["x-echo-trailer"] == "last info"
-        else:
-            assert len(resp.trailers) == 0
+        def run():
+            req_content = SyncRequestBody()
+            with client.stream(
+                "POST", f"{url}/echo", headers, content=req_content
+            ) as resp:
+                assert resp.status == 200
+                content = resp.content
+                req_content.put(b"Hello!")
+                assert next(content) == b"Hello!"
+                req_content.put(b" World!")
+                assert next(content) == b" World!"
+                req_content.close()
+                assert next(content, None) is None
+                _assert_bidi_trailers(resp, http_version, url)
+
+        await asyncio.to_thread(run)
+    else:
+        queue = asyncio.Queue()
+        async with client.stream(
+            "POST", f"{url}/echo", headers=headers, content=request_body(queue)
+        ) as resp:
+            assert resp.status == 200
+            content = resp.content
+            await queue.put(b"Hello!")
+            chunk = await anext(content)
+            assert chunk == b"Hello!"
+            await queue.put(b" World!")
+            chunk = await anext(content)
+            assert chunk == b" World!"
+            await queue.put(None)
+            chunk = await anext(content, None)
+            assert chunk is None
+            _assert_bidi_trailers(resp, http_version, url)
+
+
+def _assert_bidi_trailers(
+    resp: Response | SyncResponse, http_version: HTTPVersion | None, url: str
+) -> None:
+    if supports_trailers(http_version, url):
+        assert resp.trailers["x-echo-trailer"] == "last info"
+    else:
+        assert len(resp.trailers) == 0
+
+
+# The sync equivalent of close_no_read - closing the response must synchronously close
+# a still-pending request iterator to unblock its worker thread, not wait for GC.
+async def close_request_iter(sync_client: SyncClient, url: str) -> None:
+    def run():
+        req_content = SyncRequestBody()
+        with sync_client.stream(
+            "POST",
+            f"{url}/echo",
+            headers={"content-type": "text/plain"},
+            content=req_content,
+        ) as resp:
+            assert resp.status == 200
+        # The response is still referenced so this can only pass if close() closed the
+        # request iterator rather than relying on garbage collection.
+        assert req_content._closed
+
+    await asyncio.to_thread(run)
 
 
 async def large_body(

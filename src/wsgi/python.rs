@@ -10,6 +10,8 @@ use pyo3::{
 };
 
 use super::types::*;
+use crate::wsgi::pool::{BlockingPool, PoolHandle};
+use crate::wsgi::transport::{TransportBridge, TransportEvent};
 use crate::{eventbridge::EventBridge, ondrop::RunOnDrop, wsgi::response::ResponseSenderEvent};
 use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
 use std::thread::JoinHandle;
@@ -25,6 +27,7 @@ struct ExecuteAppEvent {
     request_body_rx: Receiver<RequestBody>,
     response_bridge: EventBridge<ResponseEvent>,
     response_written_rx: Receiver<()>,
+    transport_bridge: EventBridge<TransportEvent>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
@@ -33,6 +36,7 @@ struct ExecutorInner {
     app: Arc<Py<PyAny>>,
     root_path: Arc<Py<PyString>>,
     constants: Arc<Constants>,
+    pool: PoolHandle,
     rx: crossbeam_channel::Receiver<ExecuteAppEvent>,
 }
 
@@ -42,6 +46,7 @@ struct ExecutorInner {
 #[derive(Clone)]
 pub(crate) struct Executor {
     tx: Option<crossbeam_channel::Sender<ExecuteAppEvent>>,
+    pool: Arc<Mutex<BlockingPool>>,
     handles: Arc<Vec<JoinHandle<()>>>,
 }
 
@@ -60,11 +65,13 @@ impl Executor {
             Ok::<_, PyErr>((app.unbind(), root_path.unbind()))
         })?;
 
+        let pool = BlockingPool::new();
         let (tx, rx) = crossbeam_channel::unbounded::<ExecuteAppEvent>();
         let inner = ExecutorInner {
             app: Arc::new(app),
             root_path: Arc::new(root_path),
             constants,
+            pool: pool.handle(),
             rx,
         };
 
@@ -84,6 +91,7 @@ impl Executor {
                                 event.request_body_rx,
                                 response_bridge.clone(),
                                 event.response_written_rx,
+                                event.transport_bridge,
                                 scheduler.clone(),
                             ) {
                                 let tb = e
@@ -105,6 +113,7 @@ impl Executor {
 
         Ok(Self {
             tx: Some(tx),
+            pool: Arc::new(Mutex::new(pool)),
             handles: Arc::new(handles),
         })
     }
@@ -118,6 +127,7 @@ impl Executor {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
+        transport_bridge: EventBridge<TransportEvent>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         // The channel would only be closed during shutdown, when there
@@ -132,6 +142,7 @@ impl Executor {
                 request_body_rx,
                 response_bridge,
                 response_written_rx,
+                transport_bridge,
                 scheduler,
             })
             .unwrap();
@@ -139,10 +150,15 @@ impl Executor {
 
     /// Shutdown the executor, waiting for all threads to complete.
     pub fn shutdown(&mut self) {
+        // Close the app channel and join the app workers first. They are the only
+        // submitters of request-iteration work, so once they exit the pool can shut
+        // down without racing a concurrent submission, and any in-flight request still
+        // has its body iteration serviced until it completes.
         drop(self.tx.take());
         for handle in Arc::get_mut(&mut self.handles).unwrap().drain(..) {
             handle.join().unwrap();
         }
+        self.pool.lock().unwrap().shutdown();
     }
 }
 
@@ -157,6 +173,7 @@ impl ExecutorInner {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
+        transport_bridge: EventBridge<TransportEvent>,
         scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     ) -> PyResult<()> {
         let response_written_rx = SyncReceiver::new(response_written_rx);
@@ -301,6 +318,21 @@ impl ExecutorInner {
                 response_sender: response_sender.clone(),
             },
         )?;
+
+        let transport_bridge =
+            TransportBridge::new(transport_bridge, scheduler.clone(), self.pool.clone())
+                .into_py_any(py)?;
+        let token = self
+            .constants
+            .wsgi_transport_bridge_contextvar_set
+            .call1(py, (transport_bridge,))?;
+        let _reset = RunOnDrop(
+            self.constants
+                .wsgi_transport_bridge_contextvar_reset
+                .bind(py)
+                .clone(),
+            Some((token,)),
+        );
 
         let response = app.call1((
             environ,
