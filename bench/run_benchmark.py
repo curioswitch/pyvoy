@@ -456,11 +456,6 @@ def main() -> None:
         help="Run a short version of the tests",
     )
     parser.add_argument(
-        "--static",
-        action=argparse.BooleanOptionalAction,
-        help="Run the static file serving benchmark instead of the app matrix",
-    )
-    parser.add_argument(
         "--server",
         type=str,
         default=None,
