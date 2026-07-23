@@ -7,10 +7,25 @@
   "lockFileMaintenance": {
     "enabled": true
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^scripts/build\\.py$/"],
+      "matchStrings": [
+        "ENVOY_FILES_VERSION\\s*=\\s*\"(?<currentValue>v[^\"]+)\""
+      ],
+      "depNameTemplate": "curioswitch/envoy-files",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "packageRules": [
     {
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
+    },
+    {
+      "matchDepNames": ["curioswitch/envoy-files"],
+      "groupName": "envoy-files"
     },
     {
       "matchCategories": ["python"],

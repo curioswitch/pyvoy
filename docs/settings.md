@@ -19,6 +19,26 @@ pyvoy for even further customization.
   a value in the format `app=path=interface`, with the path being where the application is mounted. For more
   complicated routing, it is recommended to invoke Envoy [directly](#envoy) with a full config.
 
+## Static files
+
+pyvoy can serve static files from disk alongside your application, backed by the
+[envoy-files](https://github.com/curioswitch/envoy-files) dynamic module. This can be useful for example to serve a
+single-page app bundle along with an API in the same server. Using a static mount will be several times faster
+than serving in Python with e.g., Starlette.
+
+- `--static-mount` - Can be specified any number of times to serve a directory of static files. Takes a value in
+  the format `prefix=root[=opt:val,opt:val,...]`, where `prefix` is the URL path prefix to mount at and `root` is the
+  directory to serve (`~` is expanded). The `prefix` is stripped before resolving files under `root`, so
+  `--static-mount /assets=./dist` serves `./dist/app.js` at `/assets/app.js`. Supported options:
+    - `directory:index|listing|deny` - Behavior when a directory has no matching index file. **Default**: _deny_.
+    - `index:a.html;b.html` - Files (`;`-separated) attempted in order for directory requests. **Default**: _index.html_.
+    - `precompressed:br;gzip;zstd` - Precompressed variants (`;`-separated) served when available. **Default**: _br;gzip_.
+    - `dotfiles:true|false` - Whether to serve path segments beginning with a dot. **Default**: _false_.
+
+  For `cache_control`, `mime_overrides`, and other envoy-files knobs, use `PyvoyServer` directly with
+  [`StaticMount`](./api.md#pyvoy.StaticMount), which also exposes an `options` dictionary as an escape hatch for any
+  remaining envoy-files setting.
+
 ## Server
 
 - `--address` - The address to listen on. `--address 0.0.0.0` would listen on all addresses, which is commonly

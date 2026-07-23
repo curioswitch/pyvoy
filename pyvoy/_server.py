@@ -26,6 +26,12 @@ if TYPE_CHECKING:
 
 Interface = Literal["asgi", "wsgi"]
 
+Directory = Literal["index", "listing", "deny"]
+"""Behavior when a directory is requested but has no matching index file."""
+
+Precompressed = Literal["br", "gzip", "zstd"]
+"""A precompressed asset variant served in preference order."""
+
 LogLevel = Literal[
     "trace", "debug", "info", "warning", "warn", "error", "critical", "off"
 ]
@@ -54,6 +60,48 @@ class Mount:
 
     interface: Interface = "asgi"
     """The interface type of the application."""
+
+
+@dataclass(frozen=True, slots=True)
+class StaticMount:
+    """A mount that serves static files from the local filesystem."""
+
+    path: str
+    """The URL path prefix to mount at, for example '/assets' or '/'.
+
+    The prefix is stripped when resolving files, so '/assets/app.js' mounted at
+    '/assets' resolves to '<root>/app.js'.
+    """
+
+    root: Path
+    """The filesystem directory to serve files from."""
+
+    index_files: list[str] | None = None
+    """Files attempted in order when a directory is requested. Defaults to
+    ['index.html']."""
+
+    directory: Directory = "deny"
+    """Behavior when a directory has no matching index file. Defaults to 'deny'."""
+
+    precompressed: list[Precompressed] | None = None
+    """Precompressed variants to serve when available, in preference order.
+    Defaults to ['br', 'gzip']."""
+
+    cache_control: str | None = None
+    """The Cache-Control header value to emit for 200/206 responses."""
+
+    mime_overrides: dict[str, str] | None = None
+    """Extension-to-content-type overrides, for example {'md': 'text/markdown'}."""
+
+    serve_dotfiles: bool | None = None
+    """Whether to serve path segments beginning with a dot. Defaults to False."""
+
+    options: dict[str, Any] | None = None
+    """Additional envoy-files configuration options merged into the generated config.
+
+    An escape hatch for knobs not exposed as typed fields (for example 'etag',
+    'ranges', or 'chunk_size'). Values here take precedence over the typed fields.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +184,7 @@ class PyvoyServer:
     _additional_envoy_args: list[str] | None
     _env: dict[str, str]
     _upstreams: list[dict[str, Any] | Upstream]
+    _static_mounts: list[StaticMount]
     _websockets: bool
     _websockets_max_message_size: int | None
     _websockets_compression: bool
@@ -165,6 +214,7 @@ class PyvoyServer:
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
         upstreams: list[dict[str, Any] | Upstream] | None = None,
+        static_mounts: Iterable[StaticMount] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
     ) -> None:
@@ -198,6 +248,7 @@ class PyvoyServer:
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
             upstreams: A list of upstream clusters to add to the Envoy configuration.
+            static_mounts: Static file mounts to serve alongside the application(s).
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
         """
@@ -223,6 +274,7 @@ class PyvoyServer:
         self._additional_envoy_args = additional_envoy_args
         self._env = env if env is not None else {}
         self._upstreams = upstreams if upstreams is not None else []
+        self._static_mounts = list(static_mounts) if static_mounts is not None else []
 
         self._process = None
         self._listener_port_tls = None
@@ -406,7 +458,10 @@ class PyvoyServer:
             base_pyvoy_config["websockets_compression"] = False
         virtual_host_config = {"name": "local_service", "domains": ["*"]}
         ws_pyvoy_config: dict[str, str | int | bool] | None = None
-        if isinstance(self._app, str):
+        # A plain single app with no static mounts uses a single terminal filter with
+        # no routing. Anything else (multiple mounts, or static mounts) routes by path
+        # prefix through a composite filter.
+        if isinstance(self._app, str) and not self._static_mounts:
             pyvoy_config: dict[str, str | int | bool] = {
                 "app": self._app,
                 "interface": self._interface,
@@ -431,41 +486,41 @@ class PyvoyServer:
                 }
             ]
         else:
-            if not self._app:
-                msg = "at least one mount is required"
-                raise ValueError(msg)
-            matcher_map = {}
-            for mount in self._app:
+            matcher_map: dict[str, dict] = {}
+            if isinstance(self._app, str):
                 pyvoy_config = {
-                    "app": mount.app,
-                    "interface": mount.interface,
-                    "root_path": mount.path,
+                    "app": self._app,
+                    "interface": self._interface,
+                    "root_path": self._root_path,
                     **base_pyvoy_config,
                 }
-                # We always use the first app to serve websockets, for CLI usage the main app.
-                if ws_pyvoy_config is None:
-                    ws_pyvoy_config = pyvoy_config
-                matcher_map[mount.path] = {
-                    "action": {
-                        "name": "composite_action",
-                        "typed_config": {
-                            "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
-                            "typed_config": {
-                                "name": "pyvoy",
-                                "typed_config": {
-                                    "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
-                                    "dynamic_module_config": {"name": "pyvoy"},
-                                    "filter_name": "pyvoy",
-                                    "terminal_filter": True,
-                                    "filter_config": {
-                                        "@type": "type.googleapis.com/google.protobuf.StringValue",
-                                        "value": json.dumps(pyvoy_config),
-                                    },
-                                },
-                            },
-                        },
+                ws_pyvoy_config = pyvoy_config
+                # The single app is the catch-all. Envoy's prefix_match_map does
+                # longest-prefix matching, so static mounts at longer prefixes win.
+                matcher_map[self._root_path or "/"] = _dynamic_module_action(
+                    "pyvoy", pyvoy_config
+                )
+            else:
+                for mount in self._app:
+                    pyvoy_config = {
+                        "app": mount.app,
+                        "interface": mount.interface,
+                        "root_path": mount.path,
+                        **base_pyvoy_config,
                     }
-                }
+                    # We always use the first app to serve websockets, for CLI usage the main app.
+                    if ws_pyvoy_config is None:
+                        ws_pyvoy_config = pyvoy_config
+                    matcher_map[mount.path] = _dynamic_module_action(
+                        "pyvoy", pyvoy_config
+                    )
+            for static_mount in self._static_mounts:
+                matcher_map[static_mount.path] = _dynamic_module_action(
+                    "envoy_files", self._static_mount_config(static_mount)
+                )
+            if not matcher_map:
+                msg = "at least one mount is required"
+                raise ValueError(msg)
             http_filters = [
                 {
                     "name": "envoy.filters.http.composite",
@@ -522,7 +577,9 @@ class PyvoyServer:
             http_config["http3_protocol_options"] = {}
         network_filters: list[dict] = []
         if self._websockets:
-            assert ws_pyvoy_config is not None  # noqa: S101
+            if ws_pyvoy_config is None:
+                msg = "websockets require an application mount, not only static mounts"
+                raise ValueError(msg)
             network_filters.append(
                 {
                     "name": "pyvoy-ws",
@@ -750,6 +807,53 @@ class PyvoyServer:
             },
             "static_resources": static_resources,
         }
+
+    def _static_mount_config(self, mount: StaticMount) -> dict[str, Any]:
+        config: dict[str, Any] = {
+            "root": str(mount.root.expanduser().resolve()),
+            "directory": mount.directory,
+        }
+        # The mount prefix is always stripped before resolving files under root.
+        if mount.path != "/":
+            config["strip_prefix"] = mount.path
+        if mount.index_files is not None:
+            config["index_files"] = mount.index_files
+        if mount.precompressed is not None:
+            config["precompressed"] = mount.precompressed
+        if mount.cache_control is not None:
+            config["cache_control"] = mount.cache_control
+        if mount.mime_overrides is not None:
+            config["mime_overrides"] = mount.mime_overrides
+        if mount.serve_dotfiles is not None:
+            config["serve_dotfiles"] = mount.serve_dotfiles
+        if mount.options:
+            config.update(mount.options)
+        return config
+
+
+def _dynamic_module_action(name: str, config: dict) -> dict:
+    """Builds a composite ExecuteFilterAction wrapping a terminal dynamic-module filter."""
+    return {
+        "action": {
+            "name": "composite_action",
+            "typed_config": {
+                "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
+                "typed_config": {
+                    "name": name,
+                    "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
+                        "dynamic_module_config": {"name": name},
+                        "filter_name": name,
+                        "terminal_filter": True,
+                        "filter_config": {
+                            "@type": "type.googleapis.com/google.protobuf.StringValue",
+                            "value": json.dumps(config),
+                        },
+                    },
+                },
+            },
+        }
+    }
 
 
 def _to_datasource(value: bytes | os.PathLike) -> dict:

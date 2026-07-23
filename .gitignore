@@ -10,6 +10,8 @@ __pycache__
 
 pyvoy/_bin/envoy
 pyvoy/_bin/libpyvoy.so
+pyvoy/_bin/libenvoy_files.so
+pyvoy/_bin/envoy_files.dll
 
 *.profraw
 *.profdata
