@@ -13,11 +13,14 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
+    Directory,
     Interface,
     LogLevel,
     Mount,
+    Precompressed,
     PyvoyServer,
     StartupError,
+    StaticMount,
     TLSConfig,
     Upstream,
     get_envoy_environ,
@@ -40,6 +43,7 @@ class CLIArgs:
     interface: Interface
     root_path: str
     additional_mount: list[str]
+    static_mount: list[str]
     upstream: list[str]
     log_level: LogLevel
     worker_threads: int
@@ -127,6 +131,19 @@ async def amain() -> None:
     parser.add_argument(
         "--additional-mount",
         help="additional application mounts in the form 'app=path=interface'",
+        type=str,
+        nargs="+",
+        default=[],
+    )
+
+    parser.add_argument(
+        "--static-mount",
+        help=(
+            "serve a static file tree, in the form 'prefix=root[=opt:val,opt:val,...]'. "
+            "Options: directory:index|listing|deny, index:a.html;b.html, "
+            "strip_prefix:/foo, precompressed:br;gzip;zstd, dotfiles:true|false. "
+            "For cache_control and mime_overrides use PyvoyServer directly."
+        ),
         type=str,
         nargs="+",
         default=[],
@@ -296,6 +313,8 @@ async def amain() -> None:
             sys.exit(1)
         upstreams.append(Upstream(name=name, address=address, tls=tls_config))
 
+    static_mounts = [_parse_static_mount(mount_str) for mount_str in args.static_mount]
+
     server = PyvoyServer(
         app,
         address=args.address,
@@ -318,6 +337,7 @@ async def amain() -> None:
         websockets_compression=args.websockets_compression,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,
+        static_mounts=static_mounts,
     )
 
     if args.print_envoy_config:
@@ -393,6 +413,54 @@ async def _run_server(server: PyvoyServer, *, handle_sigterm: bool = True) -> No
         print(  # noqa: T201
             "Failed to start Envoy server, see logs for details.", file=sys.stderr
         )
+
+
+def _parse_static_mount(mount_str: str) -> StaticMount:
+    parts = mount_str.split("=", 2)
+    if len(parts) < 2:
+        print(  # noqa: T201
+            f"Invalid static mount format: {mount_str}, expected 'prefix=root[=opt:val,...]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    prefix = parts[0]
+    root = str(Path(parts[1]).expanduser())
+    kwargs: dict[str, object] = {}
+    if len(parts) == 3 and parts[2]:
+        for opt in parts[2].split(","):
+            key, _, value = opt.partition(":")
+            match key:
+                case "directory":
+                    if value not in get_args(Directory):
+                        print(  # noqa: T201
+                            f"Invalid directory '{value}' in '{mount_str}', expected one of {', '.join(get_args(Directory))}",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+                    kwargs["directory"] = value
+                case "index":
+                    kwargs["index_files"] = value.split(";")
+                case "strip_prefix":
+                    kwargs["strip_prefix"] = value
+                case "precompressed":
+                    variants = value.split(";")
+                    for variant in variants:
+                        if variant not in get_args(Precompressed):
+                            print(  # noqa: T201
+                                f"Invalid precompressed '{variant}' in '{mount_str}', expected one of {', '.join(get_args(Precompressed))}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(1)
+                    kwargs["precompressed"] = variants
+                case "dotfiles":
+                    kwargs["serve_dotfiles"] = value.lower() == "true"
+                case _:
+                    print(  # noqa: T201
+                        f"Unknown static mount option '{key}' in '{mount_str}'",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+    return StaticMount(path=prefix, root=root, **kwargs)  # pyright: ignore[reportArgumentType]
 
 
 def _cert_path_or_content(path_or_content: str | None) -> Path | bytes | None:

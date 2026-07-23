@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import ssl
 import subprocess
 import sys
@@ -327,12 +328,143 @@ def tls_modes(tls_arg: bool | None) -> tuple[bool, ...]:  # noqa: FBT001
     return (False, True)
 
 
+# Two representative static file sizes: a couple hundred KiB and about a MiB.
+STATIC_FILES = {"small": 256 * 1024, "large": 1024 * 1024}
+
+
+@dataclass
+class StaticConfig:
+    name: str
+    args: list[str]
+
+
+def static_configs(static_dir: Path) -> tuple[StaticConfig, ...]:
+    """The four static file serving configurations to compare.
+
+    Each serves the files at /static/<name>.bin so the load is identical; the
+    "static" variants let the server serve files natively while the "starlette"
+    variants route each request through a Python ASGI app.
+    """
+    static_app = "bench.static_app:app"
+    noop_app = "bench.static_app:noop"
+    return (
+        StaticConfig(
+            "pyvoy-static",
+            ["pyvoy", noop_app, "--static-mount", f"/static={static_dir}"],
+        ),
+        StaticConfig("pyvoy-starlette", ["pyvoy", "--interface", "asgi", static_app]),
+        StaticConfig(
+            "granian-static",
+            [
+                "granian",
+                "--interface",
+                "asgi",
+                "--static-path-mount",
+                str(static_dir),
+                noop_app,
+            ],
+        ),
+        StaticConfig(
+            "granian-starlette", ["granian", "--interface", "asgi", static_app]
+        ),
+    )
+
+
+def run_static_benchmark() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        static_dir = Path(tmp)
+        for name, size in STATIC_FILES.items():
+            (static_dir / f"{name}.bin").write_bytes(os.urandom(size))
+        env = {**os.environ, "BENCH_STATIC_DIR": str(static_dir)}
+        base_url = "http://127.0.0.1:8000/static"
+
+        for config in static_configs(static_dir):
+            with subprocess.Popen(  # noqa: S603
+                config.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+            ) as server:
+                started = False
+                for _ in range(100):
+                    try:
+                        with urllib.request.urlopen(  # noqa: S310
+                            f"{base_url}/small.bin"
+                        ) as resp:
+                            if resp.status == 200:
+                                started = True
+                                break
+                    except Exception:  # noqa: S110
+                        pass
+                    time.sleep(0.1)
+                if server.returncode is not None or not started:
+                    server.terminate()
+                    stdout, stderr = server.communicate()
+                    msg = f"Server {config.name} failed to start\n{stderr.decode()}\n{stdout.decode()}"
+                    raise RuntimeError(msg)
+
+                # Measure the worker process (envoy for pyvoy, the worker for granian).
+                pid = server.pid
+                children = psutil.Process(server.pid).children()
+                if children:
+                    pid = children[-1].pid
+                monitor = ResourceMonitor(pid)
+                monitor.start()
+
+                for name, size in STATIC_FILES.items():
+                    print(  # noqa: T201
+                        f"Running static benchmark for {config.name} file={name} ({size} bytes)\n",
+                        flush=True,
+                    )
+                    oha_args = [
+                        "oha",
+                        "-z",
+                        "5s",
+                        "-c",
+                        "50",
+                        "--no-tui",
+                        "--output-format",
+                        "json",
+                        "--http-version",
+                        "1.1",
+                        "-m",
+                        "GET",
+                        f"{base_url}/{name}.bin",
+                    ]
+                    monitor.clear()
+                    oha_run = subprocess.run(  # noqa: S603
+                        oha_args, check=True, capture_output=True, text=True
+                    )
+                    resource = monitor.aggregate()
+                    oha_json = json.loads(oha_run.stdout)
+                    _print_oha_report(oha_json)
+
+                    rps = oha_json.get("summary", {}).get("requestsPerSec")
+                    if isinstance(rps, (int, float)):
+                        print(  # noqa: T201
+                            f"\nThroughput\t\t{rps * size / (1024 * 1024):.2f} MiB/s"
+                        )
+                    print(  # noqa: T201
+                        f"CPU Percentage\t[Min, Max, Avg]\t\t{resource.min.cpu_percent:.2f}, {resource.max.cpu_percent:.2f}, {resource.avg.cpu_percent:.2f}%"
+                    )
+                    print(  # noqa: T201
+                        f"Memory RSS\t[Min, Max, Avg]\t\t{resource.min.rss}, {resource.max.rss}, {resource.avg.rss}\n"
+                    )
+                    print("\n", flush=True)  # noqa: T201
+
+                monitor.stop()
+                server.terminate()
+                server.communicate()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Conformance server")
     parser.add_argument(
         "--short",
         action=argparse.BooleanOptionalAction,
         help="Run a short version of the tests",
+    )
+    parser.add_argument(
+        "--static",
+        action=argparse.BooleanOptionalAction,
+        help="Run the static file serving benchmark instead of the app matrix",
     )
     parser.add_argument(
         "--server",
@@ -549,6 +681,9 @@ def main() -> None:
         _charts.generate_charts(benchmark_results)
     if tls_dir is not None:
         tls_dir.cleanup()
+
+    if not args.short:
+        run_static_benchmark()
 
 
 if __name__ == "__main__":

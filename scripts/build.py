@@ -1,14 +1,93 @@
 from __future__ import annotations
 
+import hashlib
+import platform
 import subprocess
 import sys
 from pathlib import Path
 from shutil import copyfileobj, rmtree
 
+from pyqwest import SyncClient
+
 bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
+
+# The envoy-files dynamic module used to serve static mounts. Bump when a new
+# release is available; renovate can track this like the Envoy version.
+ENVOY_FILES_VERSION = "v0.1.1"
+
+
+def envoy_files_asset() -> str:
+    """Returns the envoy-files release asset name for the current platform."""
+    match sys.platform:
+        case "darwin":
+            return "libenvoy_files-macos-aarch64.dylib"
+        case "win32":
+            return "envoy_files-windows-x86_64.dll"
+        case "linux":
+            match platform.machine().lower():
+                case "x86_64" | "amd64":
+                    return "libenvoy_files-linux-x86_64.so"
+                case "aarch64" | "arm64":
+                    return "libenvoy_files-linux-aarch64.so"
+                case _:
+                    msg = f"Unsupported architecture: {platform.machine()}"
+                    raise RuntimeError(msg)
+        case _:
+            msg = f"Unsupported platform: {sys.platform}"
+            raise RuntimeError(msg)
+
+
+def download_envoy_files() -> None:
+    """Downloads the envoy-files dynamic module into _bin.
+
+    Envoy resolves dynamic modules by the filename lib<name>.so on POSIX (including
+    macOS, matching how we rename libpyvoy) and <name>.dll on Windows, so we always
+    install as libenvoy_files.so / envoy_files.dll regardless of the asset name.
+    """
+    if sys.platform == "win32":
+        dest = bin_dir / "envoy_files.dll"
+    else:
+        dest = bin_dir / "libenvoy_files.so"
+
+    asset = envoy_files_asset()
+    base_url = (
+        "https://github.com/curioswitch/envoy-files/releases/download/"
+        f"{ENVOY_FILES_VERSION}/{asset}"
+    )
+
+    client = SyncClient()
+    expected_sha = _get(client, f"{base_url}.sha256").split()[0].lower()
+
+    if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() == expected_sha:
+        print(f"envoy-files {ENVOY_FILES_VERSION} already downloaded.")  # noqa: T201
+        return
+
+    print(f"Downloading envoy-files {ENVOY_FILES_VERSION}...")  # noqa: T201
+    response = SyncClient().get(base_url)
+    if response.status != 200:
+        msg = f"Failed to download {base_url}: {response.status} {response.text()}"
+        raise RuntimeError(msg)
+    content = response.content
+    actual_sha = hashlib.sha256(content).hexdigest()
+    if actual_sha != expected_sha:
+        msg = (
+            f"Checksum mismatch for {asset}: expected {expected_sha}, got {actual_sha}"
+        )
+        raise RuntimeError(msg)
+    dest.write_bytes(content)
+
+
+def _get(client: SyncClient, url: str) -> str:
+    response = client.get(url)
+    if response.status != 200:
+        msg = f"Failed to download {url}: {response.status} {response.text()}"
+        raise RuntimeError(msg)
+    return response.text()
 
 
 def main() -> None:
+    download_envoy_files()
+
     print("Building libpyvoy...")  # noqa: T201
     if sys.platform == "win32":
         pyvoy_path = bin_dir / "pyvoy.dll"

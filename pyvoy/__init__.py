@@ -1,5 +1,25 @@
 from __future__ import annotations
 
-__all__ = ["HTTPVersion", "Interface", "Mount", "PyvoyServer", "TLSConfig", "Upstream"]
+__all__ = [
+    "Directory",
+    "HTTPVersion",
+    "Interface",
+    "Mount",
+    "Precompressed",
+    "PyvoyServer",
+    "StaticMount",
+    "TLSConfig",
+    "Upstream",
+]
 
-from ._server import HTTPVersion, Interface, Mount, PyvoyServer, TLSConfig, Upstream
+from ._server import (
+    Directory,
+    HTTPVersion,
+    Interface,
+    Mount,
+    Precompressed,
+    PyvoyServer,
+    StaticMount,
+    TLSConfig,
+    Upstream,
+)
