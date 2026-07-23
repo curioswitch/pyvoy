@@ -188,6 +188,25 @@ def _assert_bidi_trailers(
         assert len(resp.trailers) == 0
 
 
+# The sync equivalent of close_no_read - closing the response must synchronously close
+# a still-pending request iterator to unblock its worker thread, not wait for GC.
+async def close_request_iter(sync_client: SyncClient, url: str) -> None:
+    def run():
+        req_content = SyncRequestBody()
+        with sync_client.stream(
+            "POST",
+            f"{url}/echo",
+            headers={"content-type": "text/plain"},
+            content=req_content,
+        ) as resp:
+            assert resp.status == 200
+        # The response is still referenced so this can only pass if close() closed the
+        # request iterator rather than relying on garbage collection.
+        assert req_content._closed
+
+    await asyncio.to_thread(run)
+
+
 async def large_body(
     client: Client | SyncClient, url: str, http_version: HTTPVersion | None
 ) -> None:

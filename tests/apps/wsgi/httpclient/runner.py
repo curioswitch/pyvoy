@@ -85,6 +85,8 @@ def app(
                 asyncio.run(client.json_content(http_client, url, extra))
             case "client_json_content_existing_content_type":
                 asyncio.run(client.json_content_existing_content_type(http_client, url))
+            case "client_close_request_iter":
+                asyncio.run(client.close_request_iter(http_client, url))
             case "client_request_content_error":
                 asyncio.run(client.request_content_error(http_client, url))
             case "client_response_error":

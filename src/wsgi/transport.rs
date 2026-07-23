@@ -1,7 +1,7 @@
 use std::{
     str::FromStr,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{RecvTimeoutError, Sender},
     },
@@ -17,6 +17,7 @@ use pyo3::{
         PyConnectionError, PyRuntimeError, PyStopIteration, PyTimeoutError, PyValueError,
     },
     pyclass, pymethods,
+    sync::MutexExt as _,
     types::{
         PyAnyMethods as _, PyBytes, PyDict, PyModule, PyModuleMethods as _, PyString,
         PyStringMethods as _,
@@ -316,6 +317,8 @@ impl HTTPTransport {
                 return Err(self.reset_error(py, reason, exception)?);
             }
             Received::TimedOut => {
+                // Without a handle there is no stream to reset; if one was started, Envoy's
+                // stream timeout, set to this same timeout, releases it.
                 return Err(PyTimeoutError::new_err("request timed out"));
             }
             _ => return Err(PyRuntimeError::new_err("transport closed")),
@@ -373,7 +376,9 @@ impl HTTPTransport {
         if timeout.is_none() {
             return Ok(None);
         }
-        let secs: f64 = timeout.call_method0("total_seconds")?.extract()?;
+        let secs: f64 = timeout
+            .call_method0(&self.constants.total_seconds)?
+            .extract()?;
         Ok(Some(if secs > 0.0 {
             Duration::from_secs_f64(secs)
         } else {
@@ -427,7 +432,7 @@ impl HTTPTransport {
                 scheduler: transport_bridge.scheduler.clone(),
                 trailers: trailers.clone().unbind(),
                 deadline,
-                request_iter: request_iter.take(),
+                request_iter: Mutex::new(request_iter.take()),
                 ended: AtomicBool::new(false),
                 constants: self.constants.clone(),
             };
@@ -452,8 +457,8 @@ struct ResponseContent {
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     trailers: Py<PyAny>,
     deadline: Option<Instant>,
-    // The streaming request body iterator, closed when this response is destroyed.
-    request_iter: Option<Py<PyAny>>,
+    // The streaming request body iterator, closed when this response is closed.
+    request_iter: Mutex<Option<Py<PyAny>>>,
     ended: AtomicBool,
     constants: Arc<Constants>,
 }
@@ -497,7 +502,7 @@ impl ResponseContent {
                 }
                 Received::Value(_) => continue,
                 Received::TimedOut => {
-                    self.reset();
+                    self.close(py);
                     return Err(PyTimeoutError::new_err("response read timed out"));
                 }
                 Received::Closed => {
@@ -508,16 +513,19 @@ impl ResponseContent {
         }
     }
 
-    /// Called by pyqwest when the response is closed. The request iterator is closed when
-    /// this object is dropped; here we release the upstream stream if it has not finished.
-    fn close(&self) {
+    /// Called by pyqwest when the response is closed. If the stream has not already finished,
+    /// the response was closed before being fully consumed so we reset the upstream stream to
+    /// release it rather than leaving it open and buffering data until the timeout, and close
+    /// the request iterator to unblock the iteration pool worker if it is still reading.
+    fn close(&self, py: Python<'_>) {
         self.reset();
+        let iter = self.request_iter.lock_py_attached(py).unwrap().take();
+        close_request_iter(py, &self.constants, iter);
     }
 }
 
 impl ResponseContent {
-    /// Resets the upstream stream if it has not already finished, releasing it rather than
-    /// leaving it open and buffering data until the timeout.
+    /// Resets the upstream stream if it has not already finished.
     fn reset(&self) {
         if !self.ended.swap(true, Ordering::Relaxed) {
             reset_stream(&self.bridge, &self.scheduler, self.stream_handle);
@@ -527,13 +535,11 @@ impl ResponseContent {
 
 impl Drop for ResponseContent {
     fn drop(&mut self) {
-        // Releases the upstream stream if the response was abandoned, and closes the
-        // request iterator to unblock the iteration pool worker if it is still reading.
-        // This runs however the response is destroyed, including client close and GC.
+        // Backstop for a response destroyed without being closed or fully consumed, e.g.
+        // garbage collected after an error. close() handles the deterministic paths.
         self.reset();
-        if self.request_iter.is_some() {
-            let iter = self.request_iter.take();
-            Python::attach(|py| close_request_iter(py, &self.constants, iter));
+        if let Some(iter) = self.request_iter.get_mut().unwrap().take() {
+            Python::attach(|py| close_request_iter(py, &self.constants, Some(iter)));
         }
     }
 }

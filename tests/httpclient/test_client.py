@@ -186,6 +186,16 @@ async def test_close_pending_read(
     )
 
 
+# The sync equivalent of close_no_read, so only exercised against WSGI.
+@pytest.mark.asyncio
+async def test_close_request_iter(
+    url_wsgi: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test(
+        "client_close_request_iter", url_wsgi, client, http_scheme, http_version
+    )
+
+
 @pytest.mark.asyncio
 async def test_request_content_error(
     url: str, client: Client, http_scheme: str, http_version: str

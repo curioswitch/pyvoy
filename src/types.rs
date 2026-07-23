@@ -225,6 +225,8 @@ pub(crate) struct Constants {
     // Misc
     /// The string "close".
     pub close: Py<PyString>,
+    /// The string "total_seconds".
+    pub total_seconds: Py<PyString>,
     /// The string "with_traceback".
     pub with_traceback: Py<PyString>,
     /// An empty bytes object.
@@ -426,6 +428,7 @@ impl Constants {
             wsgi_ext_http_send_trailers: PyString::new(py, "wsgi.ext.http.send_trailers").unbind(),
 
             close: PyString::new(py, "close").unbind(),
+            total_seconds: PyString::new(py, "total_seconds").unbind(),
             with_traceback: PyString::new(py, "with_traceback").unbind(),
             empty_bytes: PyBytes::new(py, b"").unbind(),
             empty_string: PyString::new(py, "").unbind(),

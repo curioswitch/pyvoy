@@ -150,13 +150,15 @@ impl Executor {
 
     /// Shutdown the executor, waiting for all threads to complete.
     pub fn shutdown(&mut self) {
-        // Stop the request-iteration pool first so no further work is submitted, then
-        // close the app channel so the workers exit once idle.
-        self.pool.lock().unwrap().shutdown();
+        // Close the app channel and join the app workers first. They are the only
+        // submitters of request-iteration work, so once they exit the pool can shut
+        // down without racing a concurrent submission, and any in-flight request still
+        // has its body iteration serviced until it completes.
         drop(self.tx.take());
         for handle in Arc::get_mut(&mut self.handles).unwrap().drain(..) {
             handle.join().unwrap();
         }
+        self.pool.lock().unwrap().shutdown();
     }
 }
 

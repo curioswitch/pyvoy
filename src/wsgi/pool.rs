@@ -100,7 +100,26 @@ impl PoolHandle {
     }
 }
 
+/// Decrements the worker count when the worker exits. A drop guard so a panicking job
+/// cannot skip the decrement, which would hang [`BlockingPool::shutdown`] forever.
+struct WorkerCountGuard {
+    inner: Arc<Inner>,
+}
+
+impl Drop for WorkerCountGuard {
+    fn drop(&mut self) {
+        let mut workers = self.inner.workers.lock().unwrap();
+        *workers -= 1;
+        if *workers == 0 {
+            self.inner.idle.notify_all();
+        }
+    }
+}
+
 fn run_worker(inner: Arc<Inner>, initial: Job) {
+    let _guard = WorkerCountGuard {
+        inner: inner.clone(),
+    };
     initial();
     loop {
         select! {
@@ -111,10 +130,5 @@ fn run_worker(inner: Arc<Inner>, initial: Job) {
             recv(inner.shutdown_rx) -> _ => break,
             default(KEEP_ALIVE) => break,
         }
-    }
-    let mut workers = inner.workers.lock().unwrap();
-    *workers -= 1;
-    if *workers == 0 {
-        inner.idle.notify_all();
     }
 }
