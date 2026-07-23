@@ -272,6 +272,12 @@ pub(crate) struct Constants {
 
     /// The function `pyvoy._glue.forward_bytes`.
     pub glue_forward_bytes: Py<PyAny>,
+    /// The function `pyvoy._glue.close_request_iterator`.
+    pub glue_close_request_iterator: Py<PyAny>,
+
+    /// The function `pyqwest._pyqwest.get_sync_timeout`, returning the per-request
+    /// timeout set by a synchronous client as a `timedelta`, or `None`.
+    pub get_sync_timeout: Py<PyAny>,
 
     /// A singleton ClientDisconnectedError exception instance.
     /// The traceback is not important since it is caused by the client,
@@ -312,6 +318,9 @@ impl Constants {
 
         let mod_glue = py.import("pyvoy._glue")?;
         let glue_forward_bytes = mod_glue.getattr("forward_bytes")?;
+        let glue_close_request_iterator = mod_glue.getattr("close_request_iterator")?;
+
+        let get_sync_timeout = py.import("pyqwest._pyqwest")?.getattr("get_sync_timeout")?;
 
         Ok(Self {
             asgi: PyString::new(py, "asgi").unbind(),
@@ -435,6 +444,9 @@ impl Constants {
             class_pyqwest_write_error: mod_pyqwest.getattr("WriteError")?.unbind(),
 
             glue_forward_bytes: glue_forward_bytes.unbind(),
+            glue_close_request_iterator: glue_close_request_iterator.unbind(),
+
+            get_sync_timeout: get_sync_timeout.unbind(),
 
             transport_bridge_contextvar_get: transport_bridge_contextvar.getattr("get")?.unbind(),
             transport_bridge_contextvar_set: transport_bridge_contextvar.getattr("set")?.unbind(),

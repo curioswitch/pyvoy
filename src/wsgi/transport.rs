@@ -3,8 +3,9 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
+        mpsc::{RecvTimeoutError, Sender},
     },
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
@@ -12,7 +13,9 @@ use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     Bound, IntoPyObjectExt, Py, PyAny, PyErr, PyResult, Python,
-    exceptions::{PyConnectionError, PyRuntimeError, PyStopIteration, PyValueError},
+    exceptions::{
+        PyConnectionError, PyRuntimeError, PyStopIteration, PyTimeoutError, PyValueError,
+    },
     pyclass, pymethods,
     types::{
         PyAnyMethods as _, PyBytes, PyDict, PyModule, PyModuleMethods as _, PyString,
@@ -90,8 +93,7 @@ pub(crate) struct TransportState {
 }
 
 /// Iterates a streaming request body on a pool thread, sending each chunk to the
-/// upstream stream. Running off the thread that called the client allows the response
-/// to be read while the request is written, supporting bidirectional streaming.
+/// upstream stream.
 struct ForwardRequest {
     request_iter: Py<PyAny>,
     stream_handle: u64,
@@ -274,6 +276,21 @@ impl HTTPTransport {
         let request_body = request.getattr(&self.constants.content)?;
         let buffered_body = request_body.extract::<Bytes>().ok();
         let streaming = buffered_body.is_none();
+        // A per-request timeout set by the synchronous client takes precedence over the
+        // transport's default. We enforce it ourselves for the right error type, and also
+        // pass it to Envoy so the upstream stream is released.
+        let timeout = self.sync_timeout(py)?;
+        let deadline = timeout.map(|d| Instant::now() + d);
+        let timeout_ms = timeout
+            .map(|d| (d.as_millis() as u64).max(1))
+            .unwrap_or(self.timeout_ms);
+        // Owns the request iterator and closes it whenever this closer is dropped, which
+        // guarantees the iteration pool worker is unblocked however the request ends.
+        // Moves into the response below on success, otherwise drops on the paths here.
+        let request_iter = RequestIterCloser {
+            iter: streaming.then(|| request_body.clone().unbind()),
+            constants: self.constants.clone(),
+        };
 
         let (response_tx, response_rx) = std::sync::mpsc::channel::<TransportResponse>();
         if transport_bridge
@@ -284,7 +301,7 @@ impl HTTPTransport {
                 headers,
                 buffered_body,
                 cluster_name: self.cluster_name.clone(),
-                timeout_ms: self.timeout_ms,
+                timeout_ms,
                 response_tx,
             }))
             .is_ok()
@@ -293,17 +310,20 @@ impl HTTPTransport {
         }
         let response_rx = SyncReceiver::new(response_rx);
 
-        let stream_handle = match py.detach(|| response_rx.recv()) {
-            Ok(TransportResponse::Started(handle)) => handle,
-            Ok(TransportResponse::Reset { reason, exception }) => {
+        let stream_handle = match recv_deadline(py, &response_rx, deadline) {
+            Received::Value(TransportResponse::Started(handle)) => handle,
+            Received::Value(TransportResponse::Reset { reason, exception }) => {
                 return Err(self.reset_error(py, reason, exception)?);
+            }
+            Received::TimedOut => {
+                return Err(PyTimeoutError::new_err("request timed out"));
             }
             _ => return Err(PyRuntimeError::new_err("transport closed")),
         };
 
-        if streaming {
+        if let Some(request_iter) = &request_iter.iter {
             let forward = ForwardRequest {
-                request_iter: request_body.clone().unbind(),
+                request_iter: request_iter.clone_ref(py),
                 stream_handle,
                 bridge: transport_bridge.bridge.clone(),
                 scheduler: transport_bridge.scheduler.clone(),
@@ -314,8 +334,8 @@ impl HTTPTransport {
                 .execute(move || Python::attach(|py| forward.run(py)));
         }
 
-        match py.detach(|| response_rx.recv()) {
-            Ok(TransportResponse::Headers {
+        match recv_deadline(py, &response_rx, deadline) {
+            Received::Value(TransportResponse::Headers {
                 status,
                 headers,
                 end_stream,
@@ -326,10 +346,20 @@ impl HTTPTransport {
                 end_stream,
                 response_rx,
                 stream_handle,
+                deadline,
+                request_iter,
                 transport_bridge,
             ),
-            Ok(TransportResponse::Reset { reason, exception }) => {
+            Received::Value(TransportResponse::Reset { reason, exception }) => {
                 Err(self.reset_error(py, reason, exception)?)
+            }
+            Received::TimedOut => {
+                reset_stream(
+                    &transport_bridge.bridge,
+                    &transport_bridge.scheduler,
+                    stream_handle,
+                );
+                Err(PyTimeoutError::new_err("request timed out"))
             }
             _ => Err(PyRuntimeError::new_err("transport closed")),
         }
@@ -337,6 +367,20 @@ impl HTTPTransport {
 }
 
 impl HTTPTransport {
+    /// Reads the per-request timeout set by the synchronous client, if any.
+    fn sync_timeout(&self, py: Python<'_>) -> PyResult<Option<Duration>> {
+        let timeout = self.constants.get_sync_timeout.bind(py).call0()?;
+        if timeout.is_none() {
+            return Ok(None);
+        }
+        let secs: f64 = timeout.call_method0("total_seconds")?.extract()?;
+        Ok(Some(if secs > 0.0 {
+            Duration::from_secs_f64(secs)
+        } else {
+            Duration::ZERO
+        }))
+    }
+
     fn reset_error(
         &self,
         py: Python<'_>,
@@ -358,6 +402,8 @@ impl HTTPTransport {
         end_stream: bool,
         response_rx: SyncReceiver<TransportResponse>,
         stream_handle: u64,
+        deadline: Option<Instant>,
+        request_iter: RequestIterCloser,
         transport_bridge: &TransportBridge,
     ) -> PyResult<Bound<'py, PyAny>> {
         let kwargs = PyDict::new(py);
@@ -380,6 +426,8 @@ impl HTTPTransport {
                 bridge: transport_bridge.bridge.clone(),
                 scheduler: transport_bridge.scheduler.clone(),
                 trailers: trailers.clone().unbind(),
+                deadline,
+                request_iter: request_iter.take(),
                 ended: AtomicBool::new(false),
                 constants: self.constants.clone(),
             };
@@ -403,6 +451,9 @@ struct ResponseContent {
     bridge: EventBridge<TransportEvent>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     trailers: Py<PyAny>,
+    deadline: Option<Instant>,
+    // The streaming request body iterator, closed when this response is destroyed.
+    request_iter: Option<Py<PyAny>>,
     ended: AtomicBool,
     constants: Arc<Constants>,
 }
@@ -418,11 +469,11 @@ impl ResponseContent {
             return Err(PyStopIteration::new_err(()));
         }
         loop {
-            match py.detach(|| self.rx.recv()) {
-                Ok(TransportResponse::Body(chunk)) => {
+            match recv_deadline(py, &self.rx, self.deadline) {
+                Received::Value(TransportResponse::Body(chunk)) => {
                     return Ok(PyBytes::new(py, &chunk));
                 }
-                Ok(TransportResponse::Trailers(trailers)) => {
+                Received::Value(TransportResponse::Trailers(trailers)) => {
                     let py_trailers = self.trailers.bind(py);
                     for (name, value) in &trailers {
                         py_trailers.call_method1(
@@ -433,19 +484,23 @@ impl ResponseContent {
                     self.ended.store(true, Ordering::Relaxed);
                     return Err(PyStopIteration::new_err(()));
                 }
-                Ok(TransportResponse::End) => {
+                Received::Value(TransportResponse::End) => {
                     self.ended.store(true, Ordering::Relaxed);
                     return Err(PyStopIteration::new_err(()));
                 }
-                Ok(TransportResponse::Reset { reason, exception }) => {
+                Received::Value(TransportResponse::Reset { reason, exception }) => {
                     self.ended.store(true, Ordering::Relaxed);
                     return Err(match exception {
                         Some(exception) => PyErr::from_value(exception.bind(py).clone()),
                         None => map_reset_reason(py, reason, &self.constants)?,
                     });
                 }
-                Ok(_) => continue,
-                Err(_) => {
+                Received::Value(_) => continue,
+                Received::TimedOut => {
+                    self.reset();
+                    return Err(PyTimeoutError::new_err("response read timed out"));
+                }
+                Received::Closed => {
                     self.ended.store(true, Ordering::Relaxed);
                     return Err(map_reset_reason(py, ResetReason::Local, &self.constants)?);
                 }
@@ -453,20 +508,114 @@ impl ResponseContent {
         }
     }
 
-    /// Called by pyqwest when the response is closed. If the stream has not already finished,
-    /// the response was closed before being fully consumed so we reset the upstream stream to
-    /// release it rather than leaving it open and buffering data until the timeout.
+    /// Called by pyqwest when the response is closed. The request iterator is closed when
+    /// this object is dropped; here we release the upstream stream if it has not finished.
     fn close(&self) {
-        if !self.ended.swap(true, Ordering::Relaxed)
-            && self
-                .bridge
-                .send(TransportEvent::Reset(SendStreamResetEvent {
-                    stream_handle: self.stream_handle,
-                    exception: None,
-                }))
-                .is_ok()
-        {
-            self.scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
+        self.reset();
+    }
+}
+
+impl ResponseContent {
+    /// Resets the upstream stream if it has not already finished, releasing it rather than
+    /// leaving it open and buffering data until the timeout.
+    fn reset(&self) {
+        if !self.ended.swap(true, Ordering::Relaxed) {
+            reset_stream(&self.bridge, &self.scheduler, self.stream_handle);
+        }
+    }
+}
+
+impl Drop for ResponseContent {
+    fn drop(&mut self) {
+        // Releases the upstream stream if the response was abandoned, and closes the
+        // request iterator to unblock the iteration pool worker if it is still reading.
+        // This runs however the response is destroyed, including client close and GC.
+        self.reset();
+        if self.request_iter.is_some() {
+            let iter = self.request_iter.take();
+            Python::attach(|py| close_request_iter(py, &self.constants, iter));
+        }
+    }
+}
+
+/// The outcome of a deadline-aware receive on the response channel.
+enum Received {
+    Value(TransportResponse),
+    TimedOut,
+    Closed,
+}
+
+/// Receives the next response event, blocking with the GIL released. If `deadline` is set
+/// and passes first, returns `TimedOut`.
+fn recv_deadline(
+    py: Python<'_>,
+    rx: &SyncReceiver<TransportResponse>,
+    deadline: Option<Instant>,
+) -> Received {
+    py.detach(|| match deadline {
+        None => match rx.recv() {
+            Ok(value) => Received::Value(value),
+            Err(_) => Received::Closed,
+        },
+        Some(deadline) => match deadline.checked_duration_since(Instant::now()) {
+            None => Received::TimedOut,
+            Some(remaining) => match rx.recv_timeout(remaining) {
+                Ok(value) => Received::Value(value),
+                Err(RecvTimeoutError::Timeout) => Received::TimedOut,
+                Err(RecvTimeoutError::Disconnected) => Received::Closed,
+            },
+        },
+    })
+}
+
+fn reset_stream(
+    bridge: &EventBridge<TransportEvent>,
+    scheduler: &Arc<Box<dyn EnvoyHttpFilterScheduler>>,
+    stream_handle: u64,
+) {
+    if bridge
+        .send(TransportEvent::Reset(SendStreamResetEvent {
+            stream_handle,
+            exception: None,
+        }))
+        .is_ok()
+    {
+        scheduler.commit(EVENT_ID_OUTGOING_REQUEST);
+    }
+}
+
+/// Closes a streaming request body iterator, unblocking the iteration pool worker if it is
+/// still reading. Closing is idempotent, so calling it redundantly is harmless. `None` (a
+/// non-streaming request) is a no-op.
+fn close_request_iter(py: Python<'_>, constants: &Constants, iter: Option<Py<PyAny>>) {
+    if let Some(iter) = iter {
+        let _ = constants
+            .glue_close_request_iterator
+            .bind(py)
+            .call1((iter.bind(py),));
+    }
+}
+
+/// Owns a streaming request body iterator and closes it when dropped. Being a drop guard
+/// guarantees the iteration pool worker is unblocked however the request ends — client
+/// close, timeout, error, or filter teardown — rather than only on paths that remember to
+/// do it explicitly. On success ownership of the iterator moves to the response via `take`.
+struct RequestIterCloser {
+    iter: Option<Py<PyAny>>,
+    constants: Arc<Constants>,
+}
+
+impl RequestIterCloser {
+    fn take(mut self) -> Option<Py<PyAny>> {
+        self.iter.take()
+    }
+}
+
+impl Drop for RequestIterCloser {
+    fn drop(&mut self) {
+        if self.iter.is_some() {
+            let iter = self.iter.take();
+            Python::attach(|py| close_request_iter(py, &self.constants, iter));
         }
     }
 }

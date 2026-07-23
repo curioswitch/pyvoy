@@ -25,31 +25,33 @@ use it as normal - if you use [Connect-Python](https://connectrpc.com/docs/pytho
 you can pass in the client and benefit from Envoy's features. Notably, when using gRPC protocol,
 having DNS load balancing can improve connectivity significantly.
 
-```python
-from pyqwest import Client
-from pyvoy.asgi.httpclient import HTTPTransport
+=== "ASGI"
 
-auth_client = Client(transport=HTTPTransport("auth-svc"))
-user_client = Client(transport=HTTPTransport("user-svc"))
+    ```python
+    from pyqwest import Client
+    from pyvoy.asgi.httpclient import HTTPTransport
 
-async def app(scope, recv, send):
-    res = await auth_client.post("/fetch-token")
-    user = await user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
-```
+    auth_client = Client(transport=HTTPTransport("auth-svc"))
+    user_client = Client(transport=HTTPTransport("user-svc"))
 
-For WSGI, use `pyvoy.wsgi.httpclient.HTTPTransport` with a pyqwest `SyncClient` instead.
+    async def app(scope, recv, send):
+        res = await auth_client.post("/fetch-token")
+        user = await user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
+    ```
 
-```python
-from pyqwest import SyncClient
-from pyvoy.wsgi.httpclient import HTTPTransport
+=== "WSGI"
 
-auth_client = SyncClient(transport=HTTPTransport("auth-svc"))
-user_client = SyncClient(transport=HTTPTransport("user-svc"))
+    ```python
+    from pyqwest import SyncClient
+    from pyvoy.wsgi.httpclient import HTTPTransport
 
-def app(environ, start_response):
-    res = auth_client.post("/fetch-token")
-    user = user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
-```
+    auth_client = SyncClient(transport=HTTPTransport("auth-svc"))
+    user_client = SyncClient(transport=HTTPTransport("user-svc"))
+
+    def app(environ, start_response):
+        res = auth_client.post("/fetch-token")
+        user = user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
+    ```
 
 ## Limitations
 
