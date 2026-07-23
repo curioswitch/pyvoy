@@ -11,8 +11,6 @@ from pyqwest import SyncClient
 
 bin_dir = Path(__file__).parent.parent / "pyvoy" / "_bin"
 
-# Marker recording the envoy-files version currently downloaded into _bin, so we
-# can skip re-downloading (and the network entirely) on unchanged builds.
 version_marker = Path(__file__).parent.parent / "out" / "envoy-files-version.txt"
 
 ENVOY_FILES_VERSION = "v0.1.1"
