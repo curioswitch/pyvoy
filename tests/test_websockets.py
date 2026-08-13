@@ -96,6 +96,7 @@ async def test_kosoku(cases: list[str], echo_server: PyvoyServer) -> None:
 async def server() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
+        root_path="/root",
         websockets=True,
         lifespan=False,
         stdout=subprocess.DEVNULL,
@@ -121,6 +122,12 @@ async def test_echo_and_clean_close(server: PyvoyServer) -> None:
         assert await ws.recv() == "hello"
         await ws.send(b"\x00\x01\x02")
         assert await ws.recv() == b"\x00\x01\x02"
+
+
+@pytest.mark.asyncio
+async def test_root_path(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/root-path")) as ws:
+        assert await ws.recv() == "/root"
 
 
 @pytest.mark.asyncio

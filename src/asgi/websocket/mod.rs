@@ -35,6 +35,7 @@ pub struct Config {
 impl Config {
     pub fn new(
         app: &str,
+        root_path: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
@@ -45,6 +46,7 @@ impl Config {
         let (executor, handles) = match WebSocketExecutor::new(
             module,
             attr,
+            root_path,
             constants,
             worker_threads,
             enable_lifespan,

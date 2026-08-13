@@ -128,6 +128,7 @@ class Upstream:
     """The HTTP version to use when connecting to this cluster.
 
     If not specified, will use HTTP/1 for plaintext and ALPN to autodetect for TLS.
+    HTTP/3 requires TLS.
     """
 
     tls: TLSConfig | None = None
@@ -169,6 +170,7 @@ class PyvoyServer:
     """Programmatic entrypoint to pyvoy."""
 
     _process: asyncio.subprocess.Process | None
+    _starting: bool
     _listener_address: str
     _listener_port: int
     _listener_port_tls: int | None
@@ -213,7 +215,7 @@ class PyvoyServer:
         websockets_compression: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
-        upstreams: list[dict[str, Any] | Upstream] | None = None,
+        upstreams: Iterable[dict[str, Any] | Upstream] | None = None,
         static_mounts: Iterable[StaticMount] | None = None,
         stdout: int | IO[bytes] | None = subprocess.DEVNULL,
         stderr: int | IO[bytes] | None = subprocess.DEVNULL,
@@ -238,11 +240,12 @@ class PyvoyServer:
             interface: The interface type of the application ('asgi' or 'wsgi').
             root_path: The root path to mount the application at.
             log_level: The log level for Envoy.
-            worker_threads: The number of worker threads to use.
+            worker_threads: The positive number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
-            websockets: Whether to enable ASGI WebSocket support.
-            websockets_max_message_size: The maximum WebSocket message size in bytes.
-                Unset uses the default of 64 MiB.
+            websockets: Whether to enable ASGI WebSocket support. WebSockets are
+                handled by the primary application, which must use ASGI.
+            websockets_max_message_size: The non-negative maximum WebSocket message
+                size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
                 compression.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
@@ -251,7 +254,30 @@ class PyvoyServer:
             static_mounts: Static file mounts to serve alongside the application(s).
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
+
+        Raises:
+            TypeError: If worker_threads or websockets_max_message_size is not an
+                integer.
+            ValueError: If worker_threads is not between 1 and sys.maxsize, or
+                websockets_max_message_size is not between 0 and sys.maxsize.
         """
+        if worker_threads is not None:
+            if not isinstance(worker_threads, int) or isinstance(worker_threads, bool):
+                msg = "worker_threads must be an integer"
+                raise TypeError(msg)
+            if not 1 <= worker_threads <= sys.maxsize:
+                msg = f"worker_threads must be between 1 and {sys.maxsize}"
+                raise ValueError(msg)
+        if websockets_max_message_size is not None:
+            if not isinstance(websockets_max_message_size, int) or isinstance(
+                websockets_max_message_size, bool
+            ):
+                msg = "websockets_max_message_size must be an integer"
+                raise TypeError(msg)
+            if not 0 <= websockets_max_message_size <= sys.maxsize:
+                msg = f"websockets_max_message_size must be between 0 and {sys.maxsize}"
+                raise ValueError(msg)
+
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
         self._port = port
@@ -273,10 +299,11 @@ class PyvoyServer:
         self._lifespan = lifespan
         self._additional_envoy_args = additional_envoy_args
         self._env = env if env is not None else {}
-        self._upstreams = upstreams if upstreams is not None else []
+        self._upstreams = list(upstreams) if upstreams is not None else []
         self._static_mounts = list(static_mounts) if static_mounts is not None else []
 
         self._process = None
+        self._starting = False
         self._listener_port_tls = None
         self._listener_port_quic = None
         self._admin_address = None
@@ -297,8 +324,20 @@ class PyvoyServer:
         """Starts the pyvoy server.
 
         Raises:
+            RuntimeError: If the server is already running or starting.
             StartupError: If the server fails to start.
         """
+        if self._starting or not self.stopped:
+            msg = "PyvoyServer is already running or starting."
+            raise RuntimeError(msg)
+
+        self._starting = True
+        try:
+            await self._start()
+        finally:
+            self._starting = False
+
+    async def _start(self) -> None:
         config = self.get_envoy_config()
 
         env = {**os.environ, **get_envoy_environ(), **self._env}
@@ -343,25 +382,28 @@ class PyvoyServer:
                                 f"http://{admin_address}/listeners?format=json",
                             )
                             response_data = json.loads(response.read())
-                            socket_address = response_data["listener_statuses"][0][
-                                "local_address"
-                            ]["socket_address"]
+                            listener_addresses = {
+                                status["name"]: status["local_address"][
+                                    "socket_address"
+                                ]
+                                for status in response_data["listener_statuses"]
+                            }
+                            socket_address = listener_addresses["listener"]
                             self._listener_address = socket_address["address"]
                             self._listener_port = socket_address["port_value"]
                             if self._tls_port is not None:
-                                socket_address_tls = response_data["listener_statuses"][
-                                    1
-                                ]["local_address"]["socket_address"]
+                                socket_address_tls = listener_addresses["listener_tls"]
                                 self._listener_port_tls = socket_address_tls[
                                     "port_value"
                                 ]
-                                if self._tls_enable_http3:
-                                    socket_address_quic = response_data[
-                                        "listener_statuses"
-                                    ][2]["local_address"]["socket_address"]
-                                    self._listener_port_quic = socket_address_quic[
-                                        "port_value"
-                                    ]
+                            enable_http3 = self._tls_enable_http3 and (
+                                self._tls_key or self._tls_cert or self._tls_ca_cert
+                            )
+                            if enable_http3:
+                                socket_address_quic = listener_addresses["listener_udp"]
+                                self._listener_port_quic = socket_address_quic[
+                                    "port_value"
+                                ]
                             started = True
                             break
                     await asyncio.sleep(0.1)
@@ -372,12 +414,14 @@ class PyvoyServer:
                 await asyncio.shield(self.stop())
                 raise
 
-    async def wait(self) -> None:
-        """Waits for the server to finish shutting down. May be necessary
-        if stopping in a separate task."""
+    async def wait(self) -> int | None:
+        """Waits for the server process to exit and returns its exit status.
+
+        Returns None if the server has not been started.
+        """
         if self._process is None:
-            return
-        await self._process.wait()
+            return None
+        return await self._process.wait()
 
     async def stop(self) -> None:
         """Stops the pyvoy server."""
@@ -497,9 +541,7 @@ class PyvoyServer:
                 ws_pyvoy_config = pyvoy_config
                 # The single app is the catch-all. Envoy's prefix_match_map does
                 # longest-prefix matching, so static mounts at longer prefixes win.
-                matcher_map[self._root_path or "/"] = _dynamic_module_action(
-                    "pyvoy", pyvoy_config
-                )
+                matcher_map["/"] = _dynamic_module_action("pyvoy", pyvoy_config)
             else:
                 for mount in self._app:
                     pyvoy_config = {
@@ -579,6 +621,12 @@ class PyvoyServer:
         if self._websockets:
             if ws_pyvoy_config is None:
                 msg = "websockets require an application mount, not only static mounts"
+                raise ValueError(msg)
+            if ws_pyvoy_config["interface"] != "asgi":
+                msg = (
+                    "websockets require the primary application to use the ASGI "
+                    "interface"
+                )
                 raise ValueError(msg)
             network_filters.append(
                 {
@@ -720,6 +768,12 @@ class PyvoyServer:
             clusters = []
             for cluster in self._upstreams:
                 if isinstance(cluster, Upstream):
+                    if (
+                        cluster.http_version == HTTPVersion.HTTP3
+                        and cluster.tls is None
+                    ):
+                        msg = f"HTTP/3 upstream '{cluster.name}' requires TLS"
+                        raise ValueError(msg)
                     result = urlsplit(f"//{cluster.address}")
                     if result.port is not None:
                         port = result.port
@@ -789,14 +843,27 @@ class PyvoyServer:
                             common_tls_context["validation_context"] = {
                                 "trusted_ca": _to_datasource(tls.ca_cert)
                             }
-                        cluster_config["transport_socket"] = {
-                            "name": "envoy.transport_sockets.tls",
-                            "typed_config": {
-                                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
-                                "common_tls_context": common_tls_context,
-                                "sni": result.hostname,
-                            },
+                        upstream_tls_context = {
+                            "common_tls_context": common_tls_context,
+                            "sni": result.hostname,
+                            "auto_sni_san_validation": bool(tls.ca_cert),
                         }
+                        if cluster.http_version == HTTPVersion.HTTP3:
+                            cluster_config["transport_socket"] = {
+                                "name": "envoy.transport_sockets.quic",
+                                "typed_config": {
+                                    "@type": "type.googleapis.com/envoy.extensions.transport_sockets.quic.v3.QuicUpstreamTransport",
+                                    "upstream_tls_context": upstream_tls_context,
+                                },
+                            }
+                        else:
+                            cluster_config["transport_socket"] = {
+                                "name": "envoy.transport_sockets.tls",
+                                "typed_config": {
+                                    "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
+                                    **upstream_tls_context,
+                                },
+                            }
                     clusters.append(cluster_config)
                 else:
                     clusters.append(cluster)

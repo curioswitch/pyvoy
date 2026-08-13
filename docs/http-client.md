@@ -34,9 +34,12 @@ having DNS load balancing can improve connectivity significantly.
     auth_client = Client(transport=HTTPTransport("auth-svc"))
     user_client = Client(transport=HTTPTransport("user-svc"))
 
+
     async def app(scope, recv, send):
         res = await auth_client.post("/fetch-token")
-        user = await user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
+        user = await user_client.post(
+            "/get-user", headers={"Authorization": f"Bearer {res.text()}"}
+        )
     ```
 
 === "WSGI"
@@ -48,9 +51,12 @@ having DNS load balancing can improve connectivity significantly.
     auth_client = SyncClient(transport=HTTPTransport("auth-svc"))
     user_client = SyncClient(transport=HTTPTransport("user-svc"))
 
+
     def app(environ, start_response):
         res = auth_client.post("/fetch-token")
-        user = user_client.post("/get-user", headers={"Authorization": f"Bearer {res.text()}"})
+        user = user_client.post(
+            "/get-user", headers={"Authorization": f"Bearer {res.text()}"}
+        )
     ```
 
 ## Limitations

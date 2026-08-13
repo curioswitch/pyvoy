@@ -8,6 +8,19 @@ if TYPE_CHECKING:
     from pyqwest import Client
 
 
+pytestmark = pytest.mark.parametrize(
+    ("http_scheme", "http_version"),
+    [
+        pytest.param("http", "h1", id="h1c"),
+        pytest.param("https", "h1", id="h1"),
+        pytest.param("http", "h2", id="h2c"),
+        pytest.param("https", "h2", id="h2"),
+        pytest.param("https", "h3", id="h3"),
+    ],
+    indirect=True,
+)
+
+
 async def _run_test(
     case: str,
     url: str,

@@ -3,7 +3,7 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use yaml_rust2::YamlLoader;
+use yaml_rust2::{Yaml, YamlLoader};
 
 mod asgi;
 /// Helpers for working with Envoy's SDK.
@@ -53,6 +53,31 @@ fn init() -> bool {
     true
 }
 
+fn parse_usize_config(
+    filter_config: &Yaml,
+    field: &str,
+    default: usize,
+    minimum: usize,
+) -> Option<usize> {
+    let key = Yaml::String(field.to_string());
+    let Some(value) = filter_config.as_hash().and_then(|config| config.get(&key)) else {
+        return Some(default);
+    };
+
+    let parsed = value.as_i64().and_then(|value| usize::try_from(value).ok());
+    match parsed {
+        Some(value) if value >= minimum => Some(value),
+        _ => {
+            envoy_log_error!(
+                "Filter config field '{}' must be an integer between {} and the platform maximum",
+                field,
+                minimum
+            );
+            None
+        }
+    }
+}
+
 fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     _envoy_filter_config: &mut EC,
     _filter_name: &str,
@@ -78,16 +103,9 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
     let interface = filter_config["interface"].as_str().unwrap_or("asgi");
     let root_path = filter_config["root_path"].as_str().unwrap_or("");
-    let worker_threads = match filter_config["worker_threads"].as_i64() {
-        Some(v) => v as usize,
-        None => {
-            if interface == "asgi" {
-                1
-            } else {
-                200
-            }
-        }
-    };
+    let default_worker_threads = if interface == "asgi" { 1 } else { 200 };
+    let worker_threads =
+        parse_usize_config(filter_config, "worker_threads", default_worker_threads, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
 
     let constants = Python::attach(types::Constants::get);
@@ -128,12 +146,16 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
         envoy_log_error!("Filter config missing required 'app' field");
         return None;
     };
-    let worker_threads = filter_config["worker_threads"].as_i64().unwrap_or(1) as usize;
+    let interface = filter_config["interface"].as_str().unwrap_or("asgi");
+    if interface != "asgi" {
+        envoy_log_error!("WebSockets require the ASGI interface, got: {}", interface);
+        return None;
+    }
+    let root_path = filter_config["root_path"].as_str().unwrap_or("");
+    let worker_threads = parse_usize_config(filter_config, "worker_threads", 1, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
-    let max_message_size = filter_config["websockets_max_message_size"]
-        .as_i64()
-        .map(|size| size as usize)
-        .unwrap_or(64 << 20); // Default to 64 MiB
+    let max_message_size =
+        parse_usize_config(filter_config, "websockets_max_message_size", 64 << 20, 0)?; // Default to 64 MiB
     let compression = filter_config["websockets_compression"]
         .as_bool()
         .unwrap_or(true);
@@ -141,6 +163,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     let constants = Python::attach(types::Constants::get);
     asgi::websocket::Config::new(
         app,
+        root_path,
         constants,
         worker_threads,
         enable_lifespan,

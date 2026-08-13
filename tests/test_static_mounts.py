@@ -21,6 +21,7 @@ STATIC_DIR = Path(__file__).parent / "apps" / "static"
 async def server() -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        root_path="/root",
         static_mounts=[
             StaticMount(
                 path="/static", root=STATIC_DIR, cache_control="public, max-age=60"
@@ -65,6 +66,14 @@ async def test_app_serves_non_static(url: str, client: Client) -> None:
     # The application is the catch-all mount, so non-static paths reach it.
     response = await client.get(f"{url}/controlled")
     assert response.status == 200, response.text()
+
+
+@pytest.mark.asyncio
+async def test_root_path_remains_hint(url: str, client: Client) -> None:
+    response = await client.get(f"{url}/echo-scope")
+    assert response.status == 200, response.text()
+    assert response.headers["x-scope-root-path"] == "/root"
+    assert response.headers["x-scope-path"] == "/echo-scope"
 
 
 @pytest.mark.asyncio

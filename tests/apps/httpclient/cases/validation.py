@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from pyvoy.wsgi.httpclient import HTTPTransport as SyncHTTPTransport
 
 from pyvoy.asgi.httpclient import HTTPTransport as AsyncHTTPTransport
+from pyvoy.wsgi.httpclient import HTTPTransport as SyncHTTPTransport
 
 
 def transport_invalid_option() -> None:

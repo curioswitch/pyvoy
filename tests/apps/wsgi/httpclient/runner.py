@@ -5,8 +5,8 @@ import traceback
 from typing import TYPE_CHECKING
 
 from pyqwest import HTTPVersion, SyncClient
-from pyvoy.wsgi.httpclient import HTTPTransport
 
+from pyvoy.wsgi.httpclient import HTTPTransport
 from tests.apps.httpclient.cases import client, errors, tls, validation
 
 if TYPE_CHECKING:
@@ -16,6 +16,8 @@ client_h1c = SyncClient(HTTPTransport("backend_h1c"))
 client_h1 = SyncClient(HTTPTransport("backend_h1"))
 client_h2c = SyncClient(HTTPTransport("backend_h2c"))
 client_h2 = SyncClient(HTTPTransport("backend_h2"))
+client_h3 = SyncClient(HTTPTransport("backend_h3"))
+client_wrong_hostname = SyncClient(HTTPTransport("backend_wrong_hostname"))
 client_unavailable = SyncClient(HTTPTransport("backend_unavailable"))
 
 
@@ -31,6 +33,8 @@ def app(
             http_version = HTTPVersion.HTTP1
         case "h2":
             http_version = HTTPVersion.HTTP2
+        case "h3":
+            http_version = HTTPVersion.HTTP3
         case _:
             http_version = None
     match (scheme, http_version_str):
@@ -42,6 +46,8 @@ def app(
             http_client = client_h2c
         case ("https", "h2"):
             http_client = client_h2
+        case ("https", "h3"):
+            http_client = client_h3
         case _:
             msg = f"Unknown scheme and HTTP version combination: {scheme} {http_version_str}"
             raise RuntimeError(msg)
@@ -99,6 +105,8 @@ def app(
                 asyncio.run(errors.connection_error(client_unavailable, url))
             case "tls_mtls":
                 asyncio.run(tls.mtls(http_client, url))
+            case "tls_wrong_hostname":
+                asyncio.run(errors.connection_error(client_wrong_hostname, url))
             case "transport_invalid_option":
                 validation.transport_invalid_option()
             case _:

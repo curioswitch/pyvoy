@@ -111,6 +111,28 @@ async def client(certs: Certs, http_version: HTTPVersion) -> AsyncIterator[Clien
 
 
 @pytest.mark.asyncio
+async def test_single_tls_port_http3(certs: Certs) -> None:
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        port=0,
+        tls_key=certs.server_key,
+        tls_cert=certs.server_cert,
+        lifespan=False,
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        assert server.listener_port_quic is not None
+        url = f"https://localhost:{server.listener_port_quic}"
+        async with HTTPTransport(
+            tls_ca_cert=certs.ca, http_version=HTTPVersion.HTTP3
+        ) as transport:
+            response = await Client(transport).get(f"{url}/echo-scope")
+
+        assert response.status == 200, response.text()
+        assert response.headers["x-scope-http-version"] == "3"
+
+
+@pytest.mark.asyncio
 async def test_scope_content(
     url: str, client: Client, http_version: HTTPVersion, interface: Interface
 ) -> None:
