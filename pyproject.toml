@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "CurioSwitch" }]
 keywords = ["asgi", "envoy", "wsgi"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "Operating System :: MacOS :: MacOS X",
   "Operating System :: POSIX :: Linux",
