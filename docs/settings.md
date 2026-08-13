@@ -10,7 +10,7 @@ pyvoy for even further customization.
   e.g., `myapp.server:app`. If `attribute` matches `app`, it can be omitted, e.g., `myapp.server`.
 - `--interface` - One of `asgi` or `wsgi` to indicate the type of application being served. **Default**: _asgi_.
 - `--root-path` - The root path the application is mounted on if behind a reverse proxy.
-- `--worker-threads` - The number of Python threads to serve requests with. When using ASGI, this should generally
+- `--worker-threads` - The positive number of Python threads to serve requests with. When using ASGI, this should generally
   be kept at 1 unless using free-threaded Python. **Default**: 1 for ASGI, 200 for WSGI.
 - `--[no-]lifespan` - Whether to require or disable ASGI lifespan support. By default, we try to run the application
   with lifespan and ignore any exception that is raised. If enabled explicitly, an exception will cause the server to
@@ -62,13 +62,15 @@ than serving in Python with e.g., Starlette.
 
 ## WebSockets
 
-- `--websockets` - Enables support for ASGI WebSockets. Not enabled by default.
-- `--websockets-max-message-size` - Sets the maximum WebSocket message size in bytes. **Default**: _64 MiB_.
+- `--websockets` - Enables support for ASGI WebSockets. The primary application (the only application or first
+  mount) must use ASGI and handles all WebSocket connections; path-based application mount routing does not apply.
+  Not enabled by default.
+- `--websockets-max-message-size` - Sets the non-negative maximum WebSocket message size in bytes. **Default**: _64 MiB_.
 - `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
 
 ## Development
 
-- `--reload` - Whether to automatically restart the server on code changes.
+- `--reload` - Whether to automatically restart the server on code changes. Requires the `watchfiles` dev dependency to be installed.
 - `--reload-dirs` - Directories to watch for code changes. **Default**: current directory
 - `--reload-includes` - File patterns to include for reload. **Default**: `*.py`
 - `--reload-excludes` - File patterns to exclude from reload. **Default**: `.*,*.py[cod],*.sw.*,~*`

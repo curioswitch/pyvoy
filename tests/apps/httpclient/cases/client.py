@@ -25,7 +25,8 @@ if TYPE_CHECKING:
 
 
 def supports_trailers(http_version: HTTPVersion | None, url: str) -> bool:
-    # Currently reqwest trailers patch does not apply to HTTP/3.
+    # Explicit HTTP/2 and HTTP/3 support trailers. With automatic selection, TLS
+    # negotiates a supporting protocol while plaintext defaults to HTTP/1.
     return http_version != HTTPVersion.HTTP1 or (
         http_version is None and url.startswith("https://")
     )
@@ -42,7 +43,7 @@ async def request_body(queue: asyncio.Queue) -> AsyncIterator[bytes]:
 async def basic(
     client: Client | SyncClient,
     url: str,
-    _http_version: HTTPVersion | None,
+    http_version: HTTPVersion | None,
     server_port: int,
 ) -> None:
     method = "POST"
@@ -75,6 +76,18 @@ async def basic(
     assert resp.headers["x-echo-method"] == "POST"
     assert resp.headers["x-echo-query-string"] == "foo=bar"
     assert resp.headers["x-echo-content-type"] == "text/plain"
+    if http_version is not None:
+        match http_version:
+            case HTTPVersion.HTTP1:
+                expected_http_version = "1.1"
+            case HTTPVersion.HTTP2:
+                expected_http_version = "2"
+            case HTTPVersion.HTTP3:
+                expected_http_version = "3"
+            case _:
+                msg = f"unexpected HTTP version: {http_version}"
+                raise AssertionError(msg)
+        assert resp.headers["x-echo-http-version"] == expected_http_version
     assert resp.headers.getall("x-echo-content-type") == ["text/plain"]
     assert resp.headers["x-echo-x-hello"] == "rust"
     assert resp.headers.getall("x-echo-x-hello") == ["rust", "python"]

@@ -40,6 +40,10 @@ async def backend_asgi(ca: trustme.CA) -> AsyncIterator[PyvoyServer]:
 
 
 def _backend_upstreams(backend: PyvoyServer, ca: trustme.CA) -> list[Upstream]:
+    quic_port = backend.listener_port_quic
+    if quic_port is None:
+        msg = "backend QUIC listener did not start"
+        raise RuntimeError(msg)
     cert = ca.issue_cert(
         common_name="someclient",
         organization_name="curioswitch",
@@ -58,7 +62,7 @@ def _backend_upstreams(backend: PyvoyServer, ca: trustme.CA) -> list[Upstream]:
         ),
         Upstream(
             name="backend_h1",
-            address=f"{backend.listener_address}:{backend.listener_port_tls}",
+            address=f"localhost:{backend.listener_port_tls}",
             http_version=HTTPVersion.HTTP1,
             tls=tls,
         ),
@@ -69,6 +73,18 @@ def _backend_upstreams(backend: PyvoyServer, ca: trustme.CA) -> list[Upstream]:
         ),
         Upstream(
             name="backend_h2",
+            address=f"localhost:{backend.listener_port_tls}",
+            http_version=HTTPVersion.HTTP2,
+            tls=tls,
+        ),
+        Upstream(
+            name="backend_h3",
+            address=f"localhost:{quic_port}",
+            http_version=HTTPVersion.HTTP3,
+            tls=tls,
+        ),
+        Upstream(
+            name="backend_wrong_hostname",
             address=f"{backend.listener_address}:{backend.listener_port_tls}",
             http_version=HTTPVersion.HTTP2,
             tls=tls,
@@ -131,11 +147,11 @@ def url(request: pytest.FixtureRequest, interface: str) -> str:
     return request.getfixturevalue(f"url_{interface}")
 
 
-@pytest.fixture(params=["http", "https"])
+@pytest.fixture
 def http_scheme(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
-@pytest.fixture(params=["h1", "h2"])
+@pytest.fixture
 def http_version(request: pytest.FixtureRequest) -> str:
     return request.param

@@ -97,3 +97,30 @@ def test_websockets_with_multiple_mounts_uses_first_app() -> None:
     assert ws_filter is not None
     ws_config = json.loads(ws_filter["typed_config"]["filter_config"]["value"])
     assert ws_config["app"] == "tests.apps.asgi.kitchensink"
+    assert ws_config["root_path"] == "/a"
+
+
+def test_websockets_with_single_wsgi_app_rejected() -> None:
+    server = PyvoyServer(
+        "tests.apps.wsgi.kitchensink", interface="wsgi", websockets=True
+    )
+
+    with pytest.raises(
+        ValueError, match="primary application to use the ASGI interface"
+    ):
+        server.get_envoy_config()
+
+
+def test_websockets_with_primary_wsgi_mount_rejected() -> None:
+    server = PyvoyServer(
+        [
+            Mount(app="tests.apps.wsgi.kitchensink", path="/", interface="wsgi"),
+            Mount(app="tests.apps.asgi.kitchensink", path="/asgi", interface="asgi"),
+        ],
+        websockets=True,
+    )
+
+    with pytest.raises(
+        ValueError, match="primary application to use the ASGI interface"
+    ):
+        server.get_envoy_config()

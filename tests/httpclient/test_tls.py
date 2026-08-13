@@ -38,3 +38,10 @@ async def test_mtls(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
     await _run_test("tls_mtls", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_wrong_hostname(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("tls_wrong_hostname", url, client, http_scheme, http_version)

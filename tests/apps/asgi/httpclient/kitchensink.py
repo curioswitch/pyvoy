@@ -14,6 +14,7 @@ async def _echo(
     ]
     echoed_headers.append((b"x-echo-query-string", scope["query_string"]))
     echoed_headers.append((b"x-echo-method", scope["method"].encode()))
+    echoed_headers.append((b"x-echo-http-version", scope["http_version"].encode()))
     headers_dict = dict(scope["headers"])
     if content_type := headers_dict.get(b"content-type", b""):
         echoed_headers.append((b"content-type", content_type))

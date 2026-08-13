@@ -57,6 +57,22 @@ class CLIArgs:
     reload_excludes: list[str]
 
 
+def _bounded_int(value: str, *, minimum: int) -> int:
+    parsed = int(value)
+    if not minimum <= parsed <= sys.maxsize:
+        msg = f"must be between {minimum} and {sys.maxsize}"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    return _bounded_int(value, minimum=1)
+
+
+def _non_negative_int(value: str) -> int:
+    return _bounded_int(value, minimum=0)
+
+
 async def amain() -> None:
     parser = ArgumentParser(
         description="Run a pyvoy server", formatter_class=ArgumentDefaultsHelpFormatter
@@ -133,6 +149,7 @@ async def amain() -> None:
         help="additional application mounts in the form 'app=path=interface'",
         type=str,
         nargs="+",
+        action="extend",
         default=[],
     )
 
@@ -146,6 +163,7 @@ async def amain() -> None:
         ),
         type=str,
         nargs="+",
+        action="extend",
         default=[],
     )
 
@@ -154,6 +172,7 @@ async def amain() -> None:
         help="upstream cluster to use with HTTPTransport in the form 'name=http[s]://host:port'. If scheme is https, --tls-ca-cert must be provided, and --tls-key and --tls-cert will be used if provided for client certificate authentication.",
         type=str,
         nargs="+",
+        action="extend",
         default=[],
     )
 
@@ -167,8 +186,8 @@ async def amain() -> None:
 
     parser.add_argument(
         "--worker-threads",
-        help="number of worker threads to use (default: 1 for ASGI, 200 for WSGI)",
-        type=int,
+        help="positive number of worker threads to use (default: 1 for ASGI, 200 for WSGI)",
+        type=_positive_int,
         default=argparse.SUPPRESS,
     )
 
@@ -188,8 +207,8 @@ async def amain() -> None:
 
     parser.add_argument(
         "--websockets-max-message-size",
-        help="maximum WebSocket message size in bytes (default: 64 MiB)",
-        type=int,
+        help="non-negative maximum WebSocket message size in bytes (default: 64 MiB)",
+        type=_non_negative_int,
         default=argparse.SUPPRESS,
     )
 
@@ -394,7 +413,11 @@ async def _run_server(server: PyvoyServer, *, handle_sigterm: bool = True) -> No
                 file=sys.stderr,
             )
 
+            shutdown_requested = False
+
             async def shutdown() -> None:
+                nonlocal shutdown_requested
+                shutdown_requested = True
                 print("Shutting down pyvoy...")  # noqa: T201
                 await server.stop()
 
@@ -404,15 +427,23 @@ async def _run_server(server: PyvoyServer, *, handle_sigterm: bool = True) -> No
                     signal.SIGTERM, lambda: asyncio.ensure_future(shutdown())
                 )
             try:
-                await server.wait()
+                return_code = await server.wait()
+                if return_code and not shutdown_requested:
+                    print(  # noqa: T201
+                        f"Envoy server exited unexpectedly with code {return_code}.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(128 - return_code if return_code < 0 else return_code)
             except asyncio.CancelledError:
+                await shutdown()
+            finally:
                 if install_handler:
                     asyncio.get_running_loop().remove_signal_handler(signal.SIGTERM)
-                await shutdown()
     except StartupError:
         print(  # noqa: T201
             "Failed to start Envoy server, see logs for details.", file=sys.stderr
         )
+        sys.exit(1)
 
 
 def _parse_static_mount(mount_str: str) -> StaticMount:
