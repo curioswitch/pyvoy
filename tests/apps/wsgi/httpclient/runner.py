@@ -5,8 +5,8 @@ import traceback
 from typing import TYPE_CHECKING
 
 from pyqwest import HTTPVersion, SyncClient
-from pyvoy.wsgi.httpclient import HTTPTransport
 
+from pyvoy.wsgi.httpclient import HTTPTransport
 from tests.apps.httpclient.cases import client, errors, tls, validation
 
 if TYPE_CHECKING:
