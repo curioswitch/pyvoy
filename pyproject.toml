@@ -58,17 +58,17 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.2",
+  "ruff==0.16.3",
   "seaborn==0.13.2",
   "starlette==1.6.0",
   "trustme==1.2.1",
-  "uvicorn[standard]==0.52.1",
+  "uvicorn[standard]==0.52.3",
   "watchfiles==1.2.0",
   "websockets==16.1.1",
-  "wheel==0.47.0",
+  "wheel==0.48.0",
 ]
 
-docs = ["mkdocstrings-python==2.0.5", "zensical==0.0.53"]
+docs = ["mkdocstrings-python==2.0.6", "zensical==0.0.55"]
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
