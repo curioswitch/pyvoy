@@ -48,8 +48,8 @@ dev = [
   "asgiref==3.12.1",
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
   "connectrpc==0.11.1",
-  "granian==2.8.1",
-  "gunicorn==26.0.0",
+  "granian==2.8.2",
+  "gunicorn==26.1.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
   "poethepoet==0.48.0",
@@ -58,17 +58,17 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.3",
+  "ruff==0.16.4",
   "seaborn==0.13.2",
   "starlette==1.6.0",
   "trustme==1.2.1",
-  "uvicorn[standard]==0.52.3",
+  "uvicorn[standard]==0.52.4",
   "watchfiles==1.2.0",
   "websockets==16.1.1",
   "wheel==0.48.0",
 ]
 
-docs = ["mkdocstrings-python==2.0.6", "zensical==0.0.55"]
+docs = ["mkdocstrings-python==2.0.7", "zensical==0.0.57"]
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
