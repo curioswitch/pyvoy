@@ -49,7 +49,7 @@ dev = [
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
   "connectrpc==0.11.1",
   "granian==2.8.2",
-  "gunicorn==26.1.0",
+  "gunicorn==26.2.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
   "poethepoet==0.48.0",
