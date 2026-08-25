@@ -25,9 +25,8 @@ checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
 name = "bindgen"
-version = "0.70.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+version = "0.72.0"
+source = "git+https://github.com/rust-lang/rust-bindgen.git?rev=ccd563767ab1509f7c0eb68c6effc79eaf3684a9#ccd563767ab1509f7c0eb68c6effc79eaf3684a9"
 dependencies = [
  "bitflags",
  "cexpr",
