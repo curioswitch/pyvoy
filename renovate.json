@@ -41,6 +41,12 @@
       "matchCurrentVersion": "11",
       "matchPackageNames": ["debian"],
       "enabled": false
+    },
+    {
+      // Pin to Python 3.10-compatible version
+      "matchCurrentVersion": "16.1.1",
+      "matchPackageNames": ["websockets"],
+      "enabled": false
     }
   ]
 }
