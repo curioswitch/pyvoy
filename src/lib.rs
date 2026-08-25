@@ -18,8 +18,55 @@ mod wsgi;
 
 declare_all_init_functions!(init, http: new_http_filter_config_fn, network: new_network_filter_config_fn);
 
+unsafe extern "C" {
+    fn atexit(callback: extern "C" fn()) -> std::os::raw::c_int;
+}
+
+// PyO3 does not provide a mechanism for invoking interpreter finalization, which
+// means atexit hooks are not called on server shutdown. We go ahead and invoke
+// them manually in a C exit handler instead because Envoy also doesn't provide
+// a finalization hook.
+extern "C" fn run_python_atexit_hooks() {
+    if unsafe { pyo3::ffi::Py_IsInitialized() } == 0 {
+        return;
+    }
+    let _: Result<(), PyErr> = Python::attach(|py| {
+        py.import("atexit")?.call_method0("_run_exitfuncs")?;
+        Ok(())
+    });
+}
+
+// Windows runs exit handlers registered from a DLL through the process-global
+// CRT table, which would be left dangling if the DLL were unloaded first, so
+// pin the module to keep it loaded until process exit.
+#[cfg(windows)]
+fn pin_module() {
+    const GET_MODULE_HANDLE_EX_FLAG_PIN: u32 = 0x1;
+    const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x4;
+    unsafe extern "system" {
+        fn GetModuleHandleExW(
+            flags: u32,
+            module_name: *const u16,
+            module: *mut *mut std::ffi::c_void,
+        ) -> i32;
+    }
+    let mut handle = std::ptr::null_mut();
+    unsafe {
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            run_python_atexit_hooks as *const () as *const u16,
+            &mut handle,
+        );
+    }
+}
+
 fn init() -> bool {
     Python::initialize();
+    #[cfg(windows)]
+    pin_module();
+    unsafe {
+        atexit(run_python_atexit_hooks);
+    }
     let init_result: Result<_, PyErr> = Python::attach(|py| {
         let syspath = py.import("sys")?.getattr("path")?.cast_into::<PyList>()?;
         syspath.insert(0, ".")?;
