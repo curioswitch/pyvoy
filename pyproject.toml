@@ -58,7 +58,7 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.4",
+  "ruff==0.16.5",
   "seaborn==0.13.2",
   "starlette==1.6.0",
   "trustme==1.2.1",
