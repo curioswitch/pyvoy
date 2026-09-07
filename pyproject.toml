@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "envoy-server==1.39.0",
+  "envoy-server==1.39.1",
   "find-libpython>=0.5.1",
   "pyqwest>=0.6.2",
   "pyyaml>=6.0",
@@ -47,7 +47,7 @@ pyvoy = "pyvoy._cli:main"
 dev = [
   "asgiref==3.12.1",
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
-  "connectrpc==0.11.1",
+  "connectrpc==0.12.1",
   "granian==2.8.2",
   "gunicorn==26.2.0",
   "hypercorn==0.18.0",
@@ -58,7 +58,7 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.5",
+  "ruff==0.16.6",
   "seaborn==0.13.2",
   "starlette==1.6.0",
   "trustme==1.2.1",
@@ -68,7 +68,7 @@ dev = [
   "wheel==0.48.0",
 ]
 
-docs = ["mkdocstrings-python==2.0.7", "zensical==0.0.57"]
+docs = ["mkdocstrings-python==2.0.8", "zensical==0.0.59"]
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
