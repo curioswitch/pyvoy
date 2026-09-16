@@ -47,6 +47,12 @@
       "matchCurrentVersion": "16.1.1",
       "matchPackageNames": ["websockets"],
       "enabled": false
+    },
+    {
+      "matchCategories": ["rust"],
+      "groupName": "Rust dependencies",
+      "matchPackageNames": ["envoy-proxy-dynamic-modules-rust-sdk"],
+      "enabled": false
     }
   ]
 }
