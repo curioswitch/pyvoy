@@ -278,3 +278,57 @@ def test_websockets_max_message_size_allows_zero(
 
     assert captured_server is not None
     assert captured_server._websockets_max_message_size == 0
+
+
+def test_content_encodings_parsed_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyvoy",
+            "tests.apps.asgi.kitchensink",
+            "--content-encodings",
+            "zstd,br,gzip",
+            "--print-envoy-config",
+        ],
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._content_encodings == ["zstd", "br", "gzip"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_error"),
+    [
+        ("gzip,deflate", "invalid content encoding 'deflate'"),
+        ("gzip,zopfli", "invalid content encoding 'zopfli'"),
+        ("gzip,br,gzip", "content encodings must not be repeated"),
+    ],
+)
+def test_invalid_content_encodings_rejected(
+    value: str,
+    expected_error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyvoy", "tests.apps.asgi.kitchensink", "--content-encodings", value],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 2
+    assert f"argument --content-encodings: {expected_error}" in capsys.readouterr().err

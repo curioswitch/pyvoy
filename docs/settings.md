@@ -52,6 +52,17 @@ than serving in Python with e.g., Starlette.
   and this port will in addition listen with TLS.
 - `--tls-disable-http3` - By default, if TLS is enabled, the port will also listen on UDP for HTTP/3 connections.
   Set to disable support for HTTP/3 connections.
+- `--content-encodings` - A comma-separated list of content encodings, out of `gzip`, `br`, and `zstd`, to compress
+  responses with, in order of preference, for example `zstd,br,gzip`. Responses that are already encoded, such as
+  precompressed static files, are passed through untouched. **Default**: _unset_, meaning responses are not compressed.
+
+  The client's `Accept-Encoding` header decides which of the offered encodings is used: the one the client gives
+  the highest q-value wins, and `Accept-Encoding: *` selects the first encoding in the list. Unfortunately, due to
+  an Envoy limitation, only the first entry in the list is a true server-side preference - it is chosen whenever
+  the client accepts it at the same q-value as another offered encoding.
+
+  When this is set, applications no longer receive the `Accept-Encoding` request header so compression is handled
+  entirely in Envoy.
 
 ## HTTP Client
 

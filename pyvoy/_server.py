@@ -32,6 +32,9 @@ Directory = Literal["index", "listing", "deny"]
 Precompressed = Literal["br", "gzip", "zstd"]
 """A precompressed asset variant served in preference order."""
 
+ContentEncoding = Literal["gzip", "br", "zstd"]
+"""A content encoding responses may be compressed with."""
+
 LogLevel = Literal[
     "trace", "debug", "info", "warning", "warn", "error", "critical", "off"
 ]
@@ -190,6 +193,7 @@ class PyvoyServer:
     _websockets: bool
     _websockets_max_message_size: int | None
     _websockets_compression: bool
+    _content_encodings: list[ContentEncoding]
 
     _admin_address: str | None
 
@@ -213,6 +217,7 @@ class PyvoyServer:
         websockets: bool = False,
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
+        content_encodings: Iterable[ContentEncoding] | None = None,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
         upstreams: Iterable[dict[str, Any] | Upstream] | None = None,
@@ -248,6 +253,10 @@ class PyvoyServer:
                 size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
                 compression.
+            content_encodings: The content encodings to compress responses with, in
+                order of preference. Unset or empty disables response compression.
+                When set, applications no longer receive the Accept-Encoding
+                request header so they do not compress responses themselves.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
             upstreams: A list of upstream clusters to add to the Envoy configuration.
@@ -258,8 +267,9 @@ class PyvoyServer:
         Raises:
             TypeError: If worker_threads or websockets_max_message_size is not an
                 integer.
-            ValueError: If worker_threads is not between 1 and sys.maxsize, or
-                websockets_max_message_size is not between 0 and sys.maxsize.
+            ValueError: If worker_threads is not between 1 and sys.maxsize,
+                websockets_max_message_size is not between 0 and sys.maxsize, or
+                content_encodings contains an unknown or duplicate encoding.
         """
         if worker_threads is not None:
             if not isinstance(worker_threads, int) or isinstance(worker_threads, bool):
@@ -277,6 +287,14 @@ class PyvoyServer:
             if not 0 <= websockets_max_message_size <= sys.maxsize:
                 msg = f"websockets_max_message_size must be between 0 and {sys.maxsize}"
                 raise ValueError(msg)
+        content_encodings = list(content_encodings) if content_encodings else []
+        for encoding in content_encodings:
+            if encoding not in _COMPRESSOR_LIBRARIES:
+                msg = f"content_encodings must each be one of {', '.join(_COMPRESSOR_LIBRARIES)}, got '{encoding}'"
+                raise ValueError(msg)
+        if len(set(content_encodings)) != len(content_encodings):
+            msg = "content_encodings must not contain duplicates"
+            raise ValueError(msg)
 
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
@@ -291,6 +309,7 @@ class PyvoyServer:
         self._websockets = websockets
         self._websockets_max_message_size = websockets_max_message_size
         self._websockets_compression = websockets_compression
+        self._content_encodings = content_encodings
         self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
@@ -500,6 +519,12 @@ class PyvoyServer:
             )
         if not self._websockets_compression:
             base_pyvoy_config["websockets_compression"] = False
+        # Response compression runs before the terminal filter that generates the
+        # response, so it sees the body on the way back out to the client.
+        compressor_filters = [
+            _compressor_filter(encoding, choose_first=i == 0)
+            for i, encoding in enumerate(self._content_encodings)
+        ]
         virtual_host_config = {"name": "local_service", "domains": ["*"]}
         ws_pyvoy_config: dict[str, str | int | bool] | None = None
         # A plain single app with no static mounts uses a single terminal filter with
@@ -515,6 +540,8 @@ class PyvoyServer:
             ws_pyvoy_config = pyvoy_config
 
             http_filters = [
+                *compressor_filters,
+                *_app_request_filters(self._content_encodings),
                 {
                     "name": "pyvoy",
                     "typed_config": {
@@ -527,7 +554,7 @@ class PyvoyServer:
                             "value": json.dumps(pyvoy_config),
                         },
                     },
-                }
+                },
             ]
         else:
             matcher_map: dict[str, dict] = {}
@@ -541,7 +568,11 @@ class PyvoyServer:
                 ws_pyvoy_config = pyvoy_config
                 # The single app is the catch-all. Envoy's prefix_match_map does
                 # longest-prefix matching, so static mounts at longer prefixes win.
-                matcher_map["/"] = _dynamic_module_action("pyvoy", pyvoy_config)
+                matcher_map["/"] = _dynamic_module_action(
+                    "pyvoy",
+                    pyvoy_config,
+                    prepend_filters=_app_request_filters(self._content_encodings),
+                )
             else:
                 for mount in self._app:
                     pyvoy_config = {
@@ -554,7 +585,9 @@ class PyvoyServer:
                     if ws_pyvoy_config is None:
                         ws_pyvoy_config = pyvoy_config
                     matcher_map[mount.path] = _dynamic_module_action(
-                        "pyvoy", pyvoy_config
+                        "pyvoy",
+                        pyvoy_config,
+                        prepend_filters=_app_request_filters(self._content_encodings),
                     )
             for static_mount in self._static_mounts:
                 matcher_map[static_mount.path] = _dynamic_module_action(
@@ -564,6 +597,7 @@ class PyvoyServer:
                 msg = "at least one mount is required"
                 raise ValueError(msg)
             http_filters = [
+                *compressor_filters,
                 {
                     "name": "envoy.filters.http.composite",
                     "typed_config": {
@@ -898,29 +932,84 @@ class PyvoyServer:
         return config
 
 
-def _dynamic_module_action(name: str, config: dict) -> dict:
-    """Builds a composite ExecuteFilterAction wrapping a terminal dynamic-module filter."""
-    return {
-        "action": {
-            "name": "composite_action",
-            "typed_config": {
-                "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction",
-                "typed_config": {
-                    "name": name,
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
-                        "dynamic_module_config": {"name": name},
-                        "filter_name": name,
-                        "terminal_filter": True,
-                        "filter_config": {
-                            "@type": "type.googleapis.com/google.protobuf.StringValue",
-                            "value": json.dumps(config),
-                        },
-                    },
-                },
-            },
-        }
+_COMPRESSOR_LIBRARIES: dict[str, tuple[str, str]] = {
+    "gzip": (
+        "gzip",
+        "type.googleapis.com/envoy.extensions.compression.gzip.compressor.v3.Gzip",
+    ),
+    "br": (
+        "brotli",
+        "type.googleapis.com/envoy.extensions.compression.brotli.compressor.v3.Brotli",
+    ),
+    "zstd": (
+        "zstd",
+        "type.googleapis.com/envoy.extensions.compression.zstd.compressor.v3.Zstd",
+    ),
+}
+
+
+def _compressor_filter(encoding: ContentEncoding, *, choose_first: bool) -> dict:
+    library_name, library_type = _COMPRESSOR_LIBRARIES[encoding]
+    config: dict[str, Any] = {
+        "@type": "type.googleapis.com/envoy.extensions.filters.http.compressor.v3.Compressor",
+        "compressor_library": {
+            "name": library_name,
+            "typed_config": {"@type": library_type},
+        },
     }
+    if choose_first:
+        config["choose_first"] = True
+    return {"name": f"envoy.filters.http.compressor.{encoding}", "typed_config": config}
+
+
+def _app_request_filters(content_encodings: list[ContentEncoding]) -> list[dict]:
+    if not content_encodings:
+        return []
+    return [_strip_accept_encoding_filter()]
+
+
+def _strip_accept_encoding_filter() -> dict:
+    """Builds a filter removing Accept-Encoding from the request."""
+    return {
+        "name": "envoy.filters.http.header_mutation",
+        "typed_config": {
+            "@type": "type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation",
+            "mutations": {"request_mutations": [{"remove": "accept-encoding"}]},
+        },
+    }
+
+
+def _dynamic_module_action(
+    name: str, config: dict, prepend_filters: list[dict] | None = None
+) -> dict:
+    """Builds a composite ExecuteFilterAction wrapping a terminal dynamic-module filter.
+
+    Any prepend_filters run before the terminal filter, which is how per-mount
+    request handling is expressed when routing goes through the composite filter.
+    """
+    module_filter = {
+        "name": name,
+        "typed_config": {
+            "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
+            "dynamic_module_config": {"name": name},
+            "filter_name": name,
+            "terminal_filter": True,
+            "filter_config": {
+                "@type": "type.googleapis.com/google.protobuf.StringValue",
+                "value": json.dumps(config),
+            },
+        },
+    }
+    action_config: dict[str, Any] = {
+        "@type": "type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction"
+    }
+    if prepend_filters:
+        action_config["filter_chain"] = {
+            "typed_config": [*prepend_filters, module_filter]
+        }
+    else:
+        action_config["typed_config"] = module_filter
+    return {"action": {"name": "composite_action", "typed_config": action_config}}
 
 
 def _to_datasource(value: bytes | os.PathLike) -> dict:

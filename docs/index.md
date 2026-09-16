@@ -28,6 +28,7 @@ to bring you all features of HTTP/2 and 3, with great performance and stability.
 - WebSockets, including compression
 - An HTTP client using Envoy's stack
 - Static file serving mounted alongside your application
+- Response compression with gzip, Brotli, or Zstandard
 
 ## Limitations
 

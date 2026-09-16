@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "ContentEncoding",
     "Directory",
     "HTTPVersion",
     "Interface",
@@ -15,6 +16,7 @@ __all__ = [
 ]
 
 from ._server import (
+    ContentEncoding,
     Directory,
     HTTPVersion,
     Interface,
