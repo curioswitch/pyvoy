@@ -37,7 +37,7 @@ jobs:
           apt-get install -y build-essential curl git gnupg lsb-release software-properties-common wget
 
       - name: Set up LLVM
-        run: bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
+        run: wget -O - https://apt.llvm.org/llvm.sh | bash -s -- 21
 
       - name: Set up uv
         run: |
