@@ -448,6 +448,140 @@ def run_static_benchmark() -> None:
                 server.communicate()
 
 
+# Two representative dynamic response sizes: a typical JSON payload and a large one.
+COMPRESSION_SIZES = {"small": 16 * 1024, "large": 256 * 1024}
+
+
+@dataclass
+class CompressionConfig:
+    name: str
+    args: list[str]
+
+
+def compression_configs() -> tuple[CompressionConfig, ...]:
+    gzip_app = "bench.compression_app:app"
+    plain_app = "bench.compression_app:plain"
+    return (
+        CompressionConfig(
+            "pyvoy-native", ["pyvoy", plain_app, "--content-encodings", "gzip"]
+        ),
+        CompressionConfig(
+            "pyvoy-starlette", ["pyvoy", "--interface", "asgi", gzip_app]
+        ),
+        CompressionConfig(
+            "granian-starlette", ["granian", "--interface", "asgi", gzip_app]
+        ),
+    )
+
+
+def _probe_compressed(url: str) -> tuple[bool, str | None, int]:
+    """Requests url with gzip accepted, returning (ok, content-encoding, wire bytes)."""
+    request = urllib.request.Request(  # noqa: S310
+        url, headers={"Accept-Encoding": "gzip"}
+    )
+    with urllib.request.urlopen(request) as resp:  # noqa: S310
+        body = resp.read()
+        return resp.status == 200, resp.headers.get("content-encoding"), len(body)
+
+
+def run_compression_benchmark() -> None:
+    """Compares compressing responses natively in Envoy against Starlette's
+    GZipMiddleware doing it in Python, serving the same application payload."""
+    url = "http://127.0.0.1:8000/"
+    print(  # noqa: T201
+        "Starlette GZipMiddleware compresslevel="
+        f"{os.environ.get('BENCH_COMPRESSION_LEVEL', '6')}, "
+        "matching Envoy's gzip default level\n",
+        flush=True,
+    )
+
+    for size_name, size in COMPRESSION_SIZES.items():
+        # The application builds its body at import time, so size is set per launch.
+        env = {**os.environ, "BENCH_COMPRESSION_BYTES": str(size)}
+
+        for config in compression_configs():
+            with subprocess.Popen(  # noqa: S603
+                config.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+            ) as server:
+                started = False
+                encoding, wire_size = None, 0
+                for _ in range(100):
+                    try:
+                        started, encoding, wire_size = _probe_compressed(url)
+                        if started:
+                            break
+                    except Exception:  # noqa: S110
+                        pass
+                    time.sleep(0.1)
+                if server.returncode is not None or not started:
+                    server.terminate()
+                    stdout, stderr = server.communicate()
+                    msg = f"Server {config.name} failed to start\n{stderr.decode()}\n{stdout.decode()}"
+                    raise RuntimeError(msg)
+                # A run where nothing was compressed would silently measure the
+                # wrong thing, so fail loudly instead.
+                if encoding != "gzip":
+                    server.terminate()
+                    server.communicate()
+                    msg = f"Server {config.name} did not compress, content-encoding was {encoding!r}"
+                    raise RuntimeError(msg)
+
+                # Measure the worker process (envoy for pyvoy, the worker for granian).
+                pid = server.pid
+                children = psutil.Process(server.pid).children()
+                if children:
+                    pid = children[-1].pid
+                monitor = ResourceMonitor(pid)
+                monitor.start()
+
+                print(  # noqa: T201
+                    f"Running compression benchmark for {config.name} size={size_name} "
+                    f"({size} bytes, {wire_size} bytes gzipped)\n",
+                    flush=True,
+                )
+                oha_args = [
+                    "oha",
+                    "-z",
+                    "5s",
+                    "-c",
+                    "50",
+                    "--no-tui",
+                    "--output-format",
+                    "json",
+                    "--http-version",
+                    "1.1",
+                    "-m",
+                    "GET",
+                    "-H",
+                    "Accept-Encoding: gzip",
+                    url,
+                ]
+                monitor.clear()
+                oha_run = subprocess.run(  # noqa: S603
+                    oha_args, check=True, capture_output=True, text=True
+                )
+                resource = monitor.aggregate()
+                oha_json = json.loads(oha_run.stdout)
+                _print_oha_report(oha_json)
+
+                rps = oha_json.get("summary", {}).get("requestsPerSec")
+                if isinstance(rps, (int, float)):
+                    print(  # noqa: T201
+                        f"\nThroughput\t\t{rps * size / (1024 * 1024):.2f} MiB/s uncompressed"
+                    )
+                print(  # noqa: T201
+                    f"CPU Percentage\t[Min, Max, Avg]\t\t{resource.min.cpu_percent:.2f}, {resource.max.cpu_percent:.2f}, {resource.avg.cpu_percent:.2f}%"
+                )
+                print(  # noqa: T201
+                    f"Memory RSS\t[Min, Max, Avg]\t\t{resource.min.rss}, {resource.max.rss}, {resource.avg.rss}\n"
+                )
+                print("\n", flush=True)  # noqa: T201
+
+                monitor.stop()
+                server.terminate()
+                server.communicate()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Conformance server")
     parser.add_argument(
@@ -673,6 +807,7 @@ def main() -> None:
 
     if not args.short:
         run_static_benchmark()
+        run_compression_benchmark()
 
 
 if __name__ == "__main__":

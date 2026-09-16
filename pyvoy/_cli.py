@@ -13,6 +13,7 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
+    ContentEncoding,
     Directory,
     Interface,
     LogLevel,
@@ -51,6 +52,7 @@ class CLIArgs:
     websockets: bool
     websockets_max_message_size: int
     websockets_compression: bool
+    content_encodings: list[ContentEncoding]
     reload: bool
     reload_dirs: list[str]
     reload_includes: list[str]
@@ -71,6 +73,18 @@ def _positive_int(value: str) -> int:
 
 def _non_negative_int(value: str) -> int:
     return _bounded_int(value, minimum=0)
+
+
+def _content_encodings(value: str) -> list[ContentEncoding]:
+    encodings = [encoding.strip() for encoding in value.split(",") if encoding.strip()]
+    for encoding in encodings:
+        if encoding not in get_args(ContentEncoding):
+            msg = f"invalid content encoding '{encoding}', expected one of {', '.join(get_args(ContentEncoding))}"
+            raise argparse.ArgumentTypeError(msg)
+    if len(set(encodings)) != len(encodings):
+        msg = "content encodings must not be repeated"
+        raise argparse.ArgumentTypeError(msg)
+    return cast("list[ContentEncoding]", encodings)
 
 
 async def amain() -> None:
@@ -220,6 +234,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--content-encodings",
+        help="comma-separated content encodings to compress responses with, in order of preference, for example 'zstd,br,gzip'. Compression is disabled if unset.",
+        type=_content_encodings,
+        default=[],
+    )
+
+    parser.add_argument(
         "--reload",
         help="enable auto-reloading on code changes",
         action="store_true",
@@ -354,6 +375,7 @@ async def amain() -> None:
         websockets=args.websockets,
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,
+        content_encodings=args.content_encodings,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,
         static_mounts=static_mounts,
