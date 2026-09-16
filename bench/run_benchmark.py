@@ -488,12 +488,10 @@ def run_compression_benchmark() -> None:
     """Compares compressing responses natively in Envoy against Starlette's
     GZipMiddleware doing it in Python, serving the same application payload."""
     url = "http://127.0.0.1:8000/"
-    # The two sides do not use the same gzip parameters out of the box, which is
-    # part of what the comparison shows. BENCH_COMPRESSION_LEVEL matches them up.
     print(  # noqa: T201
         "Starlette GZipMiddleware compresslevel="
-        f"{os.environ.get('BENCH_COMPRESSION_LEVEL', '9')}, "
-        "Envoy gzip defaults to level 6 with a 4 KiB window\n",
+        f"{os.environ.get('BENCH_COMPRESSION_LEVEL', '6')}, "
+        "matching Envoy's gzip default level\n",
         flush=True,
     )
 

@@ -11,9 +11,8 @@ from starlette.routing import Route
 # The response body size, set by run_compression_benchmark before launching.
 _BODY_SIZE = int(os.environ.get("BENCH_COMPRESSION_BYTES", str(16 * 1024)))
 
-# Starlette's own default is 9. Envoy's gzip defaults to level 6 with a 4 KiB
-# window, so set this to 6 to compare the two paths at a matched level.
-_LEVEL = int(os.environ.get("BENCH_COMPRESSION_LEVEL", "9"))
+# Matched to Envoy's gzip default of level 6.
+_LEVEL = int(os.environ.get("BENCH_COMPRESSION_LEVEL", "6"))
 
 # JSON-lines shaped text, compressible like a real API response but not a single
 # repeated run of bytes.
