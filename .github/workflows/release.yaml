@@ -25,7 +25,7 @@ jobs:
           - amd64
           - arm64
     container:
-      image: ubuntu:20.04
+      image: ubuntu:26.04
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
