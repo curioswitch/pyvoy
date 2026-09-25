@@ -34,9 +34,6 @@ dependencies = [
   "winloop>=0.4.1; sys_platform == 'win32'",
 ]
 
-[project.optional-dependencies]
-trio = ["trio>=0.25.0"]
-
 [project.urls]
 Changelog = "https://github.com/curioswitch/pyvoy/releases"
 Homepage = "https://github.com/curioswitch/pyvoy"

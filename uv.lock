@@ -2192,11 +2192,6 @@ dependencies = [
     { name = "winloop", marker = "sys_platform == 'win32'" },
 ]
 
-[package.optional-dependencies]
-trio = [
-    { name = "trio" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "anyio" },
@@ -2233,11 +2228,9 @@ requires-dist = [
     { name = "find-libpython", specifier = ">=0.5.1" },
     { name = "pyqwest", specifier = ">=0.6.2" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "trio", marker = "extra == 'trio'", specifier = ">=0.25.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.22.1" },
     { name = "winloop", marker = "sys_platform == 'win32'", specifier = ">=0.4.1" },
 ]
-provides-extras = ["trio"]
 
 [package.metadata.requires-dev]
 dev = [

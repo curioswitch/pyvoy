@@ -216,7 +216,7 @@ async def amain() -> None:
 
     parser.add_argument(
         "--io",
-        help="the async library to run ASGI applications on. trio requires the 'trio' extra to be installed.",
+        help="the async library to run ASGI applications on. trio must be installed separately.",
         choices=get_args(AsyncLibrary),
         type=str,
         default="asyncio",

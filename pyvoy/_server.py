@@ -252,8 +252,8 @@ class PyvoyServer:
             log_level: The log level for Envoy.
             worker_threads: The positive number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
-            io: The async library ASGI applications run on. trio requires the
-                'trio' extra to be installed.
+            io: The async library ASGI applications run on. trio must be
+                installed separately.
             websockets: Whether to enable ASGI WebSocket support. WebSockets are
                 handled by the primary application, which must use ASGI.
             websockets_max_message_size: The non-negative maximum WebSocket message
