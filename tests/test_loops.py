@@ -8,11 +8,17 @@ import pytest
 
 from pyvoy import Loop, PyvoyServer
 
+from ._util import gil_enabled
+
 if TYPE_CHECKING:
     from pyqwest import Client
 
 
 def _loop_param(loop: Loop) -> object:
+    if loop == "zuvloop" and not gil_enabled():
+        return pytest.param(
+            loop, marks=pytest.mark.skip(reason="zuvloop hangs on free-threaded Python")
+        )
     installed = importlib.util.find_spec(loop) is not None
     return pytest.param(
         loop, marks=pytest.mark.skipif(not installed, reason=f"{loop} is not installed")

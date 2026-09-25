@@ -7,6 +7,8 @@ import pytest
 import pytest_asyncio
 from pyqwest import Client, HTTPTransport, HTTPVersion
 
+from ._util import gil_enabled
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -52,11 +54,16 @@ def pytest_collection_modifyitems(
 # PyvoyServer runs applications in its Envoy subprocess, so tests always run
 # on asyncio and this selects the event loop the server runs ASGI applications
 # on. None is the default event loop. zuvloop is not a pyvoy dependency and
-# only supports Python 3.14+, so it runs when installed. Other event loops only
+# only supports Python 3.14+, so it runs when installed. It hangs on
+# free-threaded Python for now, so it is skipped there. Other event loops only
 # get a smoke test in test_loops.py.
 _suite_loops: list[Loop | None] = [
     None,
-    *(["zuvloop"] if importlib.util.find_spec("zuvloop") is not None else []),
+    *(
+        ["zuvloop"]
+        if importlib.util.find_spec("zuvloop") is not None and gil_enabled()
+        else []
+    ),
     "trio",
 ]
 
