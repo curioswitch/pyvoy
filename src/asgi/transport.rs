@@ -541,6 +541,14 @@ impl ResponseContent {
         let Some(pending_future) = state.pending_future.take() else {
             return Ok(());
         };
+        // The application cancelled the read, so the data stays buffered for
+        // the next one.
+        if pending_future
+            .call_method0(py, &inner.constants.done)?
+            .is_truthy(py)?
+        {
+            return Ok(());
+        }
 
         // Deliver any buffered data before surfacing errors or end of stream, matching the
         // ordering in `__anext__`. Otherwise a reset arriving alongside a final chunk while a
@@ -758,13 +766,20 @@ pub(crate) struct SetResponseFutureException {
 #[pymethods]
 impl SetResponseFutureException {
     fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        let err = if let Some(exception) = &self.exception {
-            PyErr::from_value(exception.bind(py).clone())
-        } else {
-            map_reset_reason(py, self.reason, &self.constants)?
-        };
-        self.future
-            .call_method1(py, &self.constants.set_exception, (err,))?;
+        // The application may have cancelled its wait for the response already.
+        if !self
+            .future
+            .call_method0(py, &self.constants.done)?
+            .is_truthy(py)?
+        {
+            let err = if let Some(exception) = &self.exception {
+                PyErr::from_value(exception.bind(py).clone())
+            } else {
+                map_reset_reason(py, self.reason, &self.constants)?
+            };
+            self.future
+                .call_method1(py, &self.constants.set_exception, (err,))?;
+        }
         if let Some(request_content) = &self.request_content {
             let task = request_content.inner.task.lock_py_attached(py).unwrap();
             if let Some(task) = task.as_ref() {

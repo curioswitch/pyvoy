@@ -12,6 +12,8 @@ from pyvoy import HTTPVersion, PyvoyServer, TLSConfig, Upstream
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import Loop
+
 
 @dataclass
 class Certs:
@@ -99,10 +101,11 @@ def _backend_upstreams(backend: PyvoyServer, ca: trustme.CA) -> list[Upstream]:
 
 @pytest_asyncio.fixture(scope="module")
 async def runner_asgi(
-    backend_asgi: PyvoyServer, ca: trustme.CA
+    backend_asgi: PyvoyServer, ca: trustme.CA, loop: Loop | None
 ) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.httpclient.runner",
+        loop=loop,
         lifespan=False,
         env={
             "TEST_URL": f"http://{backend_asgi.listener_address}:{backend_asgi.listener_port}"
@@ -143,8 +146,15 @@ def interface(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def url(request: pytest.FixtureRequest, interface: str) -> str:
-    return request.getfixturevalue(f"url_{interface}")
+def url(interface: str, url_asgi: str, url_wsgi: str) -> str:
+    match interface:
+        case "asgi":
+            return url_asgi
+        case "wsgi":
+            return url_wsgi
+        case _:
+            msg = f"unexpected interface: {interface}"
+            raise ValueError(msg)
 
 
 @pytest.fixture

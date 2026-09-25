@@ -181,8 +181,8 @@ async def test_json_content_existing_content_type(
     )
 
 
-# close_no_read and close_pending_read rely on asyncio-specific request
-# generators and _read_pending so are only exercised against ASGI.
+# The async and sync variants of the close cases are only exercised against
+# their own interface.
 @pytest.mark.asyncio
 async def test_close_no_read(
     url_asgi: str, client: Client, http_scheme: str, http_version: str
@@ -199,13 +199,21 @@ async def test_close_pending_read(
     )
 
 
-# The sync equivalent of close_no_read, so only exercised against WSGI.
 @pytest.mark.asyncio
-async def test_close_request_iter(
+async def test_close_no_read_sync(
     url_wsgi: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
     await _run_test(
-        "client_close_request_iter", url_wsgi, client, http_scheme, http_version
+        "client_close_no_read_sync", url_wsgi, client, http_scheme, http_version
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_pending_read_sync(
+    url_wsgi: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test(
+        "client_close_pending_read_sync", url_wsgi, client, http_scheme, http_version
     )
 
 
@@ -215,6 +223,23 @@ async def test_request_content_error(
 ) -> None:
     await _run_test(
         "client_request_content_error", url, client, http_scheme, http_version
+    )
+
+
+# Only the async transport streams the request body from a task that an
+# interruption can escape.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", ["BodyInterruptedError", "CancelledError"])
+async def test_request_content_interrupted(
+    url_asgi: str, client: Client, http_scheme: str, http_version: str, error: str
+) -> None:
+    await _run_test(
+        "client_request_content_interrupted",
+        url_asgi,
+        client,
+        http_scheme,
+        http_version,
+        extra=error,
     )
 
 

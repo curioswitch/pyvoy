@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -36,9 +35,6 @@ async def _run_test(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    sys.version_info < (3, 11), reason="asyncio.timeout requires Python 3.11+"
-)
 async def test_request_timeout(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
@@ -46,9 +42,6 @@ async def test_request_timeout(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    sys.version_info < (3, 11), reason="asyncio.timeout requires Python 3.11+"
-)
 async def test_response_content_timeout(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
@@ -62,3 +55,10 @@ async def test_connection_error(
     url: str, client: Client, http_scheme: str, http_version: str
 ) -> None:
     await _run_test("errors_connection_error", url, client, http_scheme, http_version)
+
+
+@pytest.mark.asyncio
+async def test_request_not_bytes(
+    url: str, client: Client, http_scheme: str, http_version: str
+) -> None:
+    await _run_test("errors_request_not_bytes", url, client, http_scheme, http_version)
