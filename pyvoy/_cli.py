@@ -17,6 +17,7 @@ from ._server import (
     Directory,
     Interface,
     LogLevel,
+    Loop,
     Mount,
     Precompressed,
     PyvoyServer,
@@ -49,6 +50,7 @@ class CLIArgs:
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
+    loop: Loop | None
     websockets: bool
     websockets_max_message_size: int
     websockets_compression: bool
@@ -213,6 +215,16 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--loop",
+        help="the event loop to run ASGI applications on, where asyncio is the standard library event loop. "
+        "Other event loops must be installed separately. "
+        "(default: uvloop, or winloop on Windows)",
+        choices=get_args(Loop),
+        type=str,
+        default=None,
+    )
+
+    parser.add_argument(
         "--websockets",
         help="enable WebSockets support",
         action="store_true",
@@ -372,6 +384,7 @@ async def amain() -> None:
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
         lifespan=args.lifespan,
+        loop=args.loop,
         websockets=args.websockets,
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,

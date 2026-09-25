@@ -25,7 +25,7 @@ use crate::{
         ExecutorHandles,
         app::load_app,
         awaitable::{EmptyAwaitable, ErrorAwaitable},
-        eventloop::EventLoops,
+        eventloop::{EventLoops, LoopKind},
         get_gil_batch_size,
         headers::extract_headers_from_event,
         scope::new_scope_dict,
@@ -57,6 +57,7 @@ impl WebSocketExecutor {
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
+        loop_kind: LoopKind,
     ) -> PyResult<(Self, ExecutorHandles)> {
         let (app, asgi, loops) = load_app(
             app_module,
@@ -64,6 +65,7 @@ impl WebSocketExecutor {
             &constants,
             worker_threads,
             enable_lifespan,
+            loop_kind,
         )?;
         let (extensions, root_path) = Python::attach(|py| {
             (

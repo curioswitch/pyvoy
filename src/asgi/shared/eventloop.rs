@@ -12,6 +12,56 @@ use pyo3::{
 use super::lifespan::{Lifespan, execute_lifespan};
 use crate::types::{Constants, SyncReceiver};
 
+/// The event loop ASGI applications run on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopKind {
+    /// The standard library asyncio event loop.
+    Asyncio,
+    /// The uvloop asyncio event loop.
+    Uvloop,
+    /// The winloop asyncio event loop.
+    Winloop,
+    /// The zuvloop asyncio event loop.
+    Zuvloop,
+    /// trio, using the event loop adapter in `pyvoy._trio`.
+    Trio,
+}
+
+impl LoopKind {
+    /// Parses the name of an event loop, returning `None` if unsupported.
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "asyncio" => Some(Self::Asyncio),
+            "uvloop" => Some(Self::Uvloop),
+            "winloop" => Some(Self::Winloop),
+            "zuvloop" => Some(Self::Zuvloop),
+            "trio" => Some(Self::Trio),
+            _ => None,
+        }
+    }
+
+    /// The event loop used when none is configured: uvloop, or winloop on
+    /// Windows.
+    pub(crate) fn platform_default() -> Self {
+        if cfg!(target_family = "windows") {
+            Self::Winloop
+        } else {
+            Self::Uvloop
+        }
+    }
+
+    /// The module providing `new_event_loop` for this event loop.
+    fn module(self) -> &'static str {
+        match self {
+            Self::Asyncio => "asyncio",
+            Self::Uvloop => "uvloop",
+            Self::Winloop => "winloop",
+            Self::Zuvloop => "zuvloop",
+            Self::Trio => "pyvoy._trio",
+        }
+    }
+}
+
 enum EventLoopsInner {
     Single(EventLoop),
     Multiple {
@@ -36,13 +86,21 @@ impl EventLoops {
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
         enable_lifespan: Option<bool>,
+        loop_kind: LoopKind,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
         match size {
             n if n > 1 => {
                 let mut loops = Vec::with_capacity(n);
                 for _ in 0..n {
-                    loops.push(EventLoop::new(py, app, asgi, enable_lifespan, constants)?);
+                    loops.push(EventLoop::new(
+                        py,
+                        app,
+                        asgi,
+                        enable_lifespan,
+                        loop_kind,
+                        constants,
+                    )?);
                 }
                 Ok(EventLoops {
                     inner: Arc::new(EventLoopsInner::Multiple {
@@ -57,6 +115,7 @@ impl EventLoops {
                     app,
                     asgi,
                     enable_lifespan,
+                    loop_kind,
                     constants,
                 )?)),
             }),
@@ -135,19 +194,30 @@ impl EventLoop {
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
         enable_lifespan: Option<bool>,
+        loop_kind: LoopKind,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
+        // Import the event loop here rather than on its thread so a missing
+        // module fails startup with its traceback.
+        let new_event_loop = py
+            .import(loop_kind.module())?
+            .getattr("new_event_loop")?
+            .unbind();
         let (tx, rx) = mpsc::channel();
         let rx = SyncReceiver::new(rx);
-        let handle = thread::spawn(|| {
+        let handle = thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
-                #[cfg(not(target_family = "windows"))]
-                let loop_module = py.import("uvloop")?;
-                #[cfg(target_family = "windows")]
-                let loop_module = py.import("winloop")?;
+                let loop_ = new_event_loop.bind(py).call0()?;
+                if loop_kind == LoopKind::Trio {
+                    // trio finalizes async generators and its worker threads
+                    // itself when the run returns.
+                    tx.send(loop_.clone().unbind()).unwrap();
+                    drop(tx);
+                    loop_.call_method0("run_forever")?;
+                    return Ok(());
+                }
 
                 let asyncio = py.import("asyncio")?;
-                let loop_ = loop_module.call_method0("new_event_loop")?;
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
                 tx.send(loop_.clone().unbind()).unwrap();
                 drop(tx);
@@ -165,7 +235,7 @@ impl EventLoop {
 
         let loop_ = py.detach(|| rx.recv()).map_err(|e| {
             PyRuntimeError::new_err(format!(
-                "Failed to initialize asyncio event loop for ASGI executor: {}",
+                "Failed to initialize event loop for ASGI executor: {}",
                 e
             ))
         })?;
@@ -178,6 +248,7 @@ impl EventLoop {
                 asgi,
                 loop_.bind(py),
                 enable_lifespan.unwrap_or(false),
+                loop_kind,
                 constants,
             )?,
         };

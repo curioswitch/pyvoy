@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 Interface = Literal["asgi", "wsgi"]
 
+Loop = Literal["asyncio", "uvloop", "winloop", "zuvloop", "trio"]
+"""An event loop ASGI applications can run on."""
+
 Directory = Literal["index", "listing", "deny"]
 """Behavior when a directory is requested but has no matching index file."""
 
@@ -186,6 +189,7 @@ class PyvoyServer:
     _tls_require_client_certificate: bool
     _worker_threads: int | None
     _lifespan: bool | None
+    _loop: Loop | None
     _additional_envoy_args: list[str] | None
     _env: dict[str, str]
     _upstreams: list[dict[str, Any] | Upstream]
@@ -214,6 +218,7 @@ class PyvoyServer:
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
         lifespan: bool | None = None,
+        loop: Loop | None = None,
         websockets: bool = False,
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
@@ -247,6 +252,9 @@ class PyvoyServer:
             log_level: The log level for Envoy.
             worker_threads: The positive number of worker threads to use.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
+            loop: The event loop ASGI applications run on. 'asyncio' is the
+                standard library event loop. Unset uses uvloop, or winloop on
+                Windows. Other event loops must be installed separately.
             websockets: Whether to enable ASGI WebSocket support. WebSockets are
                 handled by the primary application, which must use ASGI.
             websockets_max_message_size: The non-negative maximum WebSocket message
@@ -316,6 +324,7 @@ class PyvoyServer:
         self._log_level = log_level
         self._worker_threads = worker_threads
         self._lifespan = lifespan
+        self._loop = loop
         self._additional_envoy_args = additional_envoy_args
         self._env = env if env is not None else {}
         self._upstreams = list(upstreams) if upstreams is not None else []
@@ -513,6 +522,8 @@ class PyvoyServer:
             base_pyvoy_config["worker_threads"] = self._worker_threads
         if self._lifespan is not None:
             base_pyvoy_config["lifespan"] = self._lifespan
+        if self._loop is not None:
+            base_pyvoy_config["loop"] = self._loop
         if self._websockets_max_message_size is not None:
             base_pyvoy_config["websockets_max_message_size"] = (
                 self._websockets_max_message_size

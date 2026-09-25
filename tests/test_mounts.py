@@ -14,14 +14,17 @@ if TYPE_CHECKING:
 
     from pyqwest import Client
 
+    from pyvoy import Loop
+
 
 @pytest_asyncio.fixture(scope="module")
-async def server() -> AsyncIterator[PyvoyServer]:
+async def server(loop: Loop | None) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         [
             Mount(app="tests.apps.asgi.kitchensink", path="/asgi", interface="asgi"),
             Mount(app="tests.apps.wsgi.kitchensink", path="/wsgi", interface="wsgi"),
         ],
+        loop=loop,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:

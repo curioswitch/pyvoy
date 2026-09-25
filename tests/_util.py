@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from asyncio import StreamReader
 
 
@@ -34,3 +35,14 @@ async def assert_logs_contains(
         f"Missing log lines: {missing_lines}\nRead lines: {''.join(read_lines)}"
     )
     return read_lines
+
+
+def default_loop() -> str:
+    """The event loop pyvoy uses when none is configured."""
+    return "winloop" if sys.platform == "win32" else "uvloop"
+
+
+def gil_enabled() -> bool:
+    """Whether the GIL is enabled, which it always is before Python 3.13."""
+    is_gil_enabled = getattr(sys, "_is_gil_enabled", None)
+    return is_gil_enabled is None or is_gil_enabled()

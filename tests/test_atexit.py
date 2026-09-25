@@ -9,17 +9,18 @@ from pyvoy import PyvoyServer
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pyvoy import Interface
+    from pyvoy import Interface, Loop
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("interface", ["asgi", "wsgi"])
 async def test_atexit_hooks_run_on_shutdown(
-    interface: Interface, tmp_path: Path
+    interface: Interface, tmp_path: Path, loop: Loop | None
 ) -> None:
     marker = tmp_path / "atexit.txt"
     async with PyvoyServer(
         f"tests.apps.{interface}.atexit_hook",
+        loop=loop,
         interface=interface,
         env={"PYVOY_TEST_ATEXIT_PATH": str(marker)},
     ):

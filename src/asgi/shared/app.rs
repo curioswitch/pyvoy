@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::{asgi::shared::eventloop::EventLoops, types::Constants};
+use crate::{
+    asgi::shared::eventloop::{EventLoops, LoopKind},
+    types::Constants,
+};
 use pyo3::{IntoPyObjectExt, prelude::*, types::PyDict};
 
 use pyo3::PyResult;
@@ -11,6 +14,7 @@ pub(crate) fn load_app(
     constants: &Arc<Constants>,
     worker_threads: usize,
     enable_lifespan: Option<bool>,
+    loop_kind: LoopKind,
 ) -> PyResult<(Py<PyAny>, Py<PyDict>, EventLoops)> {
     // Import threading on this thread because Python records the first thread
     // that imports threading as the main thread. When running the Python interpreter, this
@@ -32,7 +36,15 @@ pub(crate) fn load_app(
         asgi.set_item("version", "3.0")?;
         asgi.set_item("spec_version", "2.5")?;
 
-        let loops = EventLoops::new(py, worker_threads, &app, &asgi, enable_lifespan, constants)?;
+        let loops = EventLoops::new(
+            py,
+            worker_threads,
+            &app,
+            &asgi,
+            enable_lifespan,
+            loop_kind,
+            constants,
+        )?;
 
         Ok::<_, PyErr>((app.unbind(), asgi.unbind(), loops))
     })

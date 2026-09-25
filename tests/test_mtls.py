@@ -16,6 +16,8 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import Loop
+
 
 @dataclass
 class Certs:
@@ -43,9 +45,10 @@ def certs() -> Certs:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server_asgi(certs: Certs) -> AsyncIterator[PyvoyServer]:
+async def server_asgi(certs: Certs, loop: Loop | None) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        loop=loop,
         tls_key=certs.server_key,
         tls_cert=certs.server_cert,
         tls_ca_cert=certs.ca,

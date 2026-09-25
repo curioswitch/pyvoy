@@ -6,6 +6,9 @@ from collections import defaultdict
 from time import perf_counter_ns
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
+import anyio
+import sniffio
+
 if TYPE_CHECKING:
     from asgiref.typing import (
         ASGIReceiveCallable,
@@ -455,7 +458,7 @@ async def _client_closed_before_response(
         msg = await recv()
         if msg["type"] != "http.request":
             break
-        await asyncio.sleep(0.1)
+        await anyio.sleep(0.1)
     if msg["type"] != "http.disconnect":
         msg = f'{msg["type"]} != "http.disconnect"'
         raise RuntimeError(msg)
@@ -502,7 +505,7 @@ async def _client_closed_after_response_start(
         except OSError:
             print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
             break
-        await asyncio.sleep(0.1)
+        await anyio.sleep(0.1)
     print("client-closed-after-response-start assertions passed", file=sys.stderr)  # noqa: T201
 
 
@@ -526,7 +529,7 @@ async def _client_closed_after_trailers_start(
         except OSError:
             print("send raised OSError as expected", file=sys.stderr)  # noqa: T201
             break
-        await asyncio.sleep(0.1)
+        await anyio.sleep(0.1)
     print("client-closed-after-trailers-start assertions passed", file=sys.stderr)  # noqa: T201
 
 
@@ -574,7 +577,7 @@ async def _controlled(
             break
 
     if sleep_ms > 0:
-        await asyncio.sleep(sleep_ms / 1000.0)
+        await anyio.sleep(sleep_ms / 1000.0)
 
     await send(
         {
@@ -1122,6 +1125,24 @@ async def _echo_scope(
     await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
+async def _event_loop(send: ASGISendCallable) -> None:
+    library = sniffio.current_async_library()
+    if library == "asyncio":
+        # e.g. uvloop for uvloop.Loop, asyncio for asyncio.unix_events.
+        library = type(asyncio.get_running_loop()).__module__.split(".")[0]
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": library.encode(), "more_body": False}
+    )
+
+
 async def http_app(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1191,6 +1212,8 @@ async def http_app(
             await _nihongo(scope, recv, send)
         case "/echo-scope":
             await _echo_scope(scope, recv, send)
+        case "/event-loop":
+            await _event_loop(send)
         case _:
             await _send_failure(f"unknown path: {scope['path']}", send)
 
@@ -1209,7 +1232,7 @@ async def ws_echo(
             "subprotocol": None,
         }
     )
-    await asyncio.sleep(0.5)
+    await anyio.sleep(0.5)
     while True:
         msg = await recv()
         match msg["type"]:

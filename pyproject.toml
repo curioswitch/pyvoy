@@ -45,6 +45,7 @@ pyvoy = "pyvoy._cli:main"
 
 [dependency-groups]
 dev = [
+  "anyio==4.14.1",
   "asgiref==3.12.1",
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
   "connectrpc==0.12.1",
@@ -61,11 +62,14 @@ dev = [
   "ruff==0.16.8",
   "seaborn==0.13.2",
   "starlette==1.6.0",
+  "trio==0.34.0",
   "trustme==1.2.1",
   "uvicorn[standard]==0.53.0",
   "watchfiles==1.3.0",
   "websockets==16.1.1",
   "wheel==0.48.0",
+  # zuvloop is not a pyvoy dependency but is tested when available.
+  "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
 docs = ["mkdocstrings-python==2.0.8", "zensical==0.0.63"]

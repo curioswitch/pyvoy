@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
 from time import perf_counter_ns
 from typing import TYPE_CHECKING
+
+import anyio
 
 if TYPE_CHECKING:
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, WebSocketScope
@@ -119,7 +120,7 @@ async def app(
         # Stall before reading so a flooding client fills the buffer and the
         # server applies request backpressure; the client's send() then pauses
         # until we start draining.
-        await asyncio.sleep(0.5)
+        await anyio.sleep(0.5)
         while True:
             m = await receive()
             if m["type"] == "websocket.disconnect":
