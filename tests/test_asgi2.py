@@ -9,7 +9,7 @@ from pyvoy import PyvoyServer
 if TYPE_CHECKING:
     from pyqwest import Client
 
-    from pyvoy import AsyncLibrary
+    from pyvoy import Loop
 
 
 @pytest.mark.asyncio
@@ -24,9 +24,9 @@ if TYPE_CHECKING:
         "asgi3_callable",
     ],
 )
-async def test_asgi2_compat(app: str, client: Client, io: AsyncLibrary):
+async def test_asgi2_compat(app: str, client: Client, loop: Loop | None):
     async with PyvoyServer(
-        f"tests.apps.asgi.asgi2:{app}", io=io, stdout=None, stderr=None
+        f"tests.apps.asgi.asgi2:{app}", loop=loop, stdout=None, stderr=None
     ) as server:
         url = f"http://{server.listener_address}:{server.listener_port}"
         response = await client.get(url)

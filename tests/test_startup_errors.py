@@ -76,18 +76,12 @@ def test_config_invalid_numeric_setting(
 
 
 @pytest.mark.parametrize("filter_name", ["pyvoy", "pyvoy-ws"])
-@pytest.mark.parametrize(
-    ("value", "message"),
-    [
-        ("curio", "Filter config field 'io' must be 'asyncio' or 'trio', got 'curio'"),
-        (1, "Filter config field 'io' must be 'asyncio' or 'trio'"),
-    ],
-)
-def test_config_invalid_io(filter_name: str, value: object, message: str) -> None:
+@pytest.mark.parametrize("value", ["curio", 1])
+def test_config_invalid_loop(filter_name: str, value: object) -> None:
     config = PyvoyServer(
         "tests.apps.asgi.kitchensink", websockets=filter_name == "pyvoy-ws"
     ).get_envoy_config()
-    assert _set_dynamic_filter_config_value(config, filter_name, "io", value)
+    assert _set_dynamic_filter_config_value(config, filter_name, "loop", value)
 
     result = subprocess.run(
         [envoy_path, "--config-yaml", json.dumps(config)],
@@ -98,7 +92,10 @@ def test_config_invalid_io(filter_name: str, value: object, message: str) -> Non
     )
 
     assert result.returncode != 0
-    assert message in result.stderr
+    assert (
+        "Filter config field 'loop' must be one of 'asyncio', 'uvloop', 'winloop', "
+        "'zuvloop', or 'trio'"
+    ) in result.stderr
 
 
 def test_config_invalid_yaml():

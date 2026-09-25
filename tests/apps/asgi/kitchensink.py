@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from collections import defaultdict
 from time import perf_counter_ns
@@ -1124,7 +1125,11 @@ async def _echo_scope(
     await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
-async def _async_library(send: ASGISendCallable) -> None:
+async def _event_loop(send: ASGISendCallable) -> None:
+    library = sniffio.current_async_library()
+    if library == "asyncio":
+        # e.g. uvloop for uvloop.Loop, asyncio for asyncio.unix_events.
+        library = type(asyncio.get_running_loop()).__module__.split(".")[0]
     await send(
         {
             "type": "http.response.start",
@@ -1134,11 +1139,7 @@ async def _async_library(send: ASGISendCallable) -> None:
         }
     )
     await send(
-        {
-            "type": "http.response.body",
-            "body": sniffio.current_async_library().encode(),
-            "more_body": False,
-        }
+        {"type": "http.response.body", "body": library.encode(), "more_body": False}
     )
 
 
@@ -1211,8 +1212,8 @@ async def http_app(
             await _nihongo(scope, recv, send)
         case "/echo-scope":
             await _echo_scope(scope, recv, send)
-        case "/async-library":
-            await _async_library(send)
+        case "/event-loop":
+            await _event_loop(send)
         case _:
             await _send_failure(f"unknown path: {scope['path']}", send)
 

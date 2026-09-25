@@ -12,13 +12,13 @@ if TYPE_CHECKING:
 
     from pyqwest import Client
 
-    from pyvoy import AsyncLibrary
+    from pyvoy import Loop
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server_asgi(io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
+async def server_asgi(loop: Loop | None) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
-        "tests.apps.asgi.kitchensink", io=io, address="::1", port=0
+        "tests.apps.asgi.kitchensink", loop=loop, address="::1", port=0
     ) as server:
         yield server
 

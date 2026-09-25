@@ -95,22 +95,22 @@ def _pyvoy_filter_configs(config: dict) -> dict[str, dict]:
     return filters
 
 
-def test_io_defaults_to_asyncio() -> None:
+def test_loop_unset_by_default() -> None:
     server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True)
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
     assert set(filters) == {"pyvoy", "pyvoy-ws"}
     for pyvoy_config in filters.values():
-        assert "io" not in pyvoy_config
+        assert "loop" not in pyvoy_config
 
 
-def test_io_trio_configures_all_filters() -> None:
-    server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True, io="trio")
+def test_loop_configures_all_filters() -> None:
+    server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True, loop="trio")
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
     assert set(filters) == {"pyvoy", "pyvoy-ws"}
     for pyvoy_config in filters.values():
-        assert pyvoy_config["io"] == "trio"
+        assert pyvoy_config["loop"] == "trio"
 
 
 @pytest.mark.parametrize("websockets_max_message_size", [True, 1.5])

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    asgi::shared::eventloop::{EventLoops, Io},
+    asgi::shared::eventloop::{EventLoops, LoopKind},
     types::Constants,
 };
 use pyo3::{IntoPyObjectExt, prelude::*, types::PyDict};
@@ -14,7 +14,7 @@ pub(crate) fn load_app(
     constants: &Arc<Constants>,
     worker_threads: usize,
     enable_lifespan: Option<bool>,
-    io: Io,
+    loop_kind: LoopKind,
 ) -> PyResult<(Py<PyAny>, Py<PyDict>, EventLoops)> {
     // Import threading on this thread because Python records the first thread
     // that imports threading as the main thread. When running the Python interpreter, this
@@ -42,7 +42,7 @@ pub(crate) fn load_app(
             &app,
             &asgi,
             enable_lifespan,
-            io,
+            loop_kind,
             constants,
         )?;
 

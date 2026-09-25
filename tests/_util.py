@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from asyncio import StreamReader
 
 
@@ -34,3 +35,8 @@ async def assert_logs_contains(
         f"Missing log lines: {missing_lines}\nRead lines: {''.join(read_lines)}"
     )
     return read_lines
+
+
+def default_loop() -> str:
+    """The event loop pyvoy uses when none is configured."""
+    return "winloop" if sys.platform == "win32" else "uvloop"

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 __all__ = [
-    "AsyncLibrary",
     "ContentEncoding",
     "Directory",
     "HTTPVersion",
     "Interface",
     "LogLevel",
+    "Loop",
     "Mount",
     "Precompressed",
     "PyvoyServer",
@@ -17,12 +17,12 @@ __all__ = [
 ]
 
 from ._server import (
-    AsyncLibrary,
     ContentEncoding,
     Directory,
     HTTPVersion,
     Interface,
     LogLevel,
+    Loop,
     Mount,
     Precompressed,
     PyvoyServer,

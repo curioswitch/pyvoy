@@ -221,10 +221,10 @@ def test_repeated_multi_value_flags_are_accumulated(
 
 
 @pytest.mark.parametrize(
-    ("args", "expected"), [([], "asyncio"), (["--io", "trio"], "trio")]
+    ("args", "expected"), [([], None), (["--loop", "zuvloop"], "zuvloop")]
 )
-def test_io_flag(
-    args: list[str], expected: str, monkeypatch: pytest.MonkeyPatch
+def test_loop_flag(
+    args: list[str], expected: str | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured_server: PyvoyServer | None = None
 
@@ -241,7 +241,7 @@ def test_io_flag(
     cli.main()
 
     assert captured_server is not None
-    assert captured_server._io == expected
+    assert captured_server._loop == expected
 
 
 @pytest.mark.parametrize(

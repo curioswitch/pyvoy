@@ -68,6 +68,8 @@ dev = [
   "watchfiles==1.2.0",
   "websockets==16.1.1",
   "wheel==0.48.0",
+  # zuvloop is not a pyvoy dependency but is tested when available.
+  "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
 docs = ["mkdocstrings-python==2.0.8", "zensical==0.0.62"]

@@ -13,11 +13,11 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
-    AsyncLibrary,
     ContentEncoding,
     Directory,
     Interface,
     LogLevel,
+    Loop,
     Mount,
     Precompressed,
     PyvoyServer,
@@ -50,7 +50,7 @@ class CLIArgs:
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
-    io: AsyncLibrary
+    loop: Loop | None
     websockets: bool
     websockets_max_message_size: int
     websockets_compression: bool
@@ -215,11 +215,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
-        "--io",
-        help="the async library to run ASGI applications on. trio must be installed separately.",
-        choices=get_args(AsyncLibrary),
+        "--loop",
+        help="the event loop to run ASGI applications on, where asyncio is the standard library event loop. "
+        "Other event loops must be installed separately. "
+        "(default: uvloop, or winloop on Windows)",
+        choices=get_args(Loop),
         type=str,
-        default="asyncio",
+        default=None,
     )
 
     parser.add_argument(
@@ -382,7 +384,7 @@ async def amain() -> None:
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
         lifespan=args.lifespan,
-        io=args.io,
+        loop=args.loop,
         websockets=args.websockets,
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,

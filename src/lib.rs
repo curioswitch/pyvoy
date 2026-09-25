@@ -125,23 +125,20 @@ fn parse_usize_config(
     }
 }
 
-/// Parses the async library ASGI applications run on, defaulting to asyncio.
-fn parse_io_config(filter_config: &Yaml) -> Option<asgi::Io> {
-    let Some(name) = filter_config["io"].as_str() else {
-        if filter_config["io"].is_badvalue() {
-            return Some(asgi::Io::Asyncio);
-        }
-        envoy_log_error!("Filter config field 'io' must be 'asyncio' or 'trio'");
-        return None;
-    };
-    let io = asgi::Io::parse(name);
-    if io.is_none() {
+/// Parses the event loop ASGI applications run on, defaulting to the platform
+/// default.
+fn parse_loop_config(filter_config: &Yaml) -> Option<asgi::LoopKind> {
+    let value = &filter_config["loop"];
+    if value.is_badvalue() {
+        return Some(asgi::LoopKind::platform_default());
+    }
+    let loop_kind = value.as_str().and_then(asgi::LoopKind::parse);
+    if loop_kind.is_none() {
         envoy_log_error!(
-            "Filter config field 'io' must be 'asyncio' or 'trio', got '{}'",
-            name
+            "Filter config field 'loop' must be one of 'asyncio', 'uvloop', 'winloop', 'zuvloop', or 'trio'"
         );
     }
-    io
+    loop_kind
 }
 
 fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
@@ -173,7 +170,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     let worker_threads =
         parse_usize_config(filter_config, "worker_threads", default_worker_threads, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
-    let io = parse_io_config(filter_config)?;
+    let loop_kind = parse_loop_config(filter_config)?;
 
     let constants = Python::attach(types::Constants::get);
 
@@ -184,7 +181,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             constants,
             worker_threads,
             enable_lifespan,
-            io,
+            loop_kind,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(app, root_path, constants, worker_threads)
@@ -226,7 +223,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     let root_path = filter_config["root_path"].as_str().unwrap_or("");
     let worker_threads = parse_usize_config(filter_config, "worker_threads", 1, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
-    let io = parse_io_config(filter_config)?;
+    let loop_kind = parse_loop_config(filter_config)?;
     let max_message_size =
         parse_usize_config(filter_config, "websockets_max_message_size", 64 << 20, 0)?; // Default to 64 MiB
     let compression = filter_config["websockets_compression"]
@@ -240,7 +237,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
         constants,
         worker_threads,
         enable_lifespan,
-        io,
+        loop_kind,
         max_message_size,
         compression,
     )

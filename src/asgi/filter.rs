@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::asgi::python;
 use crate::asgi::python::*;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::shared::eventloop::Io;
+use crate::asgi::shared::eventloop::LoopKind;
 use crate::asgi::transport::{
     RequestBody, ResetReason, SendStreamDataEvent, TransportEvent, TransportState,
 };
@@ -32,7 +32,7 @@ impl Config {
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
-        io: Io,
+        loop_kind: LoopKind,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match python::Executor::new(
@@ -42,7 +42,7 @@ impl Config {
             constants,
             worker_threads,
             enable_lifespan,
-            io,
+            loop_kind,
         ) {
             Ok(executor) => executor,
             Err(e) => {

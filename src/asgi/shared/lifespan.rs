@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use super::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable};
-use super::eventloop::Io;
+use super::eventloop::LoopKind;
 use crate::types::{Constants, SyncReceiver};
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
@@ -99,7 +99,7 @@ pub(crate) fn execute_lifespan<'py>(
     asgi: &Bound<'py, PyDict>,
     loop_: &Bound<'py, PyAny>,
     require_lifespan: bool,
-    io: Io,
+    loop_kind: LoopKind,
     constants: &Arc<Constants>,
 ) -> PyResult<(Option<Lifespan>, Option<Py<PyDict>>)> {
     let py = app.py();
@@ -147,11 +147,11 @@ pub(crate) fn execute_lifespan<'py>(
     };
 
     // Both return a concurrent.futures.Future.
-    let future = match io {
-        Io::Asyncio => py
+    let future = match loop_kind {
+        LoopKind::Trio => loop_.call_method1(&constants.run_coroutine_threadsafe, (coro,))?,
+        _ => py
             .import(&constants.asyncio)?
             .call_method1(&constants.run_coroutine_threadsafe, (coro, loop_))?,
-        Io::Trio => loop_.call_method1(&constants.run_coroutine_threadsafe, (coro,))?,
     };
     future.call_method1(
         &constants.add_done_callback,

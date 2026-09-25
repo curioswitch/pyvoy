@@ -15,7 +15,7 @@ use tungstenite::{Message, Utf8Bytes, WebSocket};
 
 use crate::asgi::python::EVENT_ID_REQUEST;
 use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::shared::eventloop::Io;
+use crate::asgi::shared::eventloop::LoopKind;
 use crate::asgi::websocket::executor::{
     Body, EVENT_ID_RESPONSE, RecvFuture, SendEvent, WebSocketExecutor,
 };
@@ -41,7 +41,7 @@ impl Config {
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
-        io: Io,
+        loop_kind: LoopKind,
         max_message_size: usize,
         compression: bool,
     ) -> Option<Self> {
@@ -53,7 +53,7 @@ impl Config {
             constants,
             worker_threads,
             enable_lifespan,
-            io,
+            loop_kind,
         ) {
             Ok(executor) => executor,
             Err(e) => {

@@ -16,16 +16,16 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pyvoy import AsyncLibrary
+    from pyvoy import Loop
 
-from ._util import assert_logs_contains, find_logs_lines
+from ._util import assert_logs_contains, default_loop, find_logs_lines
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server_asgi(io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
+async def server_asgi(loop: Loop | None) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
-        io=io,
+        loop=loop,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
         lifespan=False,
@@ -655,10 +655,10 @@ async def test_wsgi_no_start_response(
 
 
 @pytest.mark.asyncio
-async def test_async_library(url_asgi: str, client: Client, io: AsyncLibrary) -> None:
-    response = await client.get(f"{url_asgi}/async-library")
+async def test_event_loop(url_asgi: str, client: Client, loop: Loop | None) -> None:
+    response = await client.get(f"{url_asgi}/event-loop")
     assert response.status == 200, response.text()
-    assert response.text() == io
+    assert response.text() == (loop or default_loop())
 
 
 @pytest.mark.asyncio

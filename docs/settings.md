@@ -15,9 +15,10 @@ pyvoy for even further customization.
 - `--[no-]lifespan` - Whether to require or disable ASGI lifespan support. By default, we try to run the application
   with lifespan and ignore any exception that is raised. If enabled explicitly, an exception will cause the server to
   fail to start. If disabled, lifespan will not be run at all.
-- `--io` - One of `asyncio` or `trio` to indicate the async library ASGI applications run on. asyncio uses uvloop,
-  or winloop on Windows. trio must be installed separately. Applications built on anyio, such as Starlette and
-  FastAPI, run on either. The [HTTP client](./http-client.md) currently requires asyncio. **Default**: _asyncio_.
+- `--loop` - The event loop to run ASGI applications on, one of `asyncio`, `uvloop`, `winloop`, `zuvloop`, or `trio`.
+  `asyncio` is the standard library event loop. Only the default event loop is installed with pyvoy, others must be
+  installed separately. Applications built on anyio, such as Starlette and FastAPI, run on any of them. The
+  [HTTP client](./http-client.md) currently does not support trio. **Default**: _uvloop_, or _winloop_ on Windows.
 - `--additional-mount` - Can be specified any number of times to mount additional applications in the server. Takes
   a value in the format `app=path=interface`, with the path being where the application is mounted. For more
   complicated routing, it is recommended to invoke Envoy [directly](#envoy) with a full config.
