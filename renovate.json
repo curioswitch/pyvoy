@@ -38,8 +38,8 @@
     },
     {
       // We need to use an older version for compatibility
-      "matchCurrentVersion": "11",
-      "matchPackageNames": ["debian"],
+      "matchCurrentVersion": "20.04",
+      "matchPackageNames": ["ubuntu"],
       "enabled": false
     },
     {
