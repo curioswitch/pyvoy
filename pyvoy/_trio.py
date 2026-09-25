@@ -13,11 +13,17 @@ optional dependency.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
+import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
 import trio
+
+if sys.version_info < (3, 11):
+    # A dependency of trio on these versions.
+    from exceptiongroup import BaseExceptionGroup
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
@@ -29,22 +35,43 @@ _logger = logging.getLogger(__name__)
 class Future:
     """A result set by the executor that an application awaits.
 
-    It is only set and awaited on the trio thread.
+    It is only set and awaited on the trio thread. As with an asyncio future,
+    it is cancelled when the awaiting task is cancelled before it is set, and
+    setting it afterwards is ignored.
     """
 
-    __slots__ = ("_event", "_exception", "_exception_tb", "_result")
+    __slots__ = (
+        "_cancelled",
+        "_event",
+        "_exception",
+        "_exception_tb",
+        "_result",
+        "_waiter",
+    )
 
     def __init__(self) -> None:
         self._event = trio.Event()
+        self._cancelled = False
         self._result: object = None
         self._exception: BaseException | None = None
         self._exception_tb: TracebackType | None = None
+        self._waiter: Generator[Any, None, object] | None = None
+
+    def done(self) -> bool:
+        return self._cancelled or self._event.is_set()
+
+    def cancelled(self) -> bool:
+        return self._cancelled
 
     def set_result(self, result: object) -> None:
+        if self.done():
+            return
         self._result = result
         self._event.set()
 
     def set_exception(self, exception: BaseException) -> None:
+        if self.done():
+            return
         self._exception = exception
         # The executor reuses exception instances across requests, so each
         # raise restores the original traceback instead of growing it.
@@ -52,10 +79,28 @@ class Future:
         self._event.set()
 
     def __await__(self) -> Generator[Any, None, object]:
-        return self._wait().__await__()
+        # `anext(iterator, default)` calls this again each time the task is
+        # resumed, so a pending future keeps handing out the one wait it
+        # started rather than parking the task on a new one every time.
+        if self._waiter is None:
+            if self._event.is_set():
+                return self._finished().__await__()
+            self._waiter = self._wait().__await__()
+        return self._waiter
 
     async def _wait(self) -> object:
-        await self._event.wait()
+        try:
+            try:
+                await self._event.wait()
+            except BaseException:
+                if not self._event.is_set():
+                    self._cancelled = True
+                raise
+            return await self._finished()
+        finally:
+            self._waiter = None
+
+    async def _finished(self) -> object:
         if self._exception is not None:
             raise self._exception.with_traceback(self._exception_tb)
         return self._result
@@ -64,12 +109,14 @@ class Future:
 class Task:
     """An application coroutine running in the event loop's nursery."""
 
-    __slots__ = ("_callbacks", "_exception", "_result")
+    __slots__ = ("_callbacks", "_exception", "_result", "_scope", "_token")
 
-    def __init__(self) -> None:
+    def __init__(self, token: trio.lowlevel.TrioToken) -> None:
+        self._token = token
+        self._scope = trio.CancelScope()
         self._callbacks: list[Callable[[Task], object]] = []
         self._result: object = None
-        self._exception: Exception | None = None
+        self._exception: BaseException | None = None
 
     def add_done_callback(self, callback: Callable[[Task], object]) -> None:
         self._callbacks.append(callback)
@@ -79,18 +126,36 @@ class Task:
             raise self._exception
         return self._result
 
+    def cancel(self) -> None:
+        """Cancels the task. Called on the trio thread."""
+        self._scope.cancel()
+
+    def cancel_soon(self) -> None:
+        """Cancels the task from any thread."""
+        with contextlib.suppress(trio.RunFinishedError):
+            self._token.run_sync_soon(self._scope.cancel)
+
     async def _run(self, coro: Coroutine[Any, Any, object]) -> None:
         # An exception from one application must not cancel the others in the
-        # nursery, so it is stored for the done callbacks as asyncio does.
-        # BaseExceptions, notably the cancellation when the loop stops,
-        # propagate and the callbacks never run, as with a pending asyncio task
-        # when its loop stops.
-        try:
-            self._result = await coro
-        except Exception as e:
-            self._exception = e
-        for callback in self._callbacks:
-            _run_callback(callback, (self,))
+        # nursery, so it is stored for the done callbacks as asyncio does. A
+        # trio cancellation, whether from `cancel` or the loop stopping,
+        # propagates to the scope and the callbacks never run, as with a
+        # pending asyncio task when its loop stops.
+        with self._scope:
+            try:
+                self._result = await coro
+            except trio.Cancelled:
+                raise
+            except BaseExceptionGroup as group:
+                cancelled, errors = group.split(trio.Cancelled)
+                if errors is not None:
+                    self._exception = errors
+                if cancelled is not None:
+                    raise cancelled from None
+            except BaseException as e:
+                self._exception = e
+            for callback in self._callbacks:
+                _run_callback(callback, (self,))
 
 
 class EventLoop:
@@ -143,7 +208,8 @@ class EventLoop:
         As with asyncio, the task runs with a copy of the caller's context.
         """
         assert self._nursery is not None  # noqa: S101
-        task = Task()
+        assert self._token is not None  # noqa: S101
+        task = Task(self._token)
         self._nursery.start_soon(task._run, coro)  # noqa: SLF001
         return task
 
@@ -156,7 +222,7 @@ class EventLoop:
         def complete(task: Task) -> None:
             try:
                 future.set_result(task.result())
-            except Exception as e:
+            except BaseException as e:
                 future.set_exception(e)
 
         def start() -> None:

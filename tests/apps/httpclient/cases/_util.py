@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from queue import Empty, Queue
+
+import anyio
+
+
+async def hanging_body() -> AsyncIterator[bytes]:
+    """A request body that never yields a chunk."""
+    await anyio.Event().wait()
+    yield b""
 
 
 class SyncRequestBody(Iterator[bytes]):

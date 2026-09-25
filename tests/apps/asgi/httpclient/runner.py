@@ -62,7 +62,7 @@ async def app(
             case "client_empty_request":
                 await client.empty_request(http_client, url)
             case "client_bidi":
-                await client.test_bidi(http_client, url, http_version)
+                await client.bidi(http_client, url, http_version)
             case "client_large_body":
                 await client.large_body(http_client, url, http_version)
             case "client_readall":
@@ -97,6 +97,8 @@ async def app(
                 await client.close_pending_read(http_client, url)
             case "client_request_content_error":
                 await client.request_content_error(http_client, url)
+            case "client_request_content_interrupted":
+                await client.request_content_interrupted(http_client, url, extra)
             case "client_response_error":
                 await client.response_error(http_client, url)
             case "errors_request_timeout":
@@ -105,6 +107,8 @@ async def app(
                 await errors.response_content_timeout(http_client, url)
             case "errors_connection_error":
                 await errors.connection_error(client_unavailable, url)
+            case "errors_request_not_bytes":
+                await errors.request_not_bytes(http_client, url)
             case "tls_mtls":
                 await tls.mtls(http_client, url)
             case "tls_wrong_hostname":

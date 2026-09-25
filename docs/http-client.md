@@ -62,8 +62,8 @@ having DNS load balancing can improve connectivity significantly.
 ## Limitations
 
 - The transport is implemented using callbacks provided by pyvoy's server request handler. This means client
-  requests cannot outlive the server request, notably fire-and-forget type of requests that create a new
-  `asyncio.Task` without waiting for it in the server request flow will not work. Use a normal pyqwest
+  requests cannot outlive the server request, notably fire-and-forget type of requests that start a new
+  task without waiting for it in the server request flow will not work. Use a normal pyqwest
   transport for this use case.
 
 - Envoy currently does not expose functionality to implement backpressure for HTTP clients so pyvoy's

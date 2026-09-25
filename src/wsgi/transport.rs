@@ -434,6 +434,7 @@ impl HTTPTransport {
                 deadline,
                 request_iter: Mutex::new(request_iter.take()),
                 ended: AtomicBool::new(false),
+                read_pending: AtomicBool::new(false),
                 constants: self.constants.clone(),
             };
             kwargs.set_item(&self.constants.content, content.into_bound_py_any(py)?)?;
@@ -460,6 +461,8 @@ struct ResponseContent {
     // The streaming request body iterator, closed when this response is closed.
     request_iter: Mutex<Option<Py<PyAny>>>,
     ended: AtomicBool,
+    /// Whether a call to `__next__` is blocked waiting for the stream.
+    read_pending: AtomicBool,
     constants: Arc<Constants>,
 }
 
@@ -470,6 +473,31 @@ impl ResponseContent {
     }
 
     fn __next__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.read_pending.store(true, Ordering::Relaxed);
+        let result = self.next_chunk(py);
+        self.read_pending.store(false, Ordering::Relaxed);
+        result
+    }
+
+    /// Whether a read is blocked waiting for the stream, for pyqwest.
+    #[getter]
+    fn _read_pending(&self) -> bool {
+        self.read_pending.load(Ordering::Relaxed)
+    }
+
+    /// Called by pyqwest when the response is closed. If the stream has not already finished,
+    /// the response was closed before being fully consumed so we reset the upstream stream to
+    /// release it rather than leaving it open and buffering data until the timeout, and close
+    /// the request iterator to unblock the iteration pool worker if it is still reading.
+    fn close(&self, py: Python<'_>) {
+        self.reset();
+        let iter = self.request_iter.lock_py_attached(py).unwrap().take();
+        close_request_iter(py, &self.constants, iter);
+    }
+}
+
+impl ResponseContent {
+    fn next_chunk<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         if self.ended.load(Ordering::Relaxed) {
             return Err(PyStopIteration::new_err(()));
         }
@@ -513,18 +541,6 @@ impl ResponseContent {
         }
     }
 
-    /// Called by pyqwest when the response is closed. If the stream has not already finished,
-    /// the response was closed before being fully consumed so we reset the upstream stream to
-    /// release it rather than leaving it open and buffering data until the timeout, and close
-    /// the request iterator to unblock the iteration pool worker if it is still reading.
-    fn close(&self, py: Python<'_>) {
-        self.reset();
-        let iter = self.request_iter.lock_py_attached(py).unwrap().take();
-        close_request_iter(py, &self.constants, iter);
-    }
-}
-
-impl ResponseContent {
     /// Resets the upstream stream if it has not already finished.
     fn reset(&self) {
         if !self.ended.swap(true, Ordering::Relaxed) {

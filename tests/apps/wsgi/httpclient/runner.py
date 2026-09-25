@@ -62,7 +62,7 @@ def app(
             case "client_empty_request":
                 asyncio.run(client.empty_request(http_client, url))
             case "client_bidi":
-                asyncio.run(client.test_bidi(http_client, url, http_version))
+                asyncio.run(client.bidi(http_client, url, http_version))
             case "client_large_body":
                 asyncio.run(client.large_body(http_client, url, http_version))
             case "client_readall":
@@ -91,8 +91,10 @@ def app(
                 asyncio.run(client.json_content(http_client, url, extra))
             case "client_json_content_existing_content_type":
                 asyncio.run(client.json_content_existing_content_type(http_client, url))
-            case "client_close_request_iter":
-                asyncio.run(client.close_request_iter(http_client, url))
+            case "client_close_no_read_sync":
+                asyncio.run(client.close_no_read_sync(http_client, url))
+            case "client_close_pending_read_sync":
+                asyncio.run(client.close_pending_read_sync(http_client, url))
             case "client_request_content_error":
                 asyncio.run(client.request_content_error(http_client, url))
             case "client_response_error":
@@ -103,6 +105,8 @@ def app(
                 asyncio.run(errors.response_content_timeout(http_client, url))
             case "errors_connection_error":
                 asyncio.run(errors.connection_error(client_unavailable, url))
+            case "errors_request_not_bytes":
+                asyncio.run(errors.request_not_bytes(http_client, url))
             case "tls_mtls":
                 asyncio.run(tls.mtls(http_client, url))
             case "tls_wrong_hostname":
