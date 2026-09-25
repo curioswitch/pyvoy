@@ -19,6 +19,8 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import AsyncLibrary
+
 
 @dataclass
 class Certs:
@@ -39,9 +41,10 @@ def certs() -> Certs:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server_asgi(certs: Certs) -> AsyncIterator[PyvoyServer]:
+async def server_asgi(certs: Certs, io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        io=io,
         port=0,
         tls_port=0,
         tls_key=certs.server_key,
@@ -111,9 +114,10 @@ async def client(certs: Certs, http_version: HTTPVersion) -> AsyncIterator[Clien
 
 
 @pytest.mark.asyncio
-async def test_single_tls_port_http3(certs: Certs) -> None:
+async def test_single_tls_port_http3(certs: Certs, io: AsyncLibrary) -> None:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        io=io,
         port=0,
         tls_key=certs.server_key,
         tls_cert=certs.server_cert,

@@ -9,7 +9,7 @@ use crate::{
             ExecutorHandles,
             app::load_app,
             awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
-            eventloop::EventLoops,
+            eventloop::{EventLoops, Io},
             get_gil_batch_size,
             headers::extract_headers_from_event,
             scope::new_scope_dict,
@@ -68,6 +68,7 @@ impl Executor {
         constants: Arc<Constants>,
         worker_threads: usize,
         enable_lifespan: Option<bool>,
+        io: Io,
     ) -> PyResult<(Self, ExecutorHandles)> {
         let (app, asgi, loops) = load_app(
             app_module,
@@ -75,6 +76,7 @@ impl Executor {
             &constants,
             worker_threads,
             enable_lifespan,
+            io,
         )?;
 
         let (extensions, root_path) = Python::attach(|py| {

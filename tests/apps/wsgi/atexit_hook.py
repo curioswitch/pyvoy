@@ -22,8 +22,6 @@ def _write_marker() -> None:
 atexit.register(_write_marker)
 
 
-def app(
-    _environ: WSGIEnvironment, start_response: StartResponse
-) -> Iterable[bytes]:
+def app(_environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[bytes]:
     start_response("200 OK", [("content-type", "text/plain")])
     return [b"Ok"]

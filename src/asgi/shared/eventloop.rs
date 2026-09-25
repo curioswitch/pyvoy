@@ -12,6 +12,26 @@ use pyo3::{
 use super::lifespan::{Lifespan, execute_lifespan};
 use crate::types::{Constants, SyncReceiver};
 
+/// The async library ASGI applications run on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Io {
+    /// asyncio, using uvloop, or winloop on Windows.
+    Asyncio,
+    /// trio, using the event loop adapter in `pyvoy._trio`.
+    Trio,
+}
+
+impl Io {
+    /// Parses the name of an async library, returning `None` if unsupported.
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "asyncio" => Some(Self::Asyncio),
+            "trio" => Some(Self::Trio),
+            _ => None,
+        }
+    }
+}
+
 enum EventLoopsInner {
     Single(EventLoop),
     Multiple {
@@ -36,13 +56,21 @@ impl EventLoops {
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
         enable_lifespan: Option<bool>,
+        io: Io,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
         match size {
             n if n > 1 => {
                 let mut loops = Vec::with_capacity(n);
                 for _ in 0..n {
-                    loops.push(EventLoop::new(py, app, asgi, enable_lifespan, constants)?);
+                    loops.push(EventLoop::new(
+                        py,
+                        app,
+                        asgi,
+                        enable_lifespan,
+                        io,
+                        constants,
+                    )?);
                 }
                 Ok(EventLoops {
                     inner: Arc::new(EventLoopsInner::Multiple {
@@ -57,6 +85,7 @@ impl EventLoops {
                     app,
                     asgi,
                     enable_lifespan,
+                    io,
                     constants,
                 )?)),
             }),
@@ -135,12 +164,33 @@ impl EventLoop {
         app: &Bound<'py, PyAny>,
         asgi: &Bound<'py, PyDict>,
         enable_lifespan: Option<bool>,
+        io: Io,
         constants: &Arc<Constants>,
     ) -> PyResult<Self> {
+        // Import the trio adapter here rather than on the event loop thread so
+        // a missing trio install fails startup with its traceback.
+        let new_trio_loop = match io {
+            Io::Asyncio => None,
+            Io::Trio => Some(
+                py.import("pyvoy._trio")?
+                    .getattr("new_event_loop")?
+                    .unbind(),
+            ),
+        };
         let (tx, rx) = mpsc::channel();
         let rx = SyncReceiver::new(rx);
-        let handle = thread::spawn(|| {
+        let handle = thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
+                if let Some(new_trio_loop) = new_trio_loop {
+                    // trio finalizes async generators and its worker threads
+                    // itself when the run returns.
+                    let loop_ = new_trio_loop.bind(py).call0()?;
+                    tx.send(loop_.clone().unbind()).unwrap();
+                    drop(tx);
+                    loop_.call_method0("run_forever")?;
+                    return Ok(());
+                }
+
                 #[cfg(not(target_family = "windows"))]
                 let loop_module = py.import("uvloop")?;
                 #[cfg(target_family = "windows")]
@@ -165,7 +215,7 @@ impl EventLoop {
 
         let loop_ = py.detach(|| rx.recv()).map_err(|e| {
             PyRuntimeError::new_err(format!(
-                "Failed to initialize asyncio event loop for ASGI executor: {}",
+                "Failed to initialize event loop for ASGI executor: {}",
                 e
             ))
         })?;
@@ -178,6 +228,7 @@ impl EventLoop {
                 asgi,
                 loop_.bind(py),
                 enable_lifespan.unwrap_or(false),
+                io,
                 constants,
             )?,
         };

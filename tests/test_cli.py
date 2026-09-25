@@ -221,6 +221,30 @@ def test_repeated_multi_value_flags_are_accumulated(
 
 
 @pytest.mark.parametrize(
+    ("args", "expected"), [([], "asyncio"), (["--io", "trio"], "trio")]
+)
+def test_io_flag(
+    args: list[str], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys, "argv", ["pyvoy", "primary.app", *args, "--print-envoy-config"]
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._io == expected
+
+
+@pytest.mark.parametrize(
     ("flag", "value", "minimum"),
     [
         ("--worker-threads", "0", 1),

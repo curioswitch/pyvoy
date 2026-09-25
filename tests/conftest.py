@@ -9,6 +9,8 @@ from pyqwest import Client, HTTPTransport, HTTPVersion
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import AsyncLibrary
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -22,6 +24,24 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
+    # WSGI applications do not run on an event loop, so a test parametrized
+    # over both interfaces only needs its WSGI case once.
+    kept: list[pytest.Item] = []
+    dropped: list[pytest.Item] = []
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        params = callspec.params if callspec is not None else {}
+        if (
+            params.get("interface") == "wsgi"
+            and params.get("io", "asyncio") != "asyncio"
+        ):
+            dropped.append(item)
+        else:
+            kept.append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+
     if config.getoption("--full"):
         # --full given in cli: do not skip slow tests
         return
@@ -29,6 +49,14 @@ def pytest_collection_modifyitems(
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip_slow)
+
+
+# PyvoyServer runs applications in its Envoy subprocess, so tests always run
+# on asyncio and this selects the async library the server runs ASGI
+# applications on.
+@pytest.fixture(scope="session", params=["asyncio", "trio"])
+def io(request: pytest.FixtureRequest) -> AsyncLibrary:
+    return request.param
 
 
 @pytest_asyncio.fixture

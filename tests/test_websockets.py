@@ -22,6 +22,8 @@ from ._util import assert_logs_contains
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import AsyncLibrary
+
 
 def _is_docker_unavailable() -> bool:
     # Check docker CLI is available and supports Linux containers
@@ -39,9 +41,10 @@ def _is_docker_unavailable() -> bool:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def echo_server() -> AsyncIterator[PyvoyServer]:
+async def echo_server(io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.websockets.echo",
+        io=io,
         # Bind all interfaces for access from Docker
         address="0.0.0.0",  # noqa: S104
         stderr=subprocess.STDOUT,
@@ -93,9 +96,10 @@ async def test_kosoku(cases: list[str], echo_server: PyvoyServer) -> None:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server() -> AsyncIterator[PyvoyServer]:
+async def server(io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
+        io=io,
         root_path="/root",
         websockets=True,
         lifespan=False,
@@ -146,10 +150,11 @@ async def test_compression_enabled_by_default(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_compression_disabled() -> None:
+async def test_compression_disabled(io: AsyncLibrary) -> None:
     async with (
         PyvoyServer(
             "tests.apps.websockets.kitchensink",
+            io=io,
             websockets=True,
             lifespan=False,
             websockets_compression=False,
@@ -164,9 +169,10 @@ async def test_compression_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_message_size() -> None:
+async def test_max_message_size(io: AsyncLibrary) -> None:
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
+        io=io,
         websockets=True,
         lifespan=False,
         websockets_max_message_size=1024,
@@ -300,11 +306,12 @@ async def test_unknown_event(server: PyvoyServer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_recv_after_disconnect() -> None:
+async def test_recv_after_disconnect(io: AsyncLibrary) -> None:
     # Start a new PyvoyServer since we need to check its logs for confirming
     # the app exited.
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
+        io=io,
         websockets=True,
         lifespan=False,
         stdout=subprocess.PIPE,
@@ -378,11 +385,12 @@ def tls_certs() -> tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert]:
 
 @pytest_asyncio.fixture(scope="module")
 async def tls_server(
-    tls_certs: tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert],
+    tls_certs: tuple[trustme.CA, trustme.LeafCert, trustme.LeafCert], io: AsyncLibrary
 ) -> AsyncIterator[PyvoyServer]:
     ca, server_cert, _ = tls_certs
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
+        io=io,
         websockets=True,
         lifespan=False,
         tls_key=server_cert.private_key_pem.bytes(),

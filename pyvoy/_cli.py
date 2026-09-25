@@ -13,6 +13,7 @@ import yaml
 from envoy import get_envoy_path
 
 from ._server import (
+    AsyncLibrary,
     ContentEncoding,
     Directory,
     Interface,
@@ -49,6 +50,7 @@ class CLIArgs:
     log_level: LogLevel
     worker_threads: int
     lifespan: bool | None
+    io: AsyncLibrary
     websockets: bool
     websockets_max_message_size: int
     websockets_compression: bool
@@ -213,6 +215,14 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--io",
+        help="the async library to run ASGI applications on. trio requires the 'trio' extra to be installed.",
+        choices=get_args(AsyncLibrary),
+        type=str,
+        default="asyncio",
+    )
+
+    parser.add_argument(
         "--websockets",
         help="enable WebSockets support",
         action="store_true",
@@ -372,6 +382,7 @@ async def amain() -> None:
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
         lifespan=args.lifespan,
+        io=args.io,
         websockets=args.websockets,
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,

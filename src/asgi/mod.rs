@@ -4,6 +4,7 @@ pub(crate) mod filter;
 /// The Python side of the ASGI handler.
 mod python;
 mod shared;
+pub(crate) use shared::eventloop::Io;
 /// The pyqwest transport implementation.
 mod transport;
 /// The ASGI websocket filter.

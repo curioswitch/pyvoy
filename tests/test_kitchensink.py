@@ -6,6 +6,7 @@ import sys
 from asyncio import StreamReader
 from typing import TYPE_CHECKING
 
+import anyio
 import pytest
 import pytest_asyncio
 from pyqwest import Client, HTTPTransport, HTTPVersion, ReadError
@@ -15,13 +16,16 @@ from pyvoy import Interface, PyvoyServer
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pyvoy import AsyncLibrary
+
 from ._util import assert_logs_contains, find_logs_lines
 
 
 @pytest_asyncio.fixture(scope="module")
-async def server_asgi() -> AsyncIterator[PyvoyServer]:
+async def server_asgi(io: AsyncLibrary) -> AsyncIterator[PyvoyServer]:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
         lifespan=False,
@@ -648,3 +652,33 @@ async def test_wsgi_no_start_response(
     await assert_logs_contains(
         logs_wsgi, ["RuntimeError: start_response not called from WSGI application"]
     )
+
+
+@pytest.mark.asyncio
+async def test_async_library(url_asgi: str, client: Client, io: AsyncLibrary) -> None:
+    response = await client.get(f"{url_asgi}/async-library")
+    assert response.status == 200, response.text()
+    assert response.text() == io
+
+
+@pytest.mark.asyncio
+async def test_exception_does_not_affect_concurrent_requests(
+    url_asgi: str, client: Client
+) -> None:
+    # trio cancels a whole nursery when one of its tasks raises, so the
+    # application tasks must keep their exceptions to themselves. Without
+    # that the requests hang until Envoy times them out.
+    with anyio.fail_after(10):
+        slow = asyncio.create_task(
+            client.post(
+                f"{url_asgi}/controlled",
+                headers={"x-sleep-ms": "500", "x-response-bytes": "3"},
+                content=b"",
+            )
+        )
+        await asyncio.sleep(0.1)
+        response = await client.get(f"{url_asgi}/exception-before-response")
+        assert response.status == 500
+        response = await slow
+        assert response.status == 200, response.text()
+        assert response.content == b"AAA"

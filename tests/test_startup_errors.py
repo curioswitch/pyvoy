@@ -20,7 +20,7 @@ envoy_env = {**os.environ, **get_envoy_environ()}
 
 
 def _set_dynamic_filter_config_value(
-    config: object, filter_name: str, setting: str, value: int
+    config: object, filter_name: str, setting: str, value: object
 ) -> bool:
     if isinstance(config, dict):
         typed_config = config.get("typed_config")
@@ -73,6 +73,32 @@ def test_config_invalid_numeric_setting(
         f"Filter config field '{setting}' must be an integer between {minimum} "
         "and the platform maximum"
     ) in result.stderr
+
+
+@pytest.mark.parametrize("filter_name", ["pyvoy", "pyvoy-ws"])
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("curio", "Filter config field 'io' must be 'asyncio' or 'trio', got 'curio'"),
+        (1, "Filter config field 'io' must be 'asyncio' or 'trio'"),
+    ],
+)
+def test_config_invalid_io(filter_name: str, value: object, message: str) -> None:
+    config = PyvoyServer(
+        "tests.apps.asgi.kitchensink", websockets=filter_name == "pyvoy-ws"
+    ).get_envoy_config()
+    assert _set_dynamic_filter_config_value(config, filter_name, "io", value)
+
+    result = subprocess.run(
+        [envoy_path, "--config-yaml", json.dumps(config)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=envoy_env,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
 
 
 def test_config_invalid_yaml():

@@ -11,6 +11,8 @@ from pyvoy import PyvoyServer
 if TYPE_CHECKING:
     from pyqwest import Client
 
+    from pyvoy import AsyncLibrary
+
 
 async def _read_logs(stream: asyncio.StreamReader, logs: list[str]):
     async for line in stream:
@@ -18,10 +20,11 @@ async def _read_logs(stream: asyncio.StreamReader, logs: list[str]):
 
 
 @pytest.mark.asyncio
-async def test_normal(client: Client):
+async def test_normal(client: Client, io: AsyncLibrary):
     logs: list[str] = []
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:normal",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -42,9 +45,10 @@ async def test_normal(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_state_isolation(client: Client):
+async def test_state_isolation(client: Client, io: AsyncLibrary):
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:state_isolation",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -55,10 +59,11 @@ async def test_state_isolation(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_normal_lifespan_disabled(client: Client):
+async def test_normal_lifespan_disabled(client: Client, io: AsyncLibrary):
     logs: list[str] = []
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:normal",
+        io=io,
         lifespan=False,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
@@ -80,9 +85,10 @@ async def test_normal_lifespan_disabled(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_startup_failed():
+async def test_startup_failed(io: AsyncLibrary):
     server = PyvoyServer(
         "tests.apps.asgi.lifespan:startup_failed",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     )
@@ -99,9 +105,10 @@ async def test_startup_failed():
 
 
 @pytest.mark.asyncio
-async def test_startup_failed_no_msg():
+async def test_startup_failed_no_msg(io: AsyncLibrary):
     server = PyvoyServer(
         "tests.apps.asgi.lifespan:startup_failed_no_msg",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     )
@@ -118,10 +125,11 @@ async def test_startup_failed_no_msg():
 
 
 @pytest.mark.asyncio
-async def test_shutdown_failed(client: Client):
+async def test_shutdown_failed(client: Client, io: AsyncLibrary):
     logs: list[str] = []
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:shutdown_failed",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -142,10 +150,11 @@ async def test_shutdown_failed(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_failed_no_msg(client: Client):
+async def test_shutdown_failed_no_msg(client: Client, io: AsyncLibrary):
     logs: list[str] = []
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:shutdown_failed_no_msg",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -166,8 +175,10 @@ async def test_shutdown_failed_no_msg(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_return_without_events(client: Client):
-    async with PyvoyServer("tests.apps.asgi.lifespan:return_without_events") as server:
+async def test_return_without_events(client: Client, io: AsyncLibrary):
+    async with PyvoyServer(
+        "tests.apps.asgi.lifespan:return_without_events", io=io
+    ) as server:
         url = f"http://{server.listener_address}:{server.listener_port}"
 
         # This isn't an error case so we don't have anything to assert other than standard
@@ -178,9 +189,10 @@ async def test_return_without_events(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_return_without_events_during_shutdown(client: Client):
+async def test_return_without_events_during_shutdown(client: Client, io: AsyncLibrary):
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:return_without_events_during_shutdown",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -194,10 +206,11 @@ async def test_return_without_events_during_shutdown(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_exception_during_shutdown(client: Client):
+async def test_exception_during_shutdown(client: Client, io: AsyncLibrary):
     logs: list[str] = []
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:exception_during_shutdown",
+        io=io,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,
     ) as server:
@@ -218,8 +231,10 @@ async def test_exception_during_shutdown(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_immediate_exception(client: Client):
-    async with PyvoyServer("tests.apps.asgi.lifespan:immediate_exception") as server:
+async def test_immediate_exception(client: Client, io: AsyncLibrary):
+    async with PyvoyServer(
+        "tests.apps.asgi.lifespan:immediate_exception", io=io
+    ) as server:
         url = f"http://{server.listener_address}:{server.listener_port}"
 
         # This isn't an error case so we don't have anything to assert other than standard
@@ -230,8 +245,8 @@ async def test_immediate_exception(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_lifespan_optional_not_supported(client: Client):
-    async with PyvoyServer("tests.apps.asgi.kitchensink") as server:
+async def test_lifespan_optional_not_supported(client: Client, io: AsyncLibrary):
+    async with PyvoyServer("tests.apps.asgi.kitchensink", io=io) as server:
         url = f"http://{server.listener_address}:{server.listener_port}"
 
         # This isn't an error case so we don't have anything to assert other than standard
@@ -244,9 +259,10 @@ async def test_lifespan_optional_not_supported(client: Client):
 
 
 @pytest.mark.asyncio
-async def test_lifespan_required_not_supported():
+async def test_lifespan_required_not_supported(io: AsyncLibrary):
     server = PyvoyServer(
         "tests.apps.asgi.kitchensink",
+        io=io,
         lifespan=True,
         stderr=subprocess.STDOUT,
         stdout=subprocess.PIPE,

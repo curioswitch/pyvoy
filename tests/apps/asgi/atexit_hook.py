@@ -16,9 +16,7 @@ def _write_marker() -> None:
 atexit.register(_write_marker)
 
 
-async def app(
-    scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
-) -> None:
+async def app(scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
     if scope["type"] == "lifespan":
         while True:
             msg = await recv()

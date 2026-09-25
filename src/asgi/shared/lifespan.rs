@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use super::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable};
+use super::eventloop::Io;
 use crate::types::{Constants, SyncReceiver};
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
@@ -16,7 +17,7 @@ use pyo3::{
 pub(crate) struct Lifespan {
     /// The receiver of lifespan events from the app.
     pub lifespan_rx: SyncReceiver<LifespanEvent>,
-    /// An asyncio.Future that will be completed with the lifespan.shutdown message.
+    /// An event loop future that will be completed with the lifespan.shutdown message.
     shutdown_future: Py<PyAny>,
     /// Memoized constants.
     constants: Arc<Constants>,
@@ -98,6 +99,7 @@ pub(crate) fn execute_lifespan<'py>(
     asgi: &Bound<'py, PyDict>,
     loop_: &Bound<'py, PyAny>,
     require_lifespan: bool,
+    io: Io,
     constants: &Arc<Constants>,
 ) -> PyResult<(Option<Lifespan>, Option<Py<PyDict>>)> {
     let py = app.py();
@@ -144,8 +146,13 @@ pub(crate) fn execute_lifespan<'py>(
         }
     };
 
-    let asyncio = py.import(&constants.asyncio)?;
-    let future = asyncio.call_method1(&constants.run_coroutine_threadsafe, (coro, loop_))?;
+    // Both return a concurrent.futures.Future.
+    let future = match io {
+        Io::Asyncio => py
+            .import(&constants.asyncio)?
+            .call_method1(&constants.run_coroutine_threadsafe, (coro, loop_))?,
+        Io::Trio => loop_.call_method1(&constants.run_coroutine_threadsafe, (coro,))?,
+    };
     future.call_method1(
         &constants.add_done_callback,
         (FutureHandler {
