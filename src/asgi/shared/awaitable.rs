@@ -17,6 +17,12 @@ impl EmptyAwaitable {
         slf
     }
 
+    // `__await__` must return an iterator, and `yield from` as used by
+    // `asyncio.ensure_future` before Python 3.12 calls `iter()` on it.
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        slf
+    }
+
     fn __next__(&self) -> Option<()> {
         None
     }
@@ -47,6 +53,12 @@ impl ValueAwaitable {
         slf
     }
 
+    // `__await__` must return an iterator, and `yield from` as used by
+    // `asyncio.ensure_future` before Python 3.12 calls `iter()` on it.
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        slf
+    }
+
     fn __next__(&mut self) -> PyResult<Py<PyAny>> {
         if let Some(value) = self.value.take() {
             Err(PyStopIteration::new_err(value))
@@ -73,6 +85,12 @@ impl ErrorAwaitable {
 #[pymethods]
 impl ErrorAwaitable {
     fn __await__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
+        slf
+    }
+
+    // `__await__` must return an iterator, and `yield from` as used by
+    // `asyncio.ensure_future` before Python 3.12 calls `iter()` on it.
+    fn __iter__<'py>(slf: PyRef<'py, Self>) -> PyRef<'py, Self> {
         slf
     }
 

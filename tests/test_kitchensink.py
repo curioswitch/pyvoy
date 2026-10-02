@@ -114,6 +114,13 @@ async def test_request_body(url: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_receive_as_task(url_asgi: str, client: Client) -> None:
+    response = await client.get(f"{url_asgi}/receive-as-task")
+    assert response.status == 200, response.text()
+    assert response.content == b"ok"
+
+
+@pytest.mark.asyncio
 async def test_response_body(url: str, client: Client) -> None:
     response = await client.get(f"{url}/response-body")
     assert response.status == 200, response.text()
