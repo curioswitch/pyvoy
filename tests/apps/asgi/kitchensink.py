@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from asgiref.typing import (
         ASGIReceiveCallable,
         ASGISendCallable,
+        HTTPResponseStartEvent,
         HTTPScope,
         Scope,
         WebSocketScope,
@@ -134,6 +135,34 @@ async def _headers_only(
     )
     await send({"type": "http.response.body", "body": b"", "more_body": False})
     return None
+
+
+async def _receive_as_task(
+    scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    """Hands the receive and send awaitables to asyncio instead of awaiting
+    them directly, which drives them through the iterator protocol on Python
+    before 3.12. Without a request body the first receive is ready at once,
+    which is the awaitable that lacked it."""
+    if scope["method"] != "GET":
+        await _send_failure('scope["method"] != "GET"', send)
+        return
+
+    on_asyncio = sniffio.current_async_library() == "asyncio"
+
+    msg = await (asyncio.ensure_future(recv()) if on_asyncio else recv())
+    if msg["type"] != "http.request" or msg.get("body"):
+        await _send_failure("unexpected first receive", send)
+        return
+
+    start: HTTPResponseStartEvent = {
+        "type": "http.response.start",
+        "status": 200,
+        "headers": [(b"content-type", b"text/plain")],
+        "trailers": False,
+    }
+    await (asyncio.ensure_future(send(start)) if on_asyncio else send(start))
+    await send({"type": "http.response.body", "body": b"ok", "more_body": False})
 
 
 async def _request_body(
@@ -1154,6 +1183,8 @@ async def http_app(
             await _headers_only(scope, recv, send)
         case "/request-body":
             await _request_body(scope, recv, send)
+        case "/receive-as-task":
+            await _receive_as_task(scope, recv, send)
         case "/response-body":
             await _response_body(scope, send)
         case "/request-and-response-body":
