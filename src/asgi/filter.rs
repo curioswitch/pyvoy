@@ -143,7 +143,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.handle_read(envoy_filter);
 
-        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
+        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndWatermark
     }
 
     fn on_request_trailers(
