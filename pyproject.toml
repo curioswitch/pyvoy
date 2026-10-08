@@ -49,7 +49,7 @@ dev = [
   "asgiref==3.12.1",
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
   "connectrpc==0.12.1",
-  "granian==2.8.3",
+  "granian==2.8.4",
   "gunicorn==26.2.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
@@ -59,7 +59,7 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
   "seaborn==0.13.2",
   "starlette==1.7.0",
   "trio==0.34.0",
@@ -72,7 +72,7 @@ dev = [
   "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
-docs = ["mkdocstrings-python==2.0.9", "zensical==0.0.66"]
+docs = ["mkdocstrings-python==2.0.9", "zensical==0.0.68"]
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
