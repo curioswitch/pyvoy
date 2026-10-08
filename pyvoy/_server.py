@@ -9,10 +9,10 @@ import subprocess
 import sys
 import urllib.request
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import IO, TYPE_CHECKING, Any, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import urlsplit
 
 import find_libpython
@@ -43,7 +43,7 @@ LogLevel = Literal[
 ]
 
 
-class HTTPVersion(str, Enum):
+class HTTPVersion(StrEnum):
     """An enumeration of HTTP versions."""
 
     HTTP1 = "HTTP/1.1"
@@ -336,7 +336,7 @@ class PyvoyServer:
         self._listener_port_quic = None
         self._admin_address = None
 
-    async def __aenter__(self) -> PyvoyServer:
+    async def __aenter__(self) -> Self:
         await self.start()
         return self
 

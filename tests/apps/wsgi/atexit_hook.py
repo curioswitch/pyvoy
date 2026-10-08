@@ -6,13 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import sys
     from collections.abc import Iterable
-
-    if sys.version_info >= (3, 11):
-        from wsgiref.types import StartResponse, WSGIEnvironment
-    else:
-        from _typeshed.wsgi import StartResponse, WSGIEnvironment
+    from wsgiref.types import StartResponse, WSGIEnvironment
 
 
 def _write_marker() -> None:
