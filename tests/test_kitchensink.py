@@ -197,6 +197,13 @@ async def test_large_bodies(url: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_slow_large_body(url: str, client: Client) -> None:
+    response = await client.post(f"{url}/slow-large-body", content=b"A" * 5_000_000)
+    assert response.status == 200, response.text()
+    assert response.content == b"5000000"
+
+
+@pytest.mark.asyncio
 async def test_generate_large_body(url: str, client_http2: Client) -> None:
     content = bytearray()
     async with client_http2.stream(

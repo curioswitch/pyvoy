@@ -23,8 +23,6 @@ use crate::types::*;
 pub struct Config {
     executor: python::Executor,
     handles: Option<ExecutorHandles>,
-    request_body_high_watermark: usize,
-    request_body_low_watermark: usize,
 }
 
 impl Config {
@@ -35,8 +33,6 @@ impl Config {
         worker_threads: usize,
         enable_lifespan: Option<bool>,
         loop_kind: LoopKind,
-        request_body_high_watermark: usize,
-        request_body_low_watermark: usize,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match python::Executor::new(
@@ -63,8 +59,6 @@ impl Config {
         Some(Self {
             executor,
             handles: Some(handles),
-            request_body_high_watermark,
-            request_body_low_watermark,
         })
     }
 }
@@ -88,9 +82,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             transport_bridge: EventBridge::new(),
             transport_responses: HashMap::new(),
             downstream_watermark_level: 0,
-            request_body_high_watermark: self.request_body_high_watermark,
-            request_body_low_watermark: self.request_body_low_watermark,
-            request_backpressure_paused: false,
         }))
     }
 }
@@ -110,24 +101,6 @@ struct Filter {
     transport_responses: HashMap<u64, TransportState>,
 
     downstream_watermark_level: usize,
-
-    // Request-body-side backpressure. Unlike `downstream_watermark_level`
-    // above (which tracks Envoy's own write-buffer watermark events for the
-    // *response* path), there is no equivalent built-in signal for the
-    // *request* path: on_request_body() always returns
-    // StopIterationAndBuffer, which Envoy's own docs describe as a status
-    // that "can not push back on streaming data via watermarks" -- chunks
-    // accumulate in Envoy's per-filter buffer for as long as the ASGI app's
-    // receive() calls lag behind how fast the client sends data, with
-    // nothing bounding that backlog short of the connection's overall
-    // buffer limit (where Envoy gives up and resets the stream with a 413).
-    // These two fields implement real backpressure for that path: once the
-    // undrained backlog crosses request_body_high_watermark, on_request_body
-    // switches to StopIterationAndWatermark (which does pause the incoming
-    // flow) until the backlog drains back under request_body_low_watermark.
-    request_body_high_watermark: usize,
-    request_body_low_watermark: usize,
-    request_backpressure_paused: bool,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -170,20 +143,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
         self.handle_read(envoy_filter);
 
-        // handle_read() above may have already fully drained the backlog if
-        // Python had a receive() call pending; this is the common case and
-        // backlog will be ~0 bytes, so this check is nearly free and doesn't
-        // change behavior for well-behaved (fast-consuming) apps. It only
-        // engages real backpressure once the app has genuinely fallen
-        // behind the rate data is arriving at.
-        let backlog = envoy_filter.get_buffered_request_body_size()
-            + envoy_filter.get_received_request_body_size();
-        if backlog > self.request_body_high_watermark {
-            self.request_backpressure_paused = true;
-            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndWatermark;
-        }
-
-        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndBuffer
+        abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndWatermark
     }
 
     fn on_request_trailers(
@@ -220,27 +180,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         match event_id {
             EVENT_ID_REQUEST => {
                 self.handle_read(envoy_filter);
-
-                // Only relevant once on_request_body has paused the stream
-                // via StopIterationAndWatermark above. EVENT_ID_REQUEST is
-                // scheduled whenever Python registers a new receive() future
-                // (see handle_read()/recv_bridge), which is exactly the
-                // signal that the app is ready for more data -- the natural
-                // point to check whether the backlog has drained enough to
-                // resume accepting more from the client. Only the buffered
-                // (persistent) body is checked here, not the received
-                // (per-callback) body: per the Envoy SDK docs,
-                // get_received_request_body_size() is only valid inside
-                // on_request_body itself, and since Envoy has stopped
-                // calling on_request_body while paused, there is no
-                // in-flight "received" chunk to account for anyway.
-                if self.request_backpressure_paused
-                    && envoy_filter.get_buffered_request_body_size()
-                        <= self.request_body_low_watermark
-                {
-                    self.request_backpressure_paused = false;
-                    envoy_filter.continue_decoding();
-                }
             }
             EVENT_ID_RESPONSE => {
                 if self.downstream_watermark_level == 0 {

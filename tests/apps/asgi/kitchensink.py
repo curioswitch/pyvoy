@@ -253,6 +253,32 @@ async def _large_bodies(recv: ASGIReceiveCallable, send: ASGISendCallable) -> No
         )
 
 
+async def _slow_large_body(recv: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    size = 0
+
+    for _ in range(10000):
+        msg = await recv()
+        if msg["type"] != "http.request":
+            await _send_failure('msg["type"] != "http.request"', send)
+            return
+        size += len(msg.get("body", b""))
+        await anyio.sleep(0.01)
+        if not msg.get("more_body", False):
+            break
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": str(size).encode(), "more_body": False}
+    )
+
+
 async def _generate_large_body(
     _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1160,6 +1186,8 @@ async def http_app(
             await _request_and_response_body(scope, recv, send)
         case "/large-bodies":
             await _large_bodies(recv, send)
+        case "/slow-large-body":
+            await _slow_large_body(recv, send)
         case "/generate-large-body":
             await _generate_large_body(recv, send)
         case "/trailers-only":
