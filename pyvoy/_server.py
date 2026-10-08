@@ -198,6 +198,8 @@ class PyvoyServer:
     _websockets_max_message_size: int | None
     _websockets_compression: bool
     _content_encodings: list[ContentEncoding]
+    _request_body_high_watermark: int | None
+    _request_body_low_watermark: int | None
 
     _admin_address: str | None
 
@@ -222,6 +224,8 @@ class PyvoyServer:
         websockets: bool = False,
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
+        request_body_high_watermark: int | None = None,
+        request_body_low_watermark: int | None = None,
         content_encodings: Iterable[ContentEncoding] | None = None,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
@@ -261,6 +265,21 @@ class PyvoyServer:
                 size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
                 compression.
+            request_body_high_watermark: For ASGI apps, the non-negative number of
+                undrained request body bytes Envoy will buffer before pausing the
+                incoming request stream (real backpressure) until the app's receive()
+                calls catch up. Unset uses a default of 512 KiB. Only takes effect
+                for the 'asgi' interface. Without this, an app whose receive() calls
+                fall behind the client's send rate has no bound on how much of the
+                request body accumulates in Envoy's buffer short of the listener's
+                overall per_connection_buffer_limit_bytes, at which point Envoy gives
+                up and resets the stream with a 413 regardless of how that limit is
+                configured.
+            request_body_low_watermark: The non-negative number of buffered request
+                body bytes the backlog must drain back under before the incoming
+                stream is resumed, once paused by request_body_high_watermark. Must
+                be less than request_body_high_watermark. Unset uses a default of
+                request_body_high_watermark / 4.
             content_encodings: The content encodings to compress responses with, in
                 order of preference. Unset or empty disables response compression.
                 When set, applications no longer receive the Accept-Encoding
@@ -273,11 +292,15 @@ class PyvoyServer:
             stderr: Where to redirect the server's stderr.
 
         Raises:
-            TypeError: If worker_threads or websockets_max_message_size is not an
+            TypeError: If worker_threads, websockets_max_message_size,
+                request_body_high_watermark, or request_body_low_watermark is not an
                 integer.
             ValueError: If worker_threads is not between 1 and sys.maxsize,
-                websockets_max_message_size is not between 0 and sys.maxsize, or
-                content_encodings contains an unknown or duplicate encoding.
+                websockets_max_message_size is not between 0 and sys.maxsize,
+                request_body_high_watermark or request_body_low_watermark is not
+                between 0 and sys.maxsize, request_body_low_watermark is not less
+                than request_body_high_watermark, or content_encodings contains an
+                unknown or duplicate encoding.
         """
         if worker_threads is not None:
             if not isinstance(worker_threads, int) or isinstance(worker_threads, bool):
@@ -295,6 +318,24 @@ class PyvoyServer:
             if not 0 <= websockets_max_message_size <= sys.maxsize:
                 msg = f"websockets_max_message_size must be between 0 and {sys.maxsize}"
                 raise ValueError(msg)
+        for name, value in (
+            ("request_body_high_watermark", request_body_high_watermark),
+            ("request_body_low_watermark", request_body_low_watermark),
+        ):
+            if value is not None:
+                if not isinstance(value, int) or isinstance(value, bool):
+                    msg = f"{name} must be an integer"
+                    raise TypeError(msg)
+                if not 0 <= value <= sys.maxsize:
+                    msg = f"{name} must be between 0 and {sys.maxsize}"
+                    raise ValueError(msg)
+        if (
+            request_body_high_watermark is not None
+            and request_body_low_watermark is not None
+            and request_body_low_watermark >= request_body_high_watermark
+        ):
+            msg = "request_body_low_watermark must be less than request_body_high_watermark"
+            raise ValueError(msg)
         content_encodings = list(content_encodings) if content_encodings else []
         for encoding in content_encodings:
             if encoding not in _COMPRESSOR_LIBRARIES:
@@ -317,6 +358,8 @@ class PyvoyServer:
         self._websockets = websockets
         self._websockets_max_message_size = websockets_max_message_size
         self._websockets_compression = websockets_compression
+        self._request_body_high_watermark = request_body_high_watermark
+        self._request_body_low_watermark = request_body_low_watermark
         self._content_encodings = content_encodings
         self._root_path = root_path
         self._stdout = stdout
@@ -527,6 +570,14 @@ class PyvoyServer:
         if self._websockets_max_message_size is not None:
             base_pyvoy_config["websockets_max_message_size"] = (
                 self._websockets_max_message_size
+            )
+        if self._request_body_high_watermark is not None:
+            base_pyvoy_config["request_body_high_watermark_bytes"] = (
+                self._request_body_high_watermark
+            )
+        if self._request_body_low_watermark is not None:
+            base_pyvoy_config["request_body_low_watermark_bytes"] = (
+                self._request_body_low_watermark
             )
         if not self._websockets_compression:
             base_pyvoy_config["websockets_compression"] = False

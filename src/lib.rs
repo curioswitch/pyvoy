@@ -175,15 +175,52 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     let constants = Python::attach(types::Constants::get);
 
     match interface {
-        "asgi" => asgi::filter::Config::new(
-            app,
-            root_path,
-            constants,
-            worker_threads,
-            enable_lifespan,
-            loop_kind,
-        )
-        .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
+        "asgi" => {
+            // Defaults chosen to comfortably trip before Envoy's own
+            // per_connection_buffer_limit_bytes default (1 MiB) is reached,
+            // leaving headroom for whatever chunk was in flight when the
+            // high watermark was crossed plus other filter-chain overhead.
+            // See asgi::filter::Filter's request_body_high_watermark /
+            // request_body_low_watermark fields for why this exists at all:
+            // on_request_body() otherwise always returns
+            // StopIterationAndBuffer, a status which never applies real
+            // backpressure, so an ASGI app whose receive() calls fall
+            // behind the client's send rate has its request body
+            // accumulate in Envoy's buffer completely unbounded until the
+            // connection buffer limit is hit and Envoy gives up with a 413
+            // -- regardless of how large that limit is configured.
+            let request_body_high_watermark = parse_usize_config(
+                filter_config,
+                "request_body_high_watermark_bytes",
+                512 * 1024,
+                1,
+            )?;
+            let request_body_low_watermark = parse_usize_config(
+                filter_config,
+                "request_body_low_watermark_bytes",
+                request_body_high_watermark / 4,
+                0,
+            )?;
+            if request_body_low_watermark >= request_body_high_watermark {
+                envoy_log_error!(
+                    "Filter config field 'request_body_low_watermark_bytes' ({}) must be less than 'request_body_high_watermark_bytes' ({})",
+                    request_body_low_watermark,
+                    request_body_high_watermark
+                );
+                return None;
+            }
+            asgi::filter::Config::new(
+                app,
+                root_path,
+                constants,
+                worker_threads,
+                enable_lifespan,
+                loop_kind,
+                request_body_high_watermark,
+                request_body_low_watermark,
+            )
+            .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>)
+        }
         "wsgi" => wsgi::filter::Config::new(app, root_path, constants, worker_threads)
             .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
