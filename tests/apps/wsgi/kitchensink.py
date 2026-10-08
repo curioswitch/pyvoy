@@ -7,15 +7,9 @@ from wsgiref.validate import validator
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-
-    if sys.version_info >= (3, 11):
-        from wsgiref.types import ErrorStream as WSGIErrorStream
-        from wsgiref.types import InputStream as WSGIInputStream
-        from wsgiref.types import StartResponse, WSGIEnvironment
-    else:
-        from _typeshed.wsgi import ErrorStream as WSGIErrorStream
-        from _typeshed.wsgi import InputStream as WSGIInputStream
-        from _typeshed.wsgi import StartResponse, WSGIEnvironment
+    from wsgiref.types import ErrorStream as WSGIErrorStream
+    from wsgiref.types import InputStream as WSGIInputStream
+    from wsgiref.types import StartResponse, WSGIEnvironment
 
 
 def _failure(msg: str, start_response: StartResponse) -> Iterable[bytes]:
@@ -156,6 +150,23 @@ def _large_bodies(
 
     for _ in range(1000):
         yield b"B" * 1000
+
+
+def _slow_large_body(
+    environ: WSGIEnvironment, start_response: StartResponse
+) -> Iterable[bytes]:
+    request_body = cast("WSGIInputStream", environ["wsgi.input"])
+
+    size = 0
+    for _ in range(10000):
+        chunk = request_body.read(100000)
+        if not chunk:
+            break
+        size += len(chunk)
+        time.sleep(0.01)
+
+    start_response("200 OK", [("content-type", "text/plain")])
+    return [str(size).encode()]
 
 
 def _generate_large_body(
@@ -785,6 +796,8 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _request_and_response_body(environ, start_response)
         case "/large-bodies":
             return _large_bodies(environ, start_response)
+        case "/slow-large-body":
+            return _slow_large_body(environ, start_response)
         case "/generate-large-body":
             return _generate_large_body(environ, start_response)
         case "/trailers-only":

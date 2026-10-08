@@ -27,7 +27,7 @@ jobs:
           - ubuntu-24.04
           - windows-2025
         python:
-          - "3.10"
+          - "3.11"
           - "3.14"
         # Test oldest and newest on all OS's, but others only on one
         # to save CI load.
@@ -44,6 +44,10 @@ jobs:
           - os: ubuntu-24.04
             python: "3.14"
             coverage: "cov"
+          - os: ubuntu-24.04
+            python: "3.15"
+          - os: ubuntu-24.04
+            python: "3.15t"
 
     env:
       # Avoid multiple compile e.g. in lint and test by setting as a job env var
@@ -53,6 +57,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
 
       - name: Setup rust
         run: |
@@ -60,8 +66,6 @@ jobs:
           ${{ matrix.coverage == 'cov' && 'rustup component add llvm-tools' || '' }}
 
       - run: uv lock --check
-
-      - run: uv sync --python ${{ matrix.python }} --managed-python
 
       # Go ahead and run lint on all Python versions since we may have version-specific
       # guards in rust in the future.
@@ -84,7 +88,7 @@ jobs:
         # TODO: Enable on free-threaded Python after publishing a wheel for it.
         # The integration test first installs pyvoy from PyPi before we reinstall from local
         # and it's tricky to avoid that.
-        if: github.event_name == 'push' && matrix.python != '3.14t' && !startsWith(matrix.os, 'windows-')
+        if: github.event_name == 'push' && matrix.python != '3.15t' && !startsWith(matrix.os, 'windows-')
         run: uv run poe integration-test-connect
 
       - name: verify wheel build

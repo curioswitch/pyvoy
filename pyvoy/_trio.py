@@ -15,15 +15,10 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import logging
-import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
 import trio
-
-if sys.version_info < (3, 11):
-    # A dependency of trio on these versions.
-    from exceptiongroup import BaseExceptionGroup
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
