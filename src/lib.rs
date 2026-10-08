@@ -18,6 +18,14 @@ mod wsgi;
 
 declare_all_init_functions!(init, http: new_http_filter_config_fn, network: new_network_filter_config_fn);
 
+// The library is loaded by Envoy as a dynamic module rather than imported by
+// Python, but exporting a module init function lets it be built and located
+// with standard Python extension tooling.
+#[pymodule]
+fn _pyvoy(_module: &Bound<'_, PyModule>) -> PyResult<()> {
+    Ok(())
+}
+
 unsafe extern "C" {
     fn atexit(callback: extern "C" fn()) -> std::os::raw::c_int;
 }
@@ -142,10 +150,18 @@ fn parse_loop_config(filter_config: &Yaml) -> Option<asgi::LoopKind> {
 }
 
 fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
-    _envoy_filter_config: &mut EC,
-    _filter_name: &str,
+    envoy_filter_config: &mut EC,
+    filter_name: &str,
     filter_config: &[u8],
 ) -> Option<Box<dyn HttpFilterConfig<EHF>>> {
+    // Static mounts are served by envoy-files, linked into this module.
+    if filter_name == "envoy_files" {
+        return envoy_files_filter::new_http_filter_config_fn(
+            envoy_filter_config,
+            filter_name,
+            filter_config,
+        );
+    }
     let filter_config = match YamlLoader::load_from_str(std::str::from_utf8(filter_config).unwrap())
     {
         Ok(conf) => conf,

@@ -12,11 +12,12 @@ import pytest
 from envoy import get_envoy_path
 
 from pyvoy import PyvoyServer
-from pyvoy._server import get_envoy_environ
+from pyvoy._server import _pyvoy_module_path, get_envoy_environ
 
 envoy_path = get_envoy_path()
 
 envoy_env = {**os.environ, **get_envoy_environ()}
+pyvoy_module_path = _pyvoy_module_path()
 
 
 def _set_dynamic_filter_config_value(
@@ -116,7 +117,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: 'a: b: c'
@@ -131,7 +132,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -159,7 +164,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: ''
@@ -174,7 +179,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -202,7 +211,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: |
@@ -218,7 +227,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -246,7 +259,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: |
@@ -263,7 +276,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -291,7 +308,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: |
@@ -308,7 +325,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -336,7 +357,7 @@ static_resources:
             typed_config:
               '@type': type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
               dynamic_module_config:
-                name: pyvoy
+                module: {local: {filename: PYVOY_MODULE_PATH}}
               filter_config:
                 '@type': type.googleapis.com/google.protobuf.StringValue
                 value: |
@@ -353,7 +374,11 @@ static_resources:
     name: listener
 """
     result = subprocess.run(
-        [envoy_path, "--config-yaml", conf],
+        [
+            envoy_path,
+            "--config-yaml",
+            conf.replace("PYVOY_MODULE_PATH", pyvoy_module_path),
+        ],
         check=False,
         capture_output=True,
         text=True,
