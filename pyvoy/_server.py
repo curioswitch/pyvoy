@@ -141,11 +141,7 @@ class Upstream:
 
 
 def _dynamic_module_config() -> dict:
-    """Returns the Envoy config for locating the pyvoy dynamic module.
-
-    The module is built as a Python extension module so it is loaded by path.
-    It also serves static files, so all filters use the same module.
-    """
+    """Returns the Envoy config for locating the pyvoy dynamic module."""
     return {"module": {"local": {"filename": _pyvoy_module_path()}}}
 
 

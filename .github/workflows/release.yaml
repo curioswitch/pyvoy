@@ -57,6 +57,7 @@ jobs:
           args: --release ${{ env.UNSTABLE_API_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
+          before-script-linux: manylinux-install-clang
 
       - name: Build abi3 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -65,6 +66,7 @@ jobs:
           args: --release ${{ env.ABI3_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
+          before-script-linux: manylinux-install-clang
 
       - name: Build abi3t wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -73,6 +75,7 @@ jobs:
           args: --release ${{ env.ABI3T_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
+          before-script-linux: manylinux-install-clang
 
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
