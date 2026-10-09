@@ -1,6 +1,6 @@
 [project]
 name = "pyvoy"
-version = "1.2.0"
+version = "1.3.0"
 description = "A Python app server based on envoy"
 readme = "README.md"
 requires-python = ">= 3.11"
@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "envoy-server==1.39.1",
+  "envoy-server==1.39.3",
   "find-libpython>=0.5.1",
   "pyqwest>=0.6.2",
   "pyyaml>=6.0",
@@ -85,16 +85,6 @@ module-name = "pyvoy._pyvoy"
 # Check envoy version minimums and update when needed
 [tool.maturin.target.aarch64-apple-darwin]
 macos-deployment-target = "15.0"
-
-[tool.uv]
-# Rebuild the native module when the Rust sources change, not just pyproject.toml.
-cache-keys = [
-  { file = "pyproject.toml" },
-  { file = "Cargo.toml" },
-  { file = "Cargo.lock" },
-  { file = "build.rs" },
-  { file = "src/**/*.rs" },
-]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
@@ -246,3 +236,13 @@ typing-extensions = false
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 split-on-trailing-comma = false
+
+[tool.uv]
+# Rebuild the native module when the Rust sources change, not just pyproject.toml.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "Cargo.lock" },
+  { file = "build.rs" },
+  { file = "src/**/*.rs" },
+]
