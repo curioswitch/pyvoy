@@ -36,9 +36,9 @@ help = "Run the connect-python conformance tests"
 deps = ["build"]
 sequence = [
   { script = "scripts.setup_it:setup" },
-  { cmd = "uv add ../../..", cwd = "out/integration/connect" },
+  { cmd = "uv pip install ../../..", cwd = "out/integration/connect" },
   # Make sure the pyvoy venv isn't used by specifying uv run.
-  { cmd = "uv run pytest -k [pyvoy]", cwd = "out/integration/connect/conformance" },
+  { cmd = "uv run --no-sync pytest -k [pyvoy]", cwd = "out/integration/connect/conformance" },
 ]
 
 [tasks.lint-python]
