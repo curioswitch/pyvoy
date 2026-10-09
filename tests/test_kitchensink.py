@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import anyio
 import pytest
 import pytest_asyncio
-from pyqwest import Client, HTTPTransport, HTTPVersion, ReadError
+from pyqwest import Client, HTTPTransport, HTTPVersion, RemoteProtocolError
 
 from pyvoy import Interface, PyvoyServer
 
@@ -265,7 +265,7 @@ async def test_exception_before_response(
 async def test_exception_after_response_headers(
     url: str, client: Client, logs: StreamReader
 ) -> None:
-    with pytest.raises(ReadError) as exc_info:
+    with pytest.raises(RemoteProtocolError) as exc_info:
         await client.get(f"{url}/exception-after-response-headers")
     assert "unexpected EOF during chunk size line" in str(exc_info.value)
     await assert_logs_contains(
@@ -281,7 +281,7 @@ async def test_exception_after_response_headers(
 async def test_exception_after_response_body(
     url: str, client: Client, logs: StreamReader
 ) -> None:
-    with pytest.raises(ReadError) as exc_info:
+    with pytest.raises(RemoteProtocolError) as exc_info:
         await client.get(f"{url}/exception-after-response-body")
     assert "unexpected EOF during chunk size line" in str(exc_info.value)
     await assert_logs_contains(
@@ -297,7 +297,7 @@ async def test_exception_after_response_body(
 async def test_response_close_on_error(
     url_wsgi: str, client: Client, logs_wsgi: StreamReader
 ) -> None:
-    with pytest.raises(ReadError):
+    with pytest.raises(RemoteProtocolError):
         await client.get(f"{url_wsgi}/close-on-error")
     await assert_logs_contains(logs_wsgi, ["body closed"])
 
