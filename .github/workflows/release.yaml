@@ -102,7 +102,7 @@ jobs:
 
   release:
     runs-on: ubuntu-26.04
-    environment: ${{ github.event_name == 'push' && 'prod' || 'dev' }}
+    environment: ${{ github.event_name == 'push' && 'prod' || github.event_name == 'workflow_dispatch' && 'dev' || null }}
     needs:
       - ext
       - ext-sdist
