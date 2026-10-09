@@ -54,7 +54,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release ${{ env.UNSTABLE_API_FLAGS }}
+          args: --release --out dist ${{ env.UNSTABLE_API_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: ${{ matrix.manylinux == 'manylinux_2_28' && 'dnf install -y clang' || 'apt-get install -y libclang-dev' }}
@@ -63,7 +63,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release ${{ env.ABI3_FLAGS }}
+          args: --release --out dist ${{ env.ABI3_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: ${{ matrix.manylinux == 'manylinux_2_28' && 'dnf install -y clang' || 'apt-get install -y libclang-dev' }}
@@ -72,7 +72,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release ${{ env.ABI3T_FLAGS }}
+          args: --release --out dist ${{ env.ABI3T_FLAGS }}
           sccache: true
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: ${{ matrix.manylinux == 'manylinux_2_28' && 'dnf install -y clang' || 'apt-get install -y libclang-dev' }}
