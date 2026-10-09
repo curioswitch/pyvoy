@@ -52,6 +52,8 @@ jobs:
     env:
       # Avoid multiple compile e.g. in lint and test by setting as a job env var
       RUSTFLAGS: ${{ matrix.coverage == 'cov' && '-C instrument-coverage' || '' }}
+      # Test the abi3 build on the oldest versions, and version-specific builds on the rest.
+      MATURIN_PEP517_ARGS: ${{ (matrix.python == '3.11' || matrix.python == '3.12') && '--features pyo3/abi3-py311' || '' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,7 +100,7 @@ jobs:
         if: ${{ matrix.coverage == 'cov' }}
         run: |
           $(rustc --print=target-libdir)/../bin/llvm-profdata merge -sparse default_*.profraw -o tests.profdata
-          $(rustc --print=target-libdir)/../bin/llvm-cov export -format=lcov --ignore-filename-regex='/.cargo/registry' --ignore-filename-regex='.cargo/git/checkouts' --ignore-filename-regex='.rustup/toolchains' -instr-profile tests.profdata pyvoy/_bin/libpyvoy.so > tests.lcov
+          $(rustc --print=target-libdir)/../bin/llvm-cov export -format=lcov --ignore-filename-regex='/.cargo/registry' --ignore-filename-regex='.cargo/git/checkouts' --ignore-filename-regex='.rustup/toolchains' -instr-profile tests.profdata pyvoy/_pyvoy.*.so > tests.lcov
 
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         if: ${{ matrix.coverage == 'cov' }}

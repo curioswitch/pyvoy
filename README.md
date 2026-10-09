@@ -80,7 +80,7 @@ During development, the most common commands will be
 uv run poe test # Run unit tests
 uv run poe format # Apply possible formatting
 uv run poe check # Run all checks. If this passes, CI should pass
-uv run poe build # Only build pyvoy. Needed if running tests from IDE
+uv sync # Only build pyvoy, e.g. before running tests from an IDE. uv run does this automatically
 ```
 
 ## Benchmarks

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -17,8 +18,6 @@ from urllib.parse import urlsplit
 
 import find_libpython
 from envoy import get_envoy_path
-
-from ._bin import get_pyvoy_dir_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -141,11 +140,23 @@ class Upstream:
     """TLS configuration for connecting to this cluster. If not specified, will use plaintext."""
 
 
+def _dynamic_module_config() -> dict:
+    """Returns the Envoy config for locating the pyvoy dynamic module."""
+    return {"module": {"local": {"filename": _pyvoy_module_path()}}}
+
+
+def _pyvoy_module_path() -> str:
+    spec = importlib.util.find_spec("pyvoy._pyvoy")
+    if spec is None or spec.origin is None:
+        msg = "pyvoy native module not found"
+        raise RuntimeError(msg)
+    return spec.origin
+
+
 def get_envoy_environ() -> dict[str, str]:
     env = {
         "PYTHONPATH": os.pathsep.join(sys.path),
         "PYTHONHOME": f"{sys.prefix}{os.pathsep}{sys.exec_prefix}",
-        "ENVOY_DYNAMIC_MODULES_SEARCH_PATH": str(get_pyvoy_dir_path()),
     }
     if len(args := _maybe_patch_args_with_debug([sys.executable, __file__])) > 2:
         env["PYVOY_PYDEVD_ARGS"] = " ".join(args)
@@ -159,9 +170,10 @@ def get_envoy_environ() -> dict[str, str]:
             p for p in candidates if p.exists() and p.name.startswith("libpython")
         ]
         if candidates:
+            # The module is built like an extension module and does not link
+            # libpython itself, so preload it into the Envoy process.
             if sys.platform == "darwin":
-                libpython_dir = str(candidates[0].parent)
-                env["DYLD_LIBRARY_PATH"] = libpython_dir
+                env["DYLD_INSERT_LIBRARIES"] = str(candidates[0])
             else:
                 env["LD_PRELOAD"] = str(candidates[0])
     if sys.platform == "win32":
@@ -557,7 +569,7 @@ class PyvoyServer:
                     "name": "pyvoy",
                     "typed_config": {
                         "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
-                        "dynamic_module_config": {"name": "pyvoy"},
+                        "dynamic_module_config": _dynamic_module_config(),
                         "filter_name": "pyvoy",
                         "terminal_filter": True,
                         "filter_config": {
@@ -678,7 +690,7 @@ class PyvoyServer:
                     "name": "pyvoy-ws",
                     "typed_config": {
                         "@type": "type.googleapis.com/envoy.extensions.filters.network.dynamic_modules.v3.DynamicModuleNetworkFilter",
-                        "dynamic_module_config": {"name": "pyvoy"},
+                        "dynamic_module_config": _dynamic_module_config(),
                         "filter_name": "pyvoy-ws",
                         "filter_config": {
                             "@type": "type.googleapis.com/google.protobuf.StringValue",
@@ -1002,7 +1014,7 @@ def _dynamic_module_action(
         "name": name,
         "typed_config": {
             "@type": "type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter",
-            "dynamic_module_config": {"name": name},
+            "dynamic_module_config": _dynamic_module_config(),
             "filter_name": name,
             "terminal_filter": True,
             "filter_config": {

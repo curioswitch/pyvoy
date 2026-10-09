@@ -1,11 +1,6 @@
 [tasks.bench]
 help = "Run benchmarks"
-deps = ["build"]
 script = "bench.run_benchmark:main"
-
-[tasks.build]
-help = "Builds native extensions"
-script = "scripts.build:main"
 
 [tasks.check]
 help = "Runs all checks"
@@ -33,7 +28,6 @@ sequence = ["fix-python", "fix-rust", "format-python", "format-rust"]
 
 [tasks.integration-test-connect]
 help = "Run the connect-python conformance tests"
-deps = ["build"]
 sequence = [
   { script = "scripts.setup_it:setup" },
   { cmd = "uv pip install ../../..", cwd = "out/integration/connect" },
@@ -55,10 +49,8 @@ sequence = ["lint-python", "lint-rust"]
 
 [tasks.test]
 help = "Run the test suite"
-deps = ["build"]
 cmd = "pytest"
 
 [tasks.wheel]
 help = "Builds the wheel"
-deps = ["build"]
-script = "scripts.wheel:main"
+cmd = "uv build --wheel"
