@@ -87,10 +87,8 @@ jobs:
           go-version: stable
 
       - name: run connect integration tests on push
-        # TODO: Enable on free-threaded Python after publishing a wheel for it.
-        # The integration test first installs pyvoy from PyPi before we reinstall from local
-        # and it's tricky to avoid that.
-        if: github.event_name == 'push' && matrix.python != '3.15t' && !startsWith(matrix.os, 'windows-')
+        # TODO: Enable on Python 3.15 after next connect-py release
+        if: github.event_name == 'push' && !startsWith(matrix.python, '3.15') && !startsWith(matrix.os, 'windows-')
         run: uv run poe integration-test-connect
 
       - name: verify wheel build
