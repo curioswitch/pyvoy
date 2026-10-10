@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
   "envoy-server==1.39.3",
   "find-libpython>=0.5.1",
-  "pyqwest>=0.6.2",
+  "pyqwest>=0.12.0",
   "pyyaml>=6.0",
   "uvloop>=0.22.1; sys_platform != 'win32'",
   "winloop>=0.4.1; sys_platform == 'win32'",
