@@ -55,6 +55,26 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
+version = "0.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "clang-sys",
+ "itertools",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 1.1.0",
+ "shlex 1.3.0",
+ "syn",
+]
+
+[[package]]
+name = "bindgen"
 version = "0.72.0"
 source = "git+https://github.com/rust-lang/rust-bindgen.git?rev=ccd563767ab1509f7c0eb68c6effc79eaf3684a9#ccd563767ab1509f7c0eb68c6effc79eaf3684a9"
 dependencies = [
@@ -67,7 +87,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 2.1.3",
  "shlex 1.3.0",
  "syn",
 ]
@@ -460,7 +480,7 @@ source = "git+https://github.com/curioswitch/envoy-files?tag=v0.2.0#60e3a8a26673
 dependencies = [
  "envoy-files-core",
  "envoy-files-io",
- "envoy-proxy-dynamic-modules-rust-sdk",
+ "envoy-proxy-dynamic-modules-rust-sdk 0.1.0 (git+https://github.com/anuraaga/envoy?rev=245289bc0d9664a885c71a23df1deccb0511fb44)",
  "http",
  "yaml-rust2 0.11.1",
 ]
@@ -483,9 +503,18 @@ dependencies = [
 [[package]]
 name = "envoy-proxy-dynamic-modules-rust-sdk"
 version = "0.1.0"
+source = "git+https://github.com/anuraaga/envoy?rev=0f7d63e81474266339e492213a334f41772a5486#0f7d63e81474266339e492213a334f41772a5486"
+dependencies = [
+ "bindgen 0.70.1",
+ "mockall",
+]
+
+[[package]]
+name = "envoy-proxy-dynamic-modules-rust-sdk"
+version = "0.1.0"
 source = "git+https://github.com/anuraaga/envoy?rev=245289bc0d9664a885c71a23df1deccb0511fb44#245289bc0d9664a885c71a23df1deccb0511fb44"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.0",
  "mockall",
 ]
 
@@ -1257,7 +1286,7 @@ dependencies = [
  "crossbeam-channel",
  "encoding_rs 0.8.42",
  "envoy-files-filter",
- "envoy-proxy-dynamic-modules-rust-sdk",
+ "envoy-proxy-dynamic-modules-rust-sdk 0.1.0 (git+https://github.com/anuraaga/envoy?rev=0f7d63e81474266339e492213a334f41772a5486)",
  "http",
  "itoa",
  "pyo3",
@@ -1328,6 +1357,12 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
