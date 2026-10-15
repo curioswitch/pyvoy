@@ -6,6 +6,7 @@ use crate::wsgi::transport::{
 };
 use ::http::{HeaderName, HeaderValue, StatusCode};
 use envoy_proxy_dynamic_modules_rust_sdk::*;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
@@ -47,19 +48,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
-            request_closed: false,
-            response_closed: false,
+            request_closed: Cell::new(false),
+            response_closed: Cell::new(false),
             request_read_bridge: EventBridge::new(),
             response_bridge: EventBridge::new(),
             transport_bridge: EventBridge::new(),
-            transport_responses: HashMap::new(),
-            request_body_rx: Some(request_body_rx),
+            transport_responses: RefCell::new(HashMap::new()),
+            request_body_rx: Cell::new(Some(request_body_rx)),
             request_body_tx,
-            pending_read: RequestReadEvent::Wait,
-            read_buffer: Vec::new(),
+            pending_read: Cell::new(RequestReadEvent::Wait),
+            read_buffer: RefCell::new(Vec::new()),
             response_written_tx,
-            response_written_rx: Some(response_written_rx),
-            downstream_watermark_level: 0,
+            response_written_rx: Cell::new(Some(response_written_rx)),
+            downstream_watermark_level: Cell::new(0),
         }))
     }
 }
@@ -67,29 +68,31 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 struct Filter {
     executor: Executor,
 
-    request_closed: bool,
-    response_closed: bool,
+    request_closed: Cell<bool>,
+    response_closed: Cell<bool>,
 
     request_read_bridge: EventBridge<RequestReadEvent>,
     response_bridge: EventBridge<ResponseEvent>,
-    pending_read: RequestReadEvent,
-    read_buffer: Vec<u8>,
+    pending_read: Cell<RequestReadEvent>,
+    read_buffer: RefCell<Vec<u8>>,
 
     transport_bridge: EventBridge<TransportEvent>,
-    transport_responses: HashMap<u64, TransportState>,
+    transport_responses: RefCell<HashMap<u64, TransportState>>,
 
-    request_body_rx: Option<Receiver<RequestBody>>,
+    /// Handed to the executor in `on_request_headers`.
+    request_body_rx: Cell<Option<Receiver<RequestBody>>>,
     request_body_tx: Sender<RequestBody>,
 
     response_written_tx: Sender<()>,
-    response_written_rx: Option<Receiver<()>>,
+    /// Handed to the executor in `on_request_headers`.
+    response_written_rx: Cell<Option<Receiver<()>>>,
 
-    downstream_watermark_level: usize,
+    downstream_watermark_level: Cell<usize>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_request_headers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
@@ -106,20 +109,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             Box::from(envoy_filter.new_scheduler()),
         );
         if end_of_stream {
-            self.request_closed = true;
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
-        } else {
-            abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
+            self.request_closed.set(true);
         }
+        abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration
     }
 
     fn on_request_body(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         if end_of_stream {
-            self.request_closed = true;
+            self.request_closed.set(true);
         }
 
         self.process_read(envoy_filter);
@@ -128,23 +129,29 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_request_trailers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status {
-        self.request_closed = true;
+        self.request_closed.set(true);
 
         self.process_read(envoy_filter);
 
         abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::StopIteration
     }
 
-    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
-        self.response_closed = true;
+    fn on_stream_complete(&self, _envoy_filter: &mut EHF) {
+        self.response_closed.set(true);
         self.request_read_bridge.close();
         self.response_bridge.close();
         self.transport_bridge.close();
 
-        for (_, state) in self.transport_responses.drain() {
+        let transport_responses: Vec<TransportState> = self
+            .transport_responses
+            .borrow_mut()
+            .drain()
+            .map(|(_, state)| state)
+            .collect();
+        for state in transport_responses {
             let _ = state.response_tx.send(TransportResponse::Reset {
                 reason: ResetReason::ServerRequestDone,
                 exception: state.exception,
@@ -152,11 +159,11 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
+    fn on_scheduled(&self, envoy_filter: &mut EHF, event_id: u64) {
         match event_id {
             EVENT_ID_REQUEST => self.process_read(envoy_filter),
             EVENT_ID_RESPONSE => {
-                if self.downstream_watermark_level == 0 {
+                if self.downstream_watermark_level.get() == 0 {
                     self.process_send_events(envoy_filter);
                 }
             }
@@ -165,25 +172,30 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_downstream_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut EHF) {
-        self.downstream_watermark_level += 1;
+    fn on_downstream_above_write_buffer_high_watermark(&self, _envoy_filter: &mut EHF) {
+        self.downstream_watermark_level
+            .set(self.downstream_watermark_level.get() + 1);
     }
 
-    fn on_downstream_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut EHF) {
-        self.downstream_watermark_level -= 1;
-        if self.downstream_watermark_level == 0 {
+    fn on_downstream_below_write_buffer_low_watermark(&self, envoy_filter: &mut EHF) {
+        let level = self.downstream_watermark_level.get() - 1;
+        self.downstream_watermark_level.set(level);
+        if level == 0 {
             envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         }
     }
 
     fn on_http_stream_headers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         stream_handle: u64,
         response_headers: &[(EnvoyBuffer, EnvoyBuffer)],
         end_stream: bool,
     ) {
-        let Some(state) = self.transport_responses.get(&stream_handle) else {
+        // Clone the sender out so the map borrow ends before the reset below,
+        // which re-enters on_http_stream_reset.
+        let response_tx = self.response_tx_for(stream_handle);
+        let Some(response_tx) = response_tx else {
             // Happens if there is a configuration bug for the upstream.
             unsafe { envoy_filter.reset_http_stream(stream_handle) };
             return;
@@ -207,7 +219,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 _ => continue,
             }
         }
-        let _ = state.response_tx.send(TransportResponse::Headers {
+        let _ = response_tx.send(TransportResponse::Headers {
             status,
             headers,
             end_stream,
@@ -215,13 +227,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_http_stream_data(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         response_data: &[EnvoyBuffer],
         end_stream: bool,
     ) {
-        let Some(state) = self.transport_responses.get(&stream_handle) else {
+        let Some(response_tx) = self.response_tx_for(stream_handle) else {
             return;
         };
         let len = response_data.iter().map(|b| b.as_slice().len()).sum();
@@ -230,22 +242,20 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             body.extend_from_slice(buffer.as_slice());
         }
         if !body.is_empty() {
-            let _ = state
-                .response_tx
-                .send(TransportResponse::Body(body.into_boxed_slice()));
+            let _ = response_tx.send(TransportResponse::Body(body.into_boxed_slice()));
         }
         if end_stream {
-            let _ = state.response_tx.send(TransportResponse::End);
+            let _ = response_tx.send(TransportResponse::End);
         }
     }
 
     fn on_http_stream_trailers(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         response_trailers: &[(EnvoyBuffer, EnvoyBuffer)],
     ) {
-        let Some(state) = self.transport_responses.get(&stream_handle) else {
+        let Some(response_tx) = self.response_tx_for(stream_handle) else {
             return;
         };
         let mut trailers: Vec<(HeaderName, HeaderValue)> =
@@ -258,18 +268,17 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 trailers.push((name, value));
             }
         }
-        let _ = state
-            .response_tx
-            .send(TransportResponse::Trailers(trailers));
+        let _ = response_tx.send(TransportResponse::Trailers(trailers));
     }
 
     fn on_http_stream_reset(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
     ) {
-        let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
+        let state = self.transport_responses.borrow_mut().remove(&stream_handle);
+        let Some(mut state) = state else {
             return;
         };
         let reason = match reason {
@@ -298,24 +307,34 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         });
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {
+    fn on_http_stream_complete(&self, _envoy_filter: &mut EHF, stream_handle: u64) {
         // Cleanup for a successful response. It may be more precise to do this on data with
         // end_stream or trailers but simpler to just take care of it here.
-        self.transport_responses.remove(&stream_handle);
+        self.transport_responses.borrow_mut().remove(&stream_handle);
     }
 }
 
 impl Filter {
-    fn process_read<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+    /// The response channel of a live upstream stream, cloned out so the map
+    /// borrow ends before the caller does anything else.
+    fn response_tx_for(&self, stream_handle: u64) -> Option<Sender<TransportResponse>> {
+        self.transport_responses
+            .borrow()
+            .get(&stream_handle)
+            .map(|state| state.response_tx.clone())
+    }
+
+    fn process_read<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
         self.request_read_bridge.process(|event| {
-            self.pending_read = event;
+            self.pending_read.set(event);
         });
         // Reads always block until there is data or the request is finished,
         // so don't process them otherwise.
-        if !has_request_body(envoy_filter) && !self.request_closed {
+        if !has_request_body(envoy_filter) && !self.request_closed.get() {
             return;
         }
-        match self.pending_read {
+        let pending_read = self.pending_read.get();
+        match pending_read {
             RequestReadEvent::Raw(n) if n > 0 => {
                 let mut remaining = n as usize;
                 let mut body: Vec<u8> = Vec::with_capacity(remaining);
@@ -347,40 +366,39 @@ impl Filter {
                     }
                     envoy_filter.drain_received_request_body(read);
                 }
-                self.pending_read = RequestReadEvent::Wait;
+                self.pending_read.set(RequestReadEvent::Wait);
                 send_or_log(
                     &self.request_body_tx,
                     RequestBody {
                         body: body.into_boxed_slice(),
-                        closed: !has_request_body(envoy_filter) && self.request_closed,
+                        closed: !has_request_body(envoy_filter) && self.request_closed.get(),
                     },
                 );
             }
             RequestReadEvent::Raw(_) => {
-                self.read_buffer.reserve(
-                    buffers_len(&envoy_filter.get_buffered_request_body())
-                        + buffers_len(&envoy_filter.get_received_request_body()),
-                );
+                let available = buffers_len(&envoy_filter.get_buffered_request_body())
+                    + buffers_len(&envoy_filter.get_received_request_body());
+                self.read_buffer.borrow_mut().reserve(available);
                 let buffered_read = extend_from_buffers(
                     &envoy_filter.get_buffered_request_body(),
-                    &mut self.read_buffer,
+                    &mut self.read_buffer.borrow_mut(),
                 );
                 if buffered_read > 0 {
                     envoy_filter.drain_buffered_request_body(buffered_read);
                 }
                 let received_read = extend_from_buffers(
                     &envoy_filter.get_received_request_body(),
-                    &mut self.read_buffer,
+                    &mut self.read_buffer.borrow_mut(),
                 );
                 if received_read > 0 {
                     envoy_filter.drain_received_request_body(received_read);
                 }
-                if self.request_closed {
-                    self.pending_read = RequestReadEvent::Wait;
+                if self.request_closed.get() {
+                    self.pending_read.set(RequestReadEvent::Wait);
                     send_or_log(
                         &self.request_body_tx,
                         RequestBody {
-                            body: std::mem::take(&mut self.read_buffer).into_boxed_slice(),
+                            body: self.read_buffer.take().into_boxed_slice(),
                             closed: true,
                         },
                     );
@@ -398,14 +416,14 @@ impl Filter {
                     send = should_send;
                     envoy_filter.drain_received_request_body(read);
                 }
-                if send || self.request_closed {
-                    let body = std::mem::take(&mut self.read_buffer);
-                    self.pending_read = RequestReadEvent::Wait;
+                if send || self.request_closed.get() {
+                    let body = self.read_buffer.take();
+                    self.pending_read.set(RequestReadEvent::Wait);
                     send_or_log(
                         &self.request_body_tx,
                         RequestBody {
                             body: body.into_boxed_slice(),
-                            closed: !has_request_body(envoy_filter) && self.request_closed,
+                            closed: !has_request_body(envoy_filter) && self.request_closed.get(),
                         },
                     );
                 }
@@ -415,16 +433,17 @@ impl Filter {
     }
 
     fn read_request_until_line_or_size(
-        &mut self,
+        &self,
         buffers: &Vec<EnvoyMutBuffer<'_>>,
         n: isize,
     ) -> (bool, usize) {
+        let mut read_buffer = self.read_buffer.borrow_mut();
         let mut read = 0;
         for buffer in buffers.iter().map(|b| b.as_slice()) {
             for &b in buffer {
-                self.read_buffer.push(b);
+                read_buffer.push(b);
                 read += 1;
-                if b == b'\n' || (n > 0 && self.read_buffer.len() >= n as usize) {
+                if b == b'\n' || (n > 0 && read_buffer.len() >= n as usize) {
                     return (true, read);
                 }
             }
@@ -432,7 +451,7 @@ impl Filter {
         (false, read)
     }
 
-    fn process_send_events<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+    fn process_send_events<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
         self.response_bridge.process(|event| match event {
             ResponseEvent::Start(start_event, body_event) => {
                 let mut headers: Vec<(&str, &[u8])> =
@@ -481,8 +500,8 @@ impl Filter {
                 envoy_filter.send_response_trailers(&trailers_ref);
             }
             ResponseEvent::Exception => {
-                if !self.response_closed {
-                    self.response_closed = true;
+                if !self.response_closed.get() {
+                    self.response_closed.set(true);
                     envoy_filter.send_response(
                         500,
                         &[
@@ -497,7 +516,7 @@ impl Filter {
         });
     }
 
-    fn process_transport_events<EHF: EnvoyHttpFilter>(&mut self, envoy_filter: &mut EHF) {
+    fn process_transport_events<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
         self.transport_bridge.process(|event| match event {
             TransportEvent::Start(event) => {
                 let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
@@ -545,7 +564,7 @@ impl Filter {
                 let _ = event
                     .response_tx
                     .send(TransportResponse::Started(stream_handle));
-                self.transport_responses.insert(
+                self.transport_responses.borrow_mut().insert(
                     stream_handle,
                     TransportState {
                         response_tx: event.response_tx,
@@ -560,17 +579,31 @@ impl Filter {
                     end_stream,
                 } = event;
                 // Possible stream was reset before we process this event, so check for liveness.
-                if self.transport_responses.contains_key(&stream_handle) {
+                let live = self
+                    .transport_responses
+                    .borrow()
+                    .contains_key(&stream_handle);
+                if live {
                     unsafe {
                         envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
                     }
                 }
             }
             TransportEvent::Reset(mut event) => {
-                if let Some(state) = self.transport_responses.get_mut(&event.stream_handle) {
-                    if let Some(exception) = event.exception.take() {
-                        state.exception = Some(exception);
+                let live = {
+                    let mut transport_responses = self.transport_responses.borrow_mut();
+                    match transport_responses.get_mut(&event.stream_handle) {
+                        Some(state) => {
+                            if let Some(exception) = event.exception.take() {
+                                state.exception = Some(exception);
+                            }
+                            true
+                        }
+                        None => false,
                     }
+                };
+                if live {
+                    // Re-enters on_http_stream_reset, which removes the entry.
                     unsafe {
                         envoy_filter.reset_http_stream(event.stream_handle);
                     }

@@ -5,6 +5,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::{
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,14 +75,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
-            request_closed: false,
+            request_closed: Cell::new(false),
             response_closed: Arc::new(AtomicBool::new(false)),
-            response_trailers: None,
+            response_trailers: RefCell::new(None),
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
             transport_bridge: EventBridge::new(),
-            transport_responses: HashMap::new(),
-            downstream_watermark_level: 0,
+            transport_responses: RefCell::new(HashMap::new()),
+            downstream_watermark_level: Cell::new(0),
         }))
     }
 }
@@ -89,28 +90,28 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 struct Filter {
     executor: python::Executor,
 
-    request_closed: bool,
+    request_closed: Cell<bool>,
     response_closed: Arc<AtomicBool>,
 
-    response_trailers: Option<Vec<(HeaderName, HeaderValue)>>,
+    response_trailers: RefCell<Option<Vec<(HeaderName, HeaderValue)>>>,
 
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
 
     transport_bridge: EventBridge<TransportEvent>,
-    transport_responses: HashMap<u64, TransportState>,
+    transport_responses: RefCell<HashMap<u64, TransportState>>,
 
-    downstream_watermark_level: usize,
+    downstream_watermark_level: Cell<usize>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_request_headers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         if end_of_stream {
-            self.request_closed = true;
+            self.request_closed.set(true);
         }
 
         let trailers_accepted = envoy_filter
@@ -133,12 +134,12 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_request_body(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
         if end_of_stream {
-            self.request_closed = true;
+            self.request_closed.set(true);
         }
 
         self.handle_read(envoy_filter);
@@ -147,22 +148,28 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_request_trailers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status {
-        self.request_closed = true;
+        self.request_closed.set(true);
 
         self.handle_read(envoy_filter);
 
         abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::StopIteration
     }
 
-    fn on_stream_complete(&mut self, _envoy_filter: &mut EHF) {
+    fn on_stream_complete(&self, _envoy_filter: &mut EHF) {
         self.response_closed.store(true, Ordering::Relaxed);
         self.recv_bridge.close();
         self.send_bridge.close();
 
-        for (_, state) in self.transport_responses.drain() {
+        let transport_responses: Vec<TransportState> = self
+            .transport_responses
+            .borrow_mut()
+            .drain()
+            .map(|(_, state)| state)
+            .collect();
+        for state in transport_responses {
             if let Some(response_future) = state.response_future {
                 self.executor.set_response_future_exception(
                     response_future,
@@ -176,13 +183,13 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_scheduled(&mut self, envoy_filter: &mut EHF, event_id: u64) {
+    fn on_scheduled(&self, envoy_filter: &mut EHF, event_id: u64) {
         match event_id {
             EVENT_ID_REQUEST => {
                 self.handle_read(envoy_filter);
             }
             EVENT_ID_RESPONSE => {
-                if self.downstream_watermark_level == 0 {
+                if self.downstream_watermark_level.get() == 0 {
                     self.process_send_events(envoy_filter);
                 }
             }
@@ -193,25 +200,40 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_downstream_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut EHF) {
-        self.downstream_watermark_level += 1;
+    fn on_downstream_above_write_buffer_high_watermark(&self, _envoy_filter: &mut EHF) {
+        self.downstream_watermark_level
+            .set(self.downstream_watermark_level.get() + 1);
     }
 
-    fn on_downstream_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut EHF) {
-        self.downstream_watermark_level -= 1;
-        if self.downstream_watermark_level == 0 {
+    fn on_downstream_below_write_buffer_low_watermark(&self, envoy_filter: &mut EHF) {
+        let level = self.downstream_watermark_level.get() - 1;
+        self.downstream_watermark_level.set(level);
+        if level == 0 {
             envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
         }
     }
 
     fn on_http_stream_headers(
-        &mut self,
+        &self,
         envoy_filter: &mut EHF,
         stream_handle: u64,
         response_headers: &[(EnvoyBuffer, EnvoyBuffer)],
         end_stream: bool,
     ) {
-        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+        // Take what the executor needs out of the map so the borrow ends before
+        // the reset below, which re-enters on_http_stream_reset.
+        let state = self
+            .transport_responses
+            .borrow_mut()
+            .get_mut(&stream_handle)
+            .map(|state| {
+                (
+                    state.response_future.take(),
+                    state.response_content.clone(),
+                    state.request_content.clone(),
+                )
+            });
+        let Some((response_future, response_content, request_content)) = state else {
             // Happens if there is a configuration bug for the upstream.
             // TODO: Surface this.
             unsafe { envoy_filter.reset_http_stream(stream_handle) };
@@ -236,28 +258,33 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                 _ => continue,
             }
         }
-        let Some(future) = state.response_future.take() else {
+        let Some(future) = response_future else {
             // Shouldn't happen in practice.
             return;
         };
         self.executor.handle_transport_received_response_headers(
             status,
             headers,
-            state.response_content.clone(),
+            response_content,
             future,
-            state.request_content.clone(),
+            request_content,
             end_stream,
         );
     }
 
     fn on_http_stream_data(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         response_data: &[EnvoyBuffer],
         end_stream: bool,
     ) {
-        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+        let response_content = self
+            .transport_responses
+            .borrow()
+            .get(&stream_handle)
+            .map(|state| state.response_content.clone());
+        let Some(response_content) = response_content else {
             // Can't happen in practice since we would have reset the stream in on_http_stream_headers,
             // but avoid panic anyways.
             return;
@@ -267,37 +294,38 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         for buffer in response_data {
             body.extend_from_slice(buffer.as_slice());
         }
-        if state.response_content.feed_response_data(body, end_stream) {
-            self.executor
-                .notify_response(state.response_content.clone());
+        if response_content.feed_response_data(body, end_stream) {
+            self.executor.notify_response(response_content);
         }
     }
 
     fn on_http_stream_trailers(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         response_trailers: &[(EnvoyBuffer, EnvoyBuffer)],
     ) {
-        let Some(state) = self.transport_responses.get_mut(&stream_handle) else {
+        let response_content = self
+            .transport_responses
+            .borrow()
+            .get(&stream_handle)
+            .map(|state| state.response_content.clone());
+        let Some(response_content) = response_content else {
             return;
         };
-        if state
-            .response_content
-            .feed_response_trailers(response_trailers)
-        {
-            self.executor
-                .notify_response(state.response_content.clone());
+        if response_content.feed_response_trailers(response_trailers) {
+            self.executor.notify_response(response_content);
         }
     }
 
     fn on_http_stream_reset(
-        &mut self,
+        &self,
         _envoy_filter: &mut EHF,
         stream_handle: u64,
         reason: abi::envoy_dynamic_module_type_http_stream_reset_reason,
     ) {
-        let Some(mut state) = self.transport_responses.remove(&stream_handle) else {
+        let state = self.transport_responses.borrow_mut().remove(&stream_handle);
+        let Some(mut state) = state else {
             return;
         };
 
@@ -335,32 +363,32 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
     }
 
-    fn on_http_stream_complete(&mut self, _envoy_filter: &mut EHF, stream_handle: u64) {
+    fn on_http_stream_complete(&self, _envoy_filter: &mut EHF, stream_handle: u64) {
         // Cleanup for a successful response. It may be more precise to do this on data with end_stream or
         // trailers but simpler to just take care of it here.
-        self.transport_responses.remove(&stream_handle);
+        self.transport_responses.borrow_mut().remove(&stream_handle);
     }
 }
 
 impl Filter {
-    fn handle_read(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
-        if self.request_closed || has_request_body(envoy_filter) {
+    fn handle_read(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.request_closed.get() || has_request_body(envoy_filter) {
             self.recv_bridge.process(|future| {
                 self.executor.handle_recv_future(
                     read_request_body(envoy_filter),
-                    !self.request_closed,
+                    !self.request_closed.get(),
                     future,
                 );
             });
         }
     }
 
-    fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
+    fn process_send_events(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
         self.send_bridge.process(|event| {
             match event {
                 SendEvent::Start(start_event, mut body_event) => {
                     if start_event.trailers {
-                        self.response_trailers.replace(Vec::new());
+                        *self.response_trailers.borrow_mut() = Some(Vec::new());
                     }
                     let mut headers: Vec<(&str, &[u8])> =
                         Vec::with_capacity(start_event.headers.len() + 1);
@@ -369,7 +397,7 @@ impl Filter {
                         headers.push((k.as_str(), v.as_bytes()));
                     }
                     let end_stream =
-                        body_event.future.is_none() && self.response_trailers.is_none();
+                        body_event.future.is_none() && self.response_trailers.borrow().is_none();
                     if let Some(future) = body_event.future.take() {
                         self.executor.handle_send_future(future);
                     }
@@ -386,24 +414,30 @@ impl Filter {
                     }
                 }
                 SendEvent::Body(mut event) => {
-                    let end_stream = event.future.is_none() && self.response_trailers.is_none();
+                    let end_stream =
+                        event.future.is_none() && self.response_trailers.borrow().is_none();
                     if let Some(future) = event.future.take() {
                         self.executor.handle_send_future(future);
                     }
                     envoy_filter.send_response_data(&event.body, end_stream);
-                    if end_stream {}
                 }
                 SendEvent::Trailers(mut event) => {
-                    if let Some(trailers) = &mut self.response_trailers {
-                        trailers.append(&mut event.headers);
-                        if !event.more_trailers {
-                            let trailers_ref: Vec<(&str, &[u8])> = trailers
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), v.as_bytes()))
-                                .collect();
-                            envoy_filter.send_response_trailers(&trailers_ref);
-                        }
+                    // Accumulate outside the cell: sending the trailers ends
+                    // the stream, which re-enters on_stream_complete.
+                    let trailers = self.response_trailers.borrow_mut().take();
+                    let Some(mut trailers) = trailers else {
+                        return;
+                    };
+                    trailers.append(&mut event.headers);
+                    if event.more_trailers {
+                        *self.response_trailers.borrow_mut() = Some(trailers);
+                        return;
                     }
+                    let trailers_ref: Vec<(&str, &[u8])> = trailers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_bytes()))
+                        .collect();
+                    envoy_filter.send_response_trailers(&trailers_ref);
                 }
                 SendEvent::Exception => {
                     // Will reset the stream if headers have already been sent.
@@ -421,7 +455,7 @@ impl Filter {
         });
     }
 
-    fn process_transport_events(&mut self, envoy_filter: &mut impl EnvoyHttpFilter) {
+    fn process_transport_events(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
         self.transport_bridge.process(|event| match event {
             TransportEvent::Start(event) => {
                 let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
@@ -476,7 +510,7 @@ impl Filter {
                     self.executor.notify_request(request_content.clone());
                 }
                 event.response_content.set_stream_handle(stream_handle);
-                self.transport_responses.insert(
+                self.transport_responses.borrow_mut().insert(
                     stream_handle,
                     TransportState {
                         request_content,
@@ -492,17 +526,27 @@ impl Filter {
                     end_stream,
                 } = event;
                 // Possible stream was reset before we process this event, so check for liveness.
-                if self.transport_responses.contains_key(&stream_handle) {
+                let live = self
+                    .transport_responses
+                    .borrow()
+                    .contains_key(&stream_handle);
+                if live {
                     unsafe {
                         envoy_filter.send_http_stream_data(stream_handle, &data, end_stream);
                     }
                 }
             }
             TransportEvent::Reset(mut event) => {
-                if let Some(state) = self.transport_responses.get(&event.stream_handle) {
+                let response_content = self
+                    .transport_responses
+                    .borrow()
+                    .get(&event.stream_handle)
+                    .map(|state| state.response_content.clone());
+                if let Some(response_content) = response_content {
                     if let Some(exception) = event.exception.take() {
-                        state.response_content.set_exception(exception);
+                        response_content.set_exception(exception);
                     }
+                    // Re-enters on_http_stream_reset, which removes the entry.
                     unsafe {
                         envoy_filter.reset_http_stream(event.stream_handle);
                     }

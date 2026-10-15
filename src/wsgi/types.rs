@@ -15,6 +15,7 @@ pub(crate) const EVENT_ID_OUTGOING_REQUEST: u64 = 3;
 /// size 0 is handled in the WSGI input stream itself so is never set here.
 ///
 /// https://peps.python.org/pep-3333/#input-and-error-streams
+#[derive(Clone, Copy)]
 pub(crate) enum RequestReadEvent {
     /// Wait until a request to read.
     Wait,
