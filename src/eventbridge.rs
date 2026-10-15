@@ -71,7 +71,10 @@ impl<T> EventBridge<T> {
     pub(crate) fn process(&self, mut f: impl FnMut(T)) {
         let mut inner = self.inner.lock().unwrap();
         match std::mem::replace(&mut *inner, Inner::Empty) {
-            Inner::Closed | Inner::Empty => {}
+            // Draining must not reopen a closed bridge: on_scheduled can run
+            // after on_stream_complete closed it.
+            Inner::Closed => *inner = Inner::Closed,
+            Inner::Empty => {}
             Inner::Single(event) => {
                 drop(inner);
                 f(event);
@@ -89,7 +92,11 @@ impl<T> EventBridge<T> {
     pub(crate) fn get(&self) -> Option<T> {
         let mut inner = self.inner.lock().unwrap();
         match std::mem::replace(&mut *inner, Inner::Empty) {
-            Inner::Closed | Inner::Empty => None,
+            Inner::Closed => {
+                *inner = Inner::Closed;
+                None
+            }
+            Inner::Empty => None,
             Inner::Single(event) => Some(event),
             Inner::Multiple(mut events) => {
                 let event = events.remove(0);
@@ -105,5 +112,39 @@ impl<T> EventBridge<T> {
     pub(crate) fn close(&self) {
         let mut inner = self.inner.lock().unwrap();
         *inner = Inner::Closed;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_keeps_closed_bridge_closed() {
+        let bridge = EventBridge::<u32>::new();
+        bridge.close();
+        bridge.process(|_| panic!("closed bridge has no events"));
+        assert_eq!(bridge.send(1), Err(1));
+    }
+
+    #[test]
+    fn get_keeps_closed_bridge_closed() {
+        let bridge = EventBridge::<u32>::new();
+        bridge.close();
+        assert!(bridge.get().is_none());
+        assert_eq!(bridge.send(1), Err(1));
+    }
+
+    #[test]
+    fn process_drains_in_order() {
+        let bridge = EventBridge::<u32>::new();
+        bridge.send(1).unwrap();
+        bridge.send(2).unwrap();
+        let mut seen = Vec::new();
+        bridge.process(|event| seen.push(event));
+        assert_eq!(seen, vec![1, 2]);
+        assert!(bridge.is_empty());
+        bridge.send(3).unwrap();
+        assert_eq!(bridge.get(), Some(3));
     }
 }
