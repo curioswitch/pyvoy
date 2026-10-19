@@ -53,15 +53,15 @@ dev = [
   "gunicorn==26.2.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
-  "poethepoet==0.48.0",
+  "poethepoet==0.49.0",
   "psutil==7.2.2",
   "pyright[nodejs]==1.1.414",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
-  "ruff==0.16.10",
+  "ruff==0.17.1",
   "seaborn==0.13.2",
-  "starlette==1.7.0",
+  "starlette==1.9.0",
   "trio==0.34.0",
   "trustme==1.2.1",
   "uvicorn[standard]==0.54.0",
@@ -71,7 +71,7 @@ dev = [
   "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
-docs = ["mkdocstrings-python==2.0.9", "zensical==0.0.68"]
+docs = ["mkdocstrings-python==2.0.10", "zensical==0.0.71"]
 
 [build-system]
 requires = ["maturin>=1.12,<2.0"]
