@@ -49,9 +49,7 @@ def enable_pydev(debug_args: list[str]) -> None:
         import debugpy.server  # pyright: ignore[reportMissingImports]  # noqa: F401, PLC0415
 
         # This is debugpy-only
-        from _pydevd_bundle.pydevd_defaults import (  # pyright: ignore[reportMissingImports]  # noqa: PLC0415
-            PydevdCustomization,
-        )
+        from _pydevd_bundle.pydevd_defaults import PydevdCustomization  # pyright: ignore[reportMissingImports]  # noqa: PLC0415
 
         if args.debug_mode:
             PydevdCustomization.DEBUG_MODE = args.debug_mode
