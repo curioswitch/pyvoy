@@ -7,7 +7,7 @@ WORKDIR /app
 COPY . /app
 RUN uv sync --locked --no-dev
 
-FROM python:3.14-slim-trixie
+FROM python:3.15-slim-trixie
 
 COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH"
