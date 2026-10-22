@@ -2,8 +2,9 @@
 
 pyvoy includes a CLI that spawns Envoy with the Python interpreter, allowing it to run
 very similarly to any other application server. This should generally still work well
-in Docker, however to avoid potential issues with subprocesses, we recommend
-running Envoy directly.
+in Docker, and you can use the same Dockerfiles as for any other servers. However if you
+already use Envoy or want to try out its advanced features, you may want to run Envoy
+directly, using Envoy config features not supported by pyvoy CLI.
 
 pyvoy includes two commands to generate an Envoy config and startup script that can be
 used within a `Dockerfile` to make this easier. This example builds an application using
