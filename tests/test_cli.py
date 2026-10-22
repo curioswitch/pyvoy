@@ -244,6 +244,28 @@ def test_loop_flag(
     assert captured_server._loop == expected
 
 
+@pytest.mark.parametrize(("args", "expected"), [([], True), (["--no-otel"], False)])
+def test_otel_flag(
+    args: list[str], expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys, "argv", ["pyvoy", "primary.app", *args, "--print-envoy-config"]
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._enable_otel is expected
+
+
 @pytest.mark.parametrize(
     ("flag", "value", "minimum"),
     [

@@ -1,5 +1,6 @@
 use crate::envoy::{buffers_len, extend_from_buffers, has_request_body};
 use crate::eventbridge::EventBridge;
+use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::wsgi::python::Executor;
 use crate::wsgi::transport::{
     ResetReason, SendStreamDataEvent, TransportEvent, TransportResponse, TransportState,
@@ -15,6 +16,7 @@ use super::types::*;
 use crate::types::*;
 pub struct Config {
     executor: Executor,
+    trace_sampler: Option<TraceSampler>,
 }
 
 impl Config {
@@ -23,6 +25,7 @@ impl Config {
         root_path: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
+        trace_sampler: Option<TraceSampler>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let executor = match Executor::new(module, attr, root_path, worker_threads, constants) {
@@ -32,7 +35,10 @@ impl Config {
                 return None;
             }
         };
-        Some(Self { executor })
+        Some(Self {
+            executor,
+            trace_sampler,
+        })
     }
 }
 
@@ -48,6 +54,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         let (response_written_tx, response_written_rx) = mpsc::channel::<()>();
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
+            trace_sampler: self.trace_sampler,
             request_closed: Cell::new(false),
             response_closed: Cell::new(false),
             request_read_bridge: EventBridge::new(),
@@ -67,6 +74,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 
 struct Filter {
     executor: Executor,
+    trace_sampler: Option<TraceSampler>,
 
     request_closed: Cell<bool>,
     response_closed: Cell<bool>,
@@ -96,6 +104,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
+        if let Some(trace_sampler) = &self.trace_sampler {
+            propagate_active_span(envoy_filter, trace_sampler);
+        }
         let scope = new_scope(envoy_filter);
 
         self.executor.execute_app(
