@@ -55,6 +55,7 @@ class CLIArgs:
     websockets_max_message_size: int
     websockets_compression: bool
     content_encodings: list[ContentEncoding]
+    otel: bool
     reload: bool
     reload_dirs: list[str]
     reload_includes: list[str]
@@ -253,6 +254,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--otel",
+        help="whether to export Envoy's traces and metrics with OTLP as configured by the standard OTEL_* environment variables",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+
+    parser.add_argument(
         "--reload",
         help="enable auto-reloading on code changes",
         action="store_true",
@@ -389,6 +397,7 @@ async def amain() -> None:
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,
         content_encodings=args.content_encodings,
+        enable_otel=args.otel,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,
         static_mounts=static_mounts,

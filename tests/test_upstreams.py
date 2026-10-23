@@ -46,3 +46,27 @@ def test_http3_upstream_uses_quic_transport() -> None:
     assert typed_config["@type"].endswith(".QuicUpstreamTransport")
     assert typed_config["upstream_tls_context"]["sni"] == "localhost"
     assert typed_config["upstream_tls_context"]["auto_sni_san_validation"]
+
+
+@pytest.mark.parametrize(
+    ("tls", "expected"),
+    [
+        (None, {"explicit_http_config": {"http_protocol_options": {}}}),
+        (TLSConfig(ca_cert=b"test CA"), {"auto_config": {}}),
+    ],
+)
+def test_unspecified_http_version(
+    tls: TLSConfig | None, expected: dict[str, object]
+) -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        upstreams=[Upstream(name="backend", address="localhost:8080", tls=tls)],
+    )
+
+    config = server.get_envoy_config()
+    cluster = config["static_resources"]["clusters"][0]
+    protocol_options = cluster["typed_extension_protocol_options"][
+        "envoy.extensions.upstreams.http.v3.HttpProtocolOptions"
+    ]
+    # Envoy refuses to start with automatic HTTP versions on plaintext.
+    assert {k: v for k, v in protocol_options.items() if k != "@type"} == expected
