@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -102,7 +103,7 @@ def otel_config(env: Mapping[str, str]) -> OTelConfig:
         ValueError: If a variable has an invalid value.
     """
     collectors: list[OTLPCollector] = []
-    tracing = None
+    tracing: dict | None = None
     trace_sampler = None
     stats_sink = None
     stats_flush_interval = None
@@ -137,10 +138,13 @@ def otel_config(env: Mapping[str, str]) -> OTelConfig:
                     "resource_detectors": resource_detectors,
                     "sampler": envoy_sampler,
                 },
-            },
-            # Follow OTel semconv for HTTP server spans with no known route by using HTTP method.
-            "operation": "%REQ(:METHOD)%",
+            }
         }
+        # Envoy on Windows is built without CEL, which makes every substitution
+        # formatter fail to parse.
+        if sys.platform != "win32":
+            # Follow OTel semconv for HTTP server spans with no known route by using HTTP method.
+            tracing["operation"] = "%REQ(:METHOD)%"
 
     if (exporter := _exporter(env, "metrics")) is not None:
         delta = _metrics_delta_temporality(env)

@@ -189,7 +189,8 @@ async def test_new_trace(
     result = json.loads(response.content)
 
     envoy_span = await _eventually(lambda: collector.spans().get(result["trace_id"]))
-    assert envoy_span.name == "GET"
+    # Envoy on Windows cannot parse the formatter that names spans by method.
+    assert envoy_span.name == ("ingress" if sys.platform == "win32" else "GET")
     assert envoy_span.parent_span_id == b""
     # The application's instrumentation continues the trace from Envoy's span.
     assert result["parent_span_id"] == envoy_span.span_id.hex()
