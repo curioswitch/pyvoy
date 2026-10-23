@@ -114,6 +114,10 @@ class _Collector:
         return metrics
 
 
+# Servers in this module write Envoy's logs to stderr, which pytest shows for
+# failed tests, since OpenTelemetry config errors only appear there.
+
+
 class _FastFlushServer(PyvoyServer):
     """A server whose tracer exports each span as soon as it finishes."""
 
@@ -168,7 +172,7 @@ def _exporter_env(collector: _Collector) -> dict[str, str]:
 @pytest_asyncio.fixture(scope="module")
 async def traced_server(collector: _Collector) -> AsyncIterator[PyvoyServer]:
     async with _FastFlushServer(
-        "tests.apps.asgi.otel", env=_exporter_env(collector)
+        "tests.apps.asgi.otel", env=_exporter_env(collector), stderr=None
     ) as server:
         yield server
 
@@ -269,6 +273,7 @@ async def test_trace_id_ratio_sampler(collector: _Collector, client: Client) -> 
 
     async with _FastFlushServer(
         "tests.apps.asgi.otel",
+        stderr=None,
         env={
             **_exporter_env(collector),
             "OTEL_TRACES_SAMPLER": "traceidratio",
@@ -299,7 +304,10 @@ async def test_trace_id_ratio_sampler(collector: _Collector, client: Client) -> 
 @pytest.mark.asyncio
 async def test_wsgi(collector: _Collector, client: Client) -> None:
     async with _FastFlushServer(
-        "tests.apps.wsgi.otel", interface="wsgi", env=_exporter_env(collector)
+        "tests.apps.wsgi.otel",
+        interface="wsgi",
+        env=_exporter_env(collector),
+        stderr=None,
     ) as server:
         trace_id = secrets.token_hex(16)
         response = await client.get(
@@ -317,6 +325,7 @@ async def test_wsgi(collector: _Collector, client: Client) -> None:
 async def test_metrics(collector: _Collector, client: Client) -> None:
     async with PyvoyServer(
         "tests.apps.asgi.otel",
+        stderr=None,
         env={
             **_exporter_env(collector),
             "OTEL_SERVICE_NAME": "metrics-test",
@@ -361,6 +370,7 @@ async def test_tls_collector_starts(
     # Nothing listens on the collector, which only needs to be accepted by Envoy.
     async with PyvoyServer(
         "tests.apps.asgi.otel",
+        stderr=None,
         env={
             "OTEL_EXPORTER_OTLP_ENDPOINT": "https://localhost:1",
             "OTEL_EXPORTER_OTLP_PROTOCOL": protocol,
