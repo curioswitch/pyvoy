@@ -575,6 +575,24 @@ def _all_the_headers(
     return _success(start_response)
 
 
+def _http_client_no_upstreams(start_response: StartResponse) -> Iterable[bytes]:
+    # Only importable when running in pyvoy, and this app is also used to
+    # benchmark other servers.
+    from pyqwest import SyncClient  # noqa: PLC0415
+
+    from pyvoy.wsgi.httpclient import HTTPTransport  # noqa: PLC0415
+
+    client = SyncClient(HTTPTransport("missing"))
+    try:
+        client.get("http://localhost/")
+    except RuntimeError as e:
+        message = str(e)
+    else:
+        return _failure("HTTP client did not raise", start_response)
+    start_response("200 OK", [("content-type", "text/plain")])
+    return [message.encode()]
+
+
 def _nihongo(
     environ: WSGIEnvironment, start_response: StartResponse
 ) -> Iterable[bytes]:
@@ -847,5 +865,7 @@ def app(environ: WSGIEnvironment, start_response: StartResponse) -> Iterable[byt
             return _start_response_after_headers(environ, start_response)
         case "/no-start-response":
             return _no_start_response(environ, start_response)
+        case "/http-client-no-upstreams":
+            return _http_client_no_upstreams(start_response)
         case _:
             return _failure(f"Unknown path {environ['PATH_INFO']}", start_response)

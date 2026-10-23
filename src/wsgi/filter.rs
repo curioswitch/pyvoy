@@ -15,6 +15,7 @@ use super::types::*;
 use crate::types::*;
 pub struct Config {
     executor: Executor,
+    enable_http_client: bool,
 }
 
 impl Config {
@@ -23,6 +24,7 @@ impl Config {
         root_path: &str,
         constants: Arc<Constants>,
         worker_threads: usize,
+        enable_http_client: bool,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let executor = match Executor::new(module, attr, root_path, worker_threads, constants) {
@@ -32,7 +34,10 @@ impl Config {
                 return None;
             }
         };
-        Some(Self { executor })
+        Some(Self {
+            executor,
+            enable_http_client,
+        })
     }
 }
 
@@ -52,7 +57,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_closed: Cell::new(false),
             request_read_bridge: EventBridge::new(),
             response_bridge: EventBridge::new(),
-            transport_bridge: EventBridge::new(),
+            transport_bridge: self.enable_http_client.then(EventBridge::new),
             transport_responses: RefCell::new(HashMap::new()),
             request_body_rx: Cell::new(Some(request_body_rx)),
             request_body_tx,
@@ -76,7 +81,8 @@ struct Filter {
     pending_read: Cell<RequestReadEvent>,
     read_buffer: RefCell<Vec<u8>>,
 
-    transport_bridge: EventBridge<TransportEvent>,
+    /// Only present when the HTTP client is enabled.
+    transport_bridge: Option<EventBridge<TransportEvent>>,
     transport_responses: RefCell<HashMap<u64, TransportState>>,
 
     /// Handed to the executor in `on_request_headers`.
@@ -143,7 +149,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.response_closed.set(true);
         self.request_read_bridge.close();
         self.response_bridge.close();
-        self.transport_bridge.close();
+        if let Some(transport_bridge) = &self.transport_bridge {
+            transport_bridge.close();
+        }
 
         let transport_responses: Vec<TransportState> = self
             .transport_responses
@@ -517,7 +525,10 @@ impl Filter {
     }
 
     fn process_transport_events<EHF: EnvoyHttpFilter>(&self, envoy_filter: &mut EHF) {
-        self.transport_bridge.process(|event| match event {
+        let Some(transport_bridge) = &self.transport_bridge else {
+            return;
+        };
+        transport_bridge.process(|event| match event {
             TransportEvent::Start(event) => {
                 let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
                 let mut has_content_length = false;

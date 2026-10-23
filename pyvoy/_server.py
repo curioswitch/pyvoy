@@ -542,6 +542,8 @@ class PyvoyServer:
             )
         if not self._websockets_compression:
             base_pyvoy_config["websockets_compression"] = False
+        if self._upstreams:
+            base_pyvoy_config["enable_http_client"] = True
         # Response compression runs before the terminal filter that generates the
         # response, so it sees the body on the way back out to the client.
         compressor_filters = [

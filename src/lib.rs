@@ -3,6 +3,7 @@
 use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
+use std::sync::atomic::Ordering;
 use yaml_rust2::{Yaml, YamlLoader};
 
 mod asgi;
@@ -187,6 +188,12 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
         parse_usize_config(filter_config, "worker_threads", default_worker_threads, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
     let loop_kind = parse_loop_config(filter_config)?;
+    let enable_http_client = filter_config["enable_http_client"]
+        .as_bool()
+        .unwrap_or(false);
+    if enable_http_client {
+        types::HTTP_CLIENT_ENABLED.store(true, Ordering::Relaxed);
+    }
 
     let constants = Python::attach(types::Constants::get);
 
@@ -198,10 +205,17 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             worker_threads,
             enable_lifespan,
             loop_kind,
+            enable_http_client,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
-        "wsgi" => wsgi::filter::Config::new(app, root_path, constants, worker_threads)
-            .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
+        "wsgi" => wsgi::filter::Config::new(
+            app,
+            root_path,
+            constants,
+            worker_threads,
+            enable_http_client,
+        )
+        .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
             envoy_log_error!("Unsupported python interface: {}", interface);
             None

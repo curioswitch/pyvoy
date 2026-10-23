@@ -1,6 +1,9 @@
 use std::{
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard, atomic::AtomicU64},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use bytes::{Bytes, BytesMut};
@@ -26,7 +29,7 @@ use crate::{
         shared::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
     },
     eventbridge::EventBridge,
-    types::Constants,
+    types::{Constants, HTTP_CLIENT_ENABLED},
 };
 
 pub(crate) enum RequestBody {
@@ -152,6 +155,11 @@ impl HTTPTransport {
             .bind(py)
             .call1((py.None(),))?;
         if transport_bridge.is_none() {
+            if !HTTP_CLIENT_ENABLED.load(Ordering::Relaxed) {
+                return Err(PyRuntimeError::new_err(
+                    "no upstreams configured, HTTP transport cannot be used",
+                ));
+            }
             return Err(PyRuntimeError::new_err(
                 "TransportBridge not found in contextvars. This likely means the HTTP client was used outside of the context of the request.",
             ));

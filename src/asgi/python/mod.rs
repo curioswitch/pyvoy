@@ -147,7 +147,7 @@ impl Executor {
         response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
-        transport_bridge: EventBridge<TransportEvent>,
+        transport_bridge: Option<EventBridge<TransportEvent>>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         self.tx
@@ -458,22 +458,32 @@ impl AppExecutor {
             },
         ))?;
 
-        let transport_bridge =
-            TransportBridge::new(loop_.clone().unbind(), transport_bridge, scheduler.clone())
-                .into_py_any(py)?;
-        let token = self
-            .constants
-            .transport_bridge_contextvar_set
-            .call1(py, (transport_bridge,))?;
-
         let future = {
-            let _reset = RunOnDrop(
-                self.constants
-                    .transport_bridge_contextvar_reset
-                    .bind(py)
-                    .clone(),
-                Some((token,)),
-            );
+            // The task copies the current context, so the bridge only needs to be
+            // set while creating it. Without an HTTP client, we skip touching the
+            // context entirely.
+            let _reset = match transport_bridge {
+                Some(transport_bridge) => {
+                    let transport_bridge = TransportBridge::new(
+                        loop_.clone().unbind(),
+                        transport_bridge,
+                        scheduler.clone(),
+                    )
+                    .into_py_any(py)?;
+                    let token = self
+                        .constants
+                        .transport_bridge_contextvar_set
+                        .call1(py, (transport_bridge,))?;
+                    Some(RunOnDrop(
+                        self.constants
+                            .transport_bridge_contextvar_reset
+                            .bind(py)
+                            .clone(),
+                        Some((token,)),
+                    ))
+                }
+                None => None,
+            };
             loop_.call_method1(&self.constants.create_task, (coro,))?
         };
         future.call_method1(
@@ -535,7 +545,7 @@ struct ExecuteAppEvent {
     response_closed: Arc<AtomicBool>,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
-    transport_bridge: EventBridge<TransportEvent>,
+    transport_bridge: Option<EventBridge<TransportEvent>>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 

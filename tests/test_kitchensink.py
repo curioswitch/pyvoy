@@ -565,6 +565,13 @@ async def test_nihongo(url: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_http_client_no_upstreams(url: str, client: Client) -> None:
+    response = await client.get(f"{url}/http-client-no-upstreams")
+    assert response.status == 200, response.text()
+    assert response.text() == "no upstreams configured, HTTP transport cannot be used"
+
+
+@pytest.mark.asyncio
 async def test_scope_content(url: str, client: Client) -> None:
     response = await client.post(
         f"{url}/echo-scope", content=b"Hello", headers={"content-type": "text/plain"}

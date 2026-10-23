@@ -27,7 +27,7 @@ struct ExecuteAppEvent {
     request_body_rx: Receiver<RequestBody>,
     response_bridge: EventBridge<ResponseEvent>,
     response_written_rx: Receiver<()>,
-    transport_bridge: EventBridge<TransportEvent>,
+    transport_bridge: Option<EventBridge<TransportEvent>>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
@@ -127,7 +127,7 @@ impl Executor {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        transport_bridge: EventBridge<TransportEvent>,
+        transport_bridge: Option<EventBridge<TransportEvent>>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         // The channel would only be closed during shutdown, when there
@@ -173,7 +173,7 @@ impl ExecutorInner {
         request_body_rx: Receiver<RequestBody>,
         response_bridge: EventBridge<ResponseEvent>,
         response_written_rx: Receiver<()>,
-        transport_bridge: EventBridge<TransportEvent>,
+        transport_bridge: Option<EventBridge<TransportEvent>>,
         scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     ) -> PyResult<()> {
         let response_written_rx = SyncReceiver::new(response_written_rx);
@@ -319,20 +319,26 @@ impl ExecutorInner {
             },
         )?;
 
-        let transport_bridge =
-            TransportBridge::new(transport_bridge, scheduler.clone(), self.pool.clone())
-                .into_py_any(py)?;
-        let token = self
-            .constants
-            .wsgi_transport_bridge_contextvar_set
-            .call1(py, (transport_bridge,))?;
-        let _reset = RunOnDrop(
-            self.constants
-                .wsgi_transport_bridge_contextvar_reset
-                .bind(py)
-                .clone(),
-            Some((token,)),
-        );
+        // Without an HTTP client, we skip touching the context entirely.
+        let _reset = match transport_bridge {
+            Some(transport_bridge) => {
+                let transport_bridge =
+                    TransportBridge::new(transport_bridge, scheduler.clone(), self.pool.clone())
+                        .into_py_any(py)?;
+                let token = self
+                    .constants
+                    .wsgi_transport_bridge_contextvar_set
+                    .call1(py, (transport_bridge,))?;
+                Some(RunOnDrop(
+                    self.constants
+                        .wsgi_transport_bridge_contextvar_reset
+                        .bind(py)
+                        .clone(),
+                    Some((token,)),
+                ))
+            }
+            None => None,
+        };
 
         let response = app.call1((
             environ,
