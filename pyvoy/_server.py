@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 import find_libpython
 from envoy import get_envoy_path
 
+from ._otel import OTelConfig, otel_config
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from types import TracebackType
@@ -210,6 +212,7 @@ class PyvoyServer:
     _websockets_max_message_size: int | None
     _websockets_compression: bool
     _content_encodings: list[ContentEncoding]
+    _enable_otel: bool
 
     _admin_address: str | None
 
@@ -235,6 +238,7 @@ class PyvoyServer:
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
         content_encodings: Iterable[ContentEncoding] | None = None,
+        enable_otel: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
         upstreams: Iterable[dict[str, Any] | Upstream] | None = None,
@@ -277,6 +281,13 @@ class PyvoyServer:
                 order of preference. Unset or empty disables response compression.
                 When set, applications no longer receive the Accept-Encoding
                 request header so they do not compress responses themselves.
+            enable_otel: Whether to export Envoy's traces and metrics with OTLP as
+                configured by the standard OTEL_* environment variables, read from
+                the environment the server is started with. Each signal is exported
+                when its OTEL_*_EXPORTER variable includes 'otlp' or, when unset, an
+                OTLP endpoint is configured. When traces are exported, applications
+                receive the trace context of Envoy's span in the traceparent request
+                header so their instrumentation continues the trace.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
             upstreams: A list of upstream clusters to add to the Envoy configuration.
@@ -290,6 +301,8 @@ class PyvoyServer:
             ValueError: If worker_threads is not between 1 and sys.maxsize,
                 websockets_max_message_size is not between 0 and sys.maxsize, or
                 content_encodings contains an unknown or duplicate encoding.
+                When the Envoy config is generated, if enable_otel is set and an
+                OTEL_* environment variable has an invalid value.
         """
         if worker_threads is not None:
             if not isinstance(worker_threads, int) or isinstance(worker_threads, bool):
@@ -330,6 +343,7 @@ class PyvoyServer:
         self._websockets_max_message_size = websockets_max_message_size
         self._websockets_compression = websockets_compression
         self._content_encodings = content_encodings
+        self._enable_otel = enable_otel
         self._root_path = root_path
         self._stdout = stdout
         self._stderr = stderr
@@ -529,7 +543,10 @@ class PyvoyServer:
         The returned dictionary can be serialized to JSON or YAML to pass to Envoy
         on the command line.
         """
+        otel = otel_config({**os.environ, **self._env}) if self._enable_otel else None
         base_pyvoy_config = {}
+        if otel is not None and otel.trace_sampler is not None:
+            base_pyvoy_config["trace_sampler"] = otel.trace_sampler
         if self._worker_threads is not None:
             base_pyvoy_config["worker_threads"] = self._worker_threads
         if self._lifespan is not None:
@@ -669,6 +686,7 @@ class PyvoyServer:
             "route_config": {"virtual_hosts": [virtual_host_config]},
             "http_filters": http_filters,
             "generate_request_id": False,
+            **_hcm_tracing_config(otel),
         }
 
         enable_http3 = self._tls_enable_http3 and (
@@ -805,6 +823,7 @@ class PyvoyServer:
                                             ]
                                         },
                                         "http_filters": http_filters,
+                                        **_hcm_tracing_config(otel),
                                     },
                                 }
                             ],
@@ -823,9 +842,10 @@ class PyvoyServer:
             )
 
         static_resources = {"listeners": listeners}
-        if self._upstreams:
+        upstreams = [*self._upstreams, *_otel_upstreams(otel)]
+        if upstreams:
             clusters = []
-            for cluster in self._upstreams:
+            for cluster in upstreams:
                 if isinstance(cluster, Upstream):
                     if (
                         cluster.http_version == HTTPVersion.HTTP3
@@ -872,7 +892,11 @@ class PyvoyServer:
                             ],
                         },
                     }
-                    if (http_version := cluster.http_version) is not None:
+                    http_version = cluster.http_version
+                    if http_version is None and cluster.tls is None:
+                        # Envoy only autodetects the HTTP version with ALPN.
+                        http_version = HTTPVersion.HTTP1
+                    if http_version is not None:
                         explicit_http_config = {}
                         match http_version:
                             case HTTPVersion.HTTP1:
@@ -927,12 +951,16 @@ class PyvoyServer:
                 else:
                     clusters.append(cluster)
             static_resources["clusters"] = clusters
-        return {
+        config: dict[str, Any] = {
             "admin": {
                 "address": {"socket_address": {"address": "127.0.0.1", "port_value": 0}}
             },
             "static_resources": static_resources,
         }
+        if otel is not None and otel.stats_sink is not None:
+            config["stats_sinks"] = [otel.stats_sink]
+            config["stats_flush_interval"] = otel.stats_flush_interval
+        return config
 
     def _static_mount_config(self, mount: StaticMount) -> dict[str, Any]:
         config: dict[str, Any] = {
@@ -1035,6 +1063,44 @@ def _dynamic_module_action(
     else:
         action_config["typed_config"] = module_filter
     return {"action": {"name": "composite_action", "typed_config": action_config}}
+
+
+def _hcm_tracing_config(otel: OTelConfig | None) -> dict:
+    """Returns the HTTP connection manager config for exporting traces."""
+    if otel is None or otel.tracing is None:
+        return {}
+    return {
+        "tracing": otel.tracing,
+        # Without generated request IDs, Envoy would not trace any request by
+        # default, so sampling is left entirely to the tracer's sampler.
+        "request_id_extension": {
+            "typed_config": {
+                "@type": "type.googleapis.com/envoy.extensions.request_id.uuid.v3.UuidRequestIdConfig",
+                "pack_trace_reason": False,
+                "use_request_id_for_trace_sampling": False,
+            }
+        },
+    }
+
+
+def _otel_upstreams(otel: OTelConfig | None) -> list[Upstream]:
+    if otel is None:
+        return []
+    return [
+        Upstream(
+            name=collector.name,
+            address=collector.address,
+            http_version=HTTPVersion.HTTP2 if collector.grpc else None,
+            tls=TLSConfig(
+                key=Path(collector.client_key) if collector.client_key else None,
+                cert=Path(collector.client_cert) if collector.client_cert else None,
+                ca_cert=Path(collector.ca_cert) if collector.ca_cert else None,
+            )
+            if collector.tls
+            else None,
+        )
+        for collector in otel.collectors
+    ]
 
 
 def _to_datasource(value: bytes | os.PathLike) -> dict:

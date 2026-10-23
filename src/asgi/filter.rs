@@ -19,15 +19,18 @@ use crate::asgi::transport::{
 };
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
+use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::types::*;
 
 pub struct Config {
     executor: python::Executor,
     handles: Option<ExecutorHandles>,
     enable_http_client: bool,
+    trace_sampler: Option<TraceSampler>,
 }
 
 impl Config {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         app: &str,
         root_path: &str,
@@ -36,6 +39,7 @@ impl Config {
         enable_lifespan: Option<bool>,
         loop_kind: LoopKind,
         enable_http_client: bool,
+        trace_sampler: Option<TraceSampler>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match python::Executor::new(
@@ -63,6 +67,7 @@ impl Config {
             executor,
             handles: Some(handles),
             enable_http_client,
+            trace_sampler,
         })
     }
 }
@@ -78,6 +83,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
     fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
+            trace_sampler: self.trace_sampler,
             request_closed: Cell::new(false),
             response_closed: Arc::new(AtomicBool::new(false)),
             response_trailers: RefCell::new(None),
@@ -92,6 +98,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 
 struct Filter {
     executor: python::Executor,
+    trace_sampler: Option<TraceSampler>,
 
     request_closed: Cell<bool>,
     response_closed: Arc<AtomicBool>,
@@ -122,6 +129,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             .get_request_header_value("te")
             .map(|v| v.as_slice() == b"trailers")
             .unwrap_or(false);
+        if let Some(trace_sampler) = &self.trace_sampler {
+            propagate_active_span(envoy_filter, trace_sampler);
+        }
         let scope = new_scope(envoy_filter);
 
         self.executor.execute_app(

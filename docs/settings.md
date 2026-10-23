@@ -83,6 +83,42 @@ than serving in Python with e.g., Starlette.
 - `--websockets-max-message-size` - Sets the non-negative maximum WebSocket message size in bytes. **Default**: _64 MiB_.
 - `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
 
+## OpenTelemetry
+
+- `--[no-]otel` - Whether to export Envoy's traces and metrics with OTLP as configured by the standard
+  [OpenTelemetry environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+  **Default**: _enabled_.
+
+Traces and metrics are each exported when their `OTEL_TRACES_EXPORTER` / `OTEL_METRICS_EXPORTER` variable includes
+`otlp`, or when it is unset and an OTLP endpoint is set with `OTEL_EXPORTER_OTLP_ENDPOINT` or its signal-specific
+variant. With nothing configured, nothing is exported.
+
+When traces are exported, Envoy starts a server span for each request and applications receive its trace context in
+the `traceparent` request header. Instrumentation such as `opentelemetry-instrumentation-asgi` then continues the
+trace from Envoy's span without any extra configuration.
+
+Envoy's stats are exported as metrics with an `envoy.` prefix, for example `envoy.http.downstream_rq_total` and
+`envoy.http.downstream_rq_time`, with Envoy's stat tags as attributes.
+
+The following variables are recognized, with signal-specific variants such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+where the specification defines them:
+
+- `OTEL_SDK_DISABLED`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`
+- `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` - `otlp`, `otlp_proto_grpc`, `otlp_proto_http`, or `none`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_INSECURE`
+- `OTEL_EXPORTER_OTLP_PROTOCOL` - `grpc` or `http/protobuf`. **Default**: _grpc_, matching the OpenTelemetry Python SDK
+- `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_KEY` - As with
+  upstreams, an `https` endpoint's certificate is only verified when a CA certificate is set
+- `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` - `always_on`, `always_off`, `traceidratio`, and their `parentbased_`
+  variants. **Default**: _parentbased_always_on_. Envoy traces are not exported with other samplers
+- `OTEL_METRIC_EXPORT_INTERVAL` - Must be less than 300000 (5 minutes)
+- `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`
+- `OTEL_EXPORTER_OTLP_TIMEOUT` - In seconds like the OpenTelemetry Python SDK, rather than the specification's
+  milliseconds. **Default**: _10_
+
+The variables are read when the Envoy config is generated, so a config printed with `--print-envoy-config` uses the
+values at the time it was printed.
+
 ## Development
 
 - `--reload` - Whether to automatically restart the server on code changes. Requires the `watchfiles` dev dependency to be installed.

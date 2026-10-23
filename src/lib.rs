@@ -14,6 +14,8 @@ mod eventbridge;
 /// Python constants for header names.
 mod headernames;
 mod ondrop;
+/// Propagation of Envoy's tracing span to applications.
+mod tracecontext;
 mod types;
 mod wsgi;
 
@@ -150,6 +152,39 @@ fn parse_loop_config(filter_config: &Yaml) -> Option<asgi::LoopKind> {
     loop_kind
 }
 
+/// Parses the sampler of Envoy's tracer, which is unset when tracing is
+/// disabled. Returns None on invalid config.
+fn parse_trace_sampler_config(filter_config: &Yaml) -> Option<Option<tracecontext::TraceSampler>> {
+    let value = &filter_config["trace_sampler"];
+    if value.is_badvalue() {
+        return Some(None);
+    }
+    let parent_based = value["parent_based"].as_bool().unwrap_or(false);
+    let ratio = &value["ratio"];
+    let ratio = if ratio.is_badvalue() {
+        None
+    } else {
+        match ratio
+            .as_i64()
+            .and_then(|ratio| u64::try_from(ratio).ok())
+            .filter(|ratio| *ratio <= tracecontext::RATIO_DENOMINATOR)
+        {
+            Some(ratio) => Some(ratio),
+            None => {
+                envoy_log_error!(
+                    "Filter config field 'trace_sampler.ratio' must be an integer between 0 and {}",
+                    tracecontext::RATIO_DENOMINATOR
+                );
+                return None;
+            }
+        }
+    };
+    Some(Some(tracecontext::TraceSampler {
+        parent_based,
+        ratio,
+    }))
+}
+
 fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     envoy_filter_config: &mut EC,
     filter_name: &str,
@@ -194,6 +229,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     if enable_http_client {
         types::HTTP_CLIENT_ENABLED.store(true, Ordering::Relaxed);
     }
+    let trace_sampler = parse_trace_sampler_config(filter_config)?;
 
     let constants = Python::attach(types::Constants::get);
 
@@ -206,6 +242,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             enable_lifespan,
             loop_kind,
             enable_http_client,
+            trace_sampler,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(
@@ -214,6 +251,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             constants,
             worker_threads,
             enable_http_client,
+            trace_sampler,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
