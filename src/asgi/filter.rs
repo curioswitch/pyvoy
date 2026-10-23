@@ -25,10 +25,12 @@ use crate::types::*;
 pub struct Config {
     executor: python::Executor,
     handles: Option<ExecutorHandles>,
+    enable_http_client: bool,
     trace_sampler: Option<TraceSampler>,
 }
 
 impl Config {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         app: &str,
         root_path: &str,
@@ -36,6 +38,7 @@ impl Config {
         worker_threads: usize,
         enable_lifespan: Option<bool>,
         loop_kind: LoopKind,
+        enable_http_client: bool,
         trace_sampler: Option<TraceSampler>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
@@ -63,6 +66,7 @@ impl Config {
         Some(Self {
             executor,
             handles: Some(handles),
+            enable_http_client,
             trace_sampler,
         })
     }
@@ -85,7 +89,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             response_trailers: RefCell::new(None),
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
-            transport_bridge: EventBridge::new(),
+            transport_bridge: self.enable_http_client.then(EventBridge::new),
             transport_responses: RefCell::new(HashMap::new()),
             downstream_watermark_level: Cell::new(0),
         }))
@@ -104,7 +108,8 @@ struct Filter {
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
 
-    transport_bridge: EventBridge<TransportEvent>,
+    /// Only present when the HTTP client is enabled.
+    transport_bridge: Option<EventBridge<TransportEvent>>,
     transport_responses: RefCell<HashMap<u64, TransportState>>,
 
     downstream_watermark_level: Cell<usize>,
@@ -465,7 +470,10 @@ impl Filter {
     }
 
     fn process_transport_events(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
-        self.transport_bridge.process(|event| match event {
+        let Some(transport_bridge) = &self.transport_bridge else {
+            return;
+        };
+        transport_bridge.process(|event| match event {
             TransportEvent::Start(event) => {
                 let mut headers: Vec<(&str, &[u8])> = Vec::with_capacity(event.headers.len() + 4);
                 let mut has_content_length = false;

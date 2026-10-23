@@ -1122,6 +1122,34 @@ async def _all_the_headers(
     await _send_success(send)
 
 
+async def _http_client_no_upstreams(send: ASGISendCallable) -> None:
+    # Only importable when running in pyvoy, and this app is also used to
+    # benchmark other servers.
+    from pyqwest import Client  # noqa: PLC0415
+
+    from pyvoy.asgi.httpclient import HTTPTransport  # noqa: PLC0415
+
+    client = Client(HTTPTransport("missing"))
+    try:
+        await client.get("http://localhost/")
+    except RuntimeError as e:
+        message = str(e)
+    else:
+        await _send_failure("HTTP client did not raise", send)
+        return
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {"type": "http.response.body", "body": message.encode(), "more_body": False}
+    )
+
+
 async def _nihongo(
     scope: HTTPScope, _recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1273,6 +1301,8 @@ async def http_app(
             await _echo_scope(scope, recv, send)
         case "/event-loop":
             await _event_loop(send)
+        case "/http-client-no-upstreams":
+            await _http_client_no_upstreams(send)
         case _:
             await _send_failure(f"unknown path: {scope['path']}", send)
 

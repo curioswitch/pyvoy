@@ -27,7 +27,7 @@ use url::Url;
 
 use crate::{
     eventbridge::EventBridge,
-    types::{Constants, SyncReceiver},
+    types::{Constants, HTTP_CLIENT_ENABLED, SyncReceiver},
     wsgi::{pool::PoolHandle, types::EVENT_ID_OUTGOING_REQUEST},
 };
 
@@ -224,6 +224,11 @@ impl HTTPTransport {
             .bind(py)
             .call1((py.None(),))?;
         if transport_bridge.is_none() {
+            if !HTTP_CLIENT_ENABLED.load(Ordering::Relaxed) {
+                return Err(PyRuntimeError::new_err(
+                    "no upstreams configured, HTTP transport cannot be used",
+                ));
+            }
             return Err(PyRuntimeError::new_err(
                 "TransportBridge not found in contextvars. This likely means the HTTP client was used outside of the context of the request.",
             ));

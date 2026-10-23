@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 
 use crate::envoy::*;
@@ -288,6 +289,10 @@ pub(crate) struct Constants {
     /// so we can share it.
     pub client_disconnected_err: Py<PyAny>,
 }
+
+/// Whether any filter was configured with `enable_http_client`, so an HTTP
+/// client used without it can report the missing upstreams configuration.
+pub static HTTP_CLIENT_ENABLED: AtomicBool = AtomicBool::new(false);
 
 impl Constants {
     pub fn get(py: Python<'_>) -> Arc<Self> {
