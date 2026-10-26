@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 # Serves static mounts. Must use the same SDK revision as above.
 envoy-files-filter = { git = "https://github.com/curioswitch/envoy-files", tag = "v0.3.0" }
-envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/envoyproxy/envoy", tag = "v1.40.0" }
+envoy-proxy-dynamic-modules-rust-sdk = { git = "https://github.com/envoyproxy/envoy", tag = "v1.40.1" }
 url = "2.5.8"
 
 bytes = "1.12.1"
