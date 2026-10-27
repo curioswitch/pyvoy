@@ -46,10 +46,10 @@ pyvoy = "pyvoy._cli:main"
 [dependency-groups]
 dev = [
   "anyio==4.15.1",
-  "asgiref==3.12.1",
+  "asgiref==3.13.0",
   # Used in setup_it.py, not directly, keeping it here allows renovate for free.
-  "connectrpc==0.12.1",
-  "granian==2.8.4",
+  "connectrpc==0.13.0",
+  "granian==2.8.5",
   "gunicorn==26.2.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
@@ -60,11 +60,11 @@ dev = [
   "psutil==7.2.2",
   "pyright[nodejs]==1.1.414",
   "pytest==9.1.1",
-  "pytest-asyncio==1.4.0",
+  "pytest-asyncio==1.4.1",
   "pytest-cov==7.1.0",
-  "ruff==0.17.1",
+  "ruff==0.17.2",
   "seaborn==0.13.2",
-  "starlette==1.9.0",
+  "starlette==1.10.0",
   "trio==0.34.0",
   "trustme==1.2.1",
   "uvicorn[standard]==0.54.0",
@@ -74,7 +74,7 @@ dev = [
   "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
-docs = ["mkdocstrings-python==2.0.10", "zensical==0.0.71"]
+docs = ["mkdocstrings-python==2.0.10", "zensical==0.0.73"]
 
 [build-system]
 requires = ["maturin>=1.12,<2.0"]
