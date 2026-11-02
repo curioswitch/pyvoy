@@ -34,6 +34,7 @@ class CLIArgs:
     app: str
     address: str
     port: int
+    uds: str | None
     print_envoy_config: bool
     print_envoy_entrypoint: bool
     tls_port: int | None
@@ -106,6 +107,12 @@ async def amain() -> None:
         help="the port to listen on (0 for random). Will use TLS if --tls-key/cert are provided without --tls-port",
         type=int,
         default=8000,
+    )
+    parser.add_argument(
+        "--uds",
+        help="path of a Unix domain socket to listen on instead of --address and --port",
+        type=str,
+        default=None,
     )
     parser.add_argument(
         "--tls-port",
@@ -315,6 +322,8 @@ async def amain() -> None:
         pass
 
     args = parser.parse_args(argv, namespace=CLIArgs())
+    if args.uds is not None and args.tls_port is not None:
+        parser.error("--tls-port cannot be used with --uds")
 
     if args.additional_mount:
         mounts = [Mount(app=args.app, path=args.root_path, interface=args.interface)]
@@ -379,6 +388,7 @@ async def amain() -> None:
         app,
         address=args.address,
         port=args.port,
+        uds=args.uds,
         stdout=None,
         stderr=None,
         tls_port=args.tls_port,
@@ -452,8 +462,12 @@ async def amain() -> None:
 async def _run_server(server: PyvoyServer, *, handle_sigterm: bool = True) -> None:
     try:
         async with server:
+            if server.listener_port == 0:
+                listening_on = f"unix socket {server.listener_address}"
+            else:
+                listening_on = f"{server.listener_address}:{server.listener_port}"
             print(  # noqa: T201
-                f"pyvoy listening on {server.listener_address}:{server.listener_port}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
+                f"pyvoy listening on {listening_on}{' (TLS on ' + str(server.listener_port_tls) + ')' if server.listener_port_tls else ''}",
                 file=sys.stderr,
             )
 

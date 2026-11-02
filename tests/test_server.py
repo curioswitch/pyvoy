@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -70,6 +71,25 @@ def test_websockets_max_message_size_allows_zero() -> None:
     ][0]["typed_config"]["http_filters"][0]
     pyvoy_config = json.loads(http_filter["typed_config"]["filter_config"]["value"])
     assert pyvoy_config["websockets_max_message_size"] == 0
+
+
+def test_uds_rejects_tls_port() -> None:
+    with pytest.raises(ValueError, match="tls_port cannot be used with uds"):
+        PyvoyServer("tests.apps.asgi.kitchensink", uds="pyvoy.sock", tls_port=0)
+
+
+def test_uds_listener_without_http3() -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        uds=Path("pyvoy.sock"),
+        tls_key=b"key",
+        tls_cert=b"cert",
+    )
+
+    listeners = server.get_envoy_config()["static_resources"]["listeners"]
+    assert [listener["name"] for listener in listeners] == ["listener"]
+    assert listeners[0]["address"] == {"pipe": {"path": "pyvoy.sock", "mode": 0o666}}
+    assert "transport_socket" in listeners[0]["filter_chains"][0]
 
 
 def _pyvoy_filter_configs(config: dict) -> dict[str, dict]:

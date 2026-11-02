@@ -258,7 +258,22 @@ impl ExecutorInner {
             }
         }
 
-        if let Some((server, port)) = scope.server {
+        let server = match scope.server {
+            Some((server, Some(port))) => Some((server, port)),
+            // WSGI has no notion of Unix sockets, so like gunicorn, use the Host
+            // header, which Envoy requires.
+            Some((_, None)) => host_authority(&scope.headers).map(|authority| {
+                let default_port = if scope.scheme == http::uri::Scheme::HTTPS {
+                    443
+                } else {
+                    80
+                };
+                let port = authority.port_u16().map_or(default_port, i64::from);
+                (Box::from(authority.host()), port)
+            }),
+            None => None,
+        };
+        if let Some((server, port)) = server {
             environ.set_item(&self.constants.server_name, &server[..])?;
             environ.set_item(&self.constants.server_port, port.to_string())?;
         } else {
@@ -743,4 +758,10 @@ fn convert_headers<'py>(
         ));
     }
     Ok(headers)
+}
+
+/// Returns the request's Host header if it is a valid authority.
+fn host_authority(headers: &[(HeaderName, HeaderValue)]) -> Option<http::uri::Authority> {
+    let (_, value) = headers.iter().find(|(name, _)| name == header::HOST)?;
+    http::uri::Authority::try_from(value.as_bytes()).ok()
 }

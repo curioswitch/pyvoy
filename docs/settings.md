@@ -48,6 +48,9 @@ than serving in Python with e.g., Starlette.
 - `--address` - The address to listen on. `--address 0.0.0.0` would listen on all addresses, which is commonly
   needed in container deployments like k8s. **Default**: _127.0.0.1_.
 - `--port` - The port to listen on. If `0`, an available port will be automatically used. **Default**: _8000_.
+- `--uds` - The path of a Unix domain socket to listen on instead of `--address` and `--port`. Any existing file at
+  the path is replaced, and the socket is created with permissions for any local user to connect. TLS can be enabled
+  on the socket with `--tls-key` / `--tls-cert`, but `--tls-port` cannot be used and HTTP/3 is not enabled.
 - `--tls-key` / `--tls-cert` - Paths to the TLS key and cert files to enable listening with TLS.
 - `--tls-ca-cert` - Path to the TLS cert to verify client certificates with.
 - `--tls-require-client-certificate` - Whether a valid TLS client certificate must be present to connect, for mTLS.

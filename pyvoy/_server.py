@@ -191,6 +191,7 @@ class PyvoyServer:
 
     _process: asyncio.subprocess.Process | None
     _starting: bool
+    _uds: str | None
     _listener_address: str
     _listener_port: int
     _listener_port_tls: int | None
@@ -222,6 +223,7 @@ class PyvoyServer:
         *,
         address: str = "127.0.0.1",
         port: int = 0,
+        uds: str | os.PathLike[str] | None = None,
         tls_port: int | None = None,
         tls_key: bytes | os.PathLike | None = None,
         tls_cert: bytes | os.PathLike | None = None,
@@ -253,6 +255,9 @@ class PyvoyServer:
                 or as an iterable of Mount objects to serve multiple.
             address: The address to listen on.
             port: The port to listen on.
+            uds: The path of a Unix domain socket to listen on instead of address and
+                 port. Any existing file at the path is replaced. Cannot be used with
+                 tls_port, and HTTP/3 is not enabled.
             tls_port: The port to listen on for TLS connections in addition to port.
                       If not specified and tls_key/cert are provided, a single TLS port
                       specified by port will be used.
@@ -299,8 +304,9 @@ class PyvoyServer:
             TypeError: If worker_threads or websockets_max_message_size is not an
                 integer.
             ValueError: If worker_threads is not between 1 and sys.maxsize,
-                websockets_max_message_size is not between 0 and sys.maxsize, or
-                content_encodings contains an unknown or duplicate encoding.
+                websockets_max_message_size is not between 0 and sys.maxsize,
+                content_encodings contains an unknown or duplicate encoding, or
+                uds is used with tls_port.
                 When the Envoy config is generated, if enable_otel is set and an
                 OTEL_* environment variable has an invalid value.
         """
@@ -320,6 +326,9 @@ class PyvoyServer:
             if not 0 <= websockets_max_message_size <= sys.maxsize:
                 msg = f"websockets_max_message_size must be between 0 and {sys.maxsize}"
                 raise ValueError(msg)
+        if uds is not None and tls_port is not None:
+            msg = "tls_port cannot be used with uds"
+            raise ValueError(msg)
         content_encodings = list(content_encodings) if content_encodings else []
         for encoding in content_encodings:
             if encoding not in _COMPRESSOR_LIBRARIES:
@@ -332,6 +341,7 @@ class PyvoyServer:
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
         self._port = port
+        self._uds = os.fspath(uds) if uds is not None else None
         self._tls_port = tls_port
         self._tls_key = tls_key
         self._tls_cert = tls_cert
@@ -431,42 +441,43 @@ class PyvoyServer:
                         )
                         if admin_address:
                             self._admin_address = admin_address
-                            response = await asyncio.to_thread(
-                                urllib.request.urlopen,
-                                f"http://{admin_address}/listeners?format=json",
+                            # Fails until Envoy is live, with its listeners bound
+                            # and workers serving them.
+                            await asyncio.to_thread(
+                                urllib.request.urlopen, f"http://{admin_address}/ready"
                             )
-                            response_data = json.loads(response.read())
-                            listener_addresses = {
-                                status["name"]: status["local_address"][
-                                    "socket_address"
-                                ]
-                                for status in response_data["listener_statuses"]
-                            }
-                            socket_address = listener_addresses["listener"]
-                            self._listener_address = socket_address["address"]
-                            self._listener_port = socket_address["port_value"]
-                            if self._tls_port is not None:
-                                socket_address_tls = listener_addresses["listener_tls"]
-                                self._listener_port_tls = socket_address_tls[
-                                    "port_value"
-                                ]
-                            enable_http3 = self._tls_enable_http3 and (
-                                self._tls_key or self._tls_cert or self._tls_ca_cert
-                            )
-                            if enable_http3:
-                                socket_address_quic = listener_addresses["listener_udp"]
-                                self._listener_port_quic = socket_address_quic[
-                                    "port_value"
-                                ]
+                            await self._resolve_listeners(admin_address)
                             started = True
                             break
                     await asyncio.sleep(0.1)
                 if not started:
-                    msg = "Failed to resolve Envoy admin address."
+                    msg = "Envoy server did not become ready."
                     raise StartupError(msg)  # noqa: TRY301
             except BaseException:
                 await asyncio.shield(self.stop())
                 raise
+
+    async def _resolve_listeners(self, admin_address: str) -> None:
+        if self._uds is not None:
+            self._listener_address = self._uds
+            self._listener_port = 0
+            return
+        # Ports may be chosen by the OS, so read them back from Envoy.
+        response = await asyncio.to_thread(
+            urllib.request.urlopen, f"http://{admin_address}/listeners?format=json"
+        )
+        response_data = json.loads(response.read())
+        listener_addresses = {
+            status["name"]: status["local_address"]["socket_address"]
+            for status in response_data["listener_statuses"]
+        }
+        socket_address = listener_addresses["listener"]
+        self._listener_address = socket_address["address"]
+        self._listener_port = socket_address["port_value"]
+        if (socket_address_tls := listener_addresses.get("listener_tls")) is not None:
+            self._listener_port_tls = socket_address_tls["port_value"]
+        if (socket_address_quic := listener_addresses.get("listener_udp")) is not None:
+            self._listener_port_quic = socket_address_quic["port_value"]
 
     async def wait(self) -> int | None:
         """Waits for the server process to exit and returns its exit status.
@@ -501,12 +512,16 @@ class PyvoyServer:
 
     @property
     def listener_address(self) -> str:
-        """The address the server is listening on."""
+        """The address the server is listening on, or the path of its Unix domain
+        socket.
+        """
         return self._listener_address
 
     @property
     def listener_port(self) -> int:
-        """The port the server is listening on."""
+        """The port the server is listening on, or 0 when listening on a Unix domain
+        socket.
+        """
         return self._listener_port
 
     @property
@@ -689,8 +704,10 @@ class PyvoyServer:
             **_hcm_tracing_config(otel),
         }
 
-        enable_http3 = self._tls_enable_http3 and (
-            self._tls_key or self._tls_cert or self._tls_ca_cert
+        enable_http3 = (
+            self._tls_enable_http3
+            and self._uds is None
+            and (self._tls_key or self._tls_cert or self._tls_ca_cert)
         )
         if enable_http3:
             http_config["http3_protocol_options"] = {}
@@ -763,15 +780,17 @@ class PyvoyServer:
             else:
                 filter_chain["transport_socket"] = transport_socket
 
+        if self._uds is not None:
+            # Like uvicorn, allow any local user to connect.
+            listener_address = {"pipe": {"path": self._uds, "mode": 0o666}}
+        else:
+            listener_address = {
+                "socket_address": {"address": self._address, "port_value": self._port}
+            }
         listeners = [
             {
                 "name": "listener",
-                "address": {
-                    "socket_address": {
-                        "address": self._address,
-                        "port_value": self._port,
-                    }
-                },
+                "address": listener_address,
                 "filter_chains": [filter_chain],
             }
         ]
