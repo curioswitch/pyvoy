@@ -105,9 +105,9 @@ WSGI_APP = "tests.apps.wsgi.kitchensink:app"
 
 PYVOY = AppServer(
     "pyvoy",
-    ["pyvoy"],
+    ["pyvoy", "--io-threads", "1"],
     [ASGI_APP],
-    ["--worker-threads", "8"],
+    ["--worker-threads", "8", "--io-threads", "auto"],
     ["--interface", "wsgi", WSGI_APP],
     ("--tls-key", "--tls-cert"),
 )
@@ -344,9 +344,19 @@ def static_configs(static_dir: Path) -> tuple[StaticConfig, ...]:
     return (
         StaticConfig(
             "pyvoy-static",
-            ["pyvoy", noop_app, "--static-mount", f"/static={static_dir}"],
+            [
+                "pyvoy",
+                "--io-threads",
+                "1",
+                noop_app,
+                "--static-mount",
+                f"/static={static_dir}",
+            ],
         ),
-        StaticConfig("pyvoy-starlette", ["pyvoy", "--interface", "asgi", static_app]),
+        StaticConfig(
+            "pyvoy-starlette",
+            ["pyvoy", "--io-threads", "1", "--interface", "asgi", static_app],
+        ),
         StaticConfig(
             "granian-static",
             [
@@ -463,10 +473,12 @@ def compression_configs() -> tuple[CompressionConfig, ...]:
     plain_app = "bench.compression_app:plain"
     return (
         CompressionConfig(
-            "pyvoy-native", ["pyvoy", plain_app, "--content-encodings", "gzip"]
+            "pyvoy-native",
+            ["pyvoy", "--io-threads", "1", plain_app, "--content-encodings", "gzip"],
         ),
         CompressionConfig(
-            "pyvoy-starlette", ["pyvoy", "--interface", "asgi", gzip_app]
+            "pyvoy-starlette",
+            ["pyvoy", "--io-threads", "1", "--interface", "asgi", gzip_app],
         ),
         CompressionConfig(
             "granian-starlette", ["granian", "--interface", "asgi", gzip_app]

@@ -268,7 +268,7 @@ def test_otel_flag(
 
 @pytest.mark.parametrize(
     ("args", "expected"),
-    [([], 1), (["--io-threads", "4"], 4), (["--io-threads", "auto"], "auto")],
+    [([], "auto"), (["--io-threads", "1"], 1), (["--io-threads", "auto"], "auto")],
 )
 def test_io_threads_flag(
     args: list[str], expected: int | str, monkeypatch: pytest.MonkeyPatch

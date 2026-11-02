@@ -32,11 +32,8 @@ RUN pyvoy server:app --address=0.0.0.0 --print-envoy-entrypoint > entrypoint.sh 
 
 WORKDIR /app
 
-CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml", "--concurrency", "1"]
+CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml"]
 ```
-
-Envoy defaults to one worker thread per CPU core when invoked directly, so the example passes
-`--concurrency 1` to match the pyvoy CLI default of `--io-threads`.
 
 This example runs `--print-envoy-config` to generate an Envoy config transparently within the Docker
 container, however it can be a good idea to instead run that locally to bootstrap an Envoy config

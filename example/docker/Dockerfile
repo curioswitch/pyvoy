@@ -19,4 +19,4 @@ RUN pyvoy server:app --address=0.0.0.0 --print-envoy-entrypoint > entrypoint.sh 
 
 WORKDIR /app
 
-CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml", "--concurrency", "1"]
+CMD ["/pyvoy/entrypoint.sh", "--config-path", "/pyvoy/envoy-config.yaml"]

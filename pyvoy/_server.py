@@ -233,7 +233,7 @@ class PyvoyServer:
         root_path: str = "",
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
-        io_threads: int | Literal["auto"] = 1,
+        io_threads: int | Literal["auto"] = "auto",
         lifespan: bool | None = None,
         loop: Loop | None = None,
         websockets: bool = False,
@@ -270,9 +270,8 @@ class PyvoyServer:
             log_level: The log level for Envoy.
             worker_threads: The positive number of worker threads to use.
             io_threads: The positive number of threads handling connections and HTTP
-                in Envoy, passed to Envoy as --concurrency. One is generally enough
-                since Python serializes the application, and more threads use more
-                CPU per request. Set to 'auto' to use one thread per CPU core.
+                in Envoy, passed to Envoy as --concurrency, or 'auto' for one per
+                available CPU core.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             loop: The event loop ASGI applications run on. 'asyncio' is the
                 standard library event loop. Unset uses uvloop, or winloop on

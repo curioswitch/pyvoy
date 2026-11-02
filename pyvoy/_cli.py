@@ -218,9 +218,9 @@ async def amain() -> None:
     parser.add_argument(
         "--io-threads",
         help="positive number of threads handling connections and HTTP in Envoy, "
-        "or 'auto' for one per CPU core (default: 1)",
+        "or 'auto' for one per available CPU core (default: auto)",
         type=_io_threads,
-        default=1,
+        default="auto",
     )
 
     parser.add_argument(

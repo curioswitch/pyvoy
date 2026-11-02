@@ -59,7 +59,7 @@ def test_io_threads_must_be_an_integer(io_threads: object) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
-    [({}, 1), ({"io_threads": 2}, 2), ({"io_threads": "auto"}, os.cpu_count())],
+    [({}, os.cpu_count()), ({"io_threads": 1}, 1), ({"io_threads": 2}, 2)],
 )
 async def test_io_threads(kwargs: dict[str, object], expected: int) -> None:
     async with PyvoyServer(
