@@ -49,6 +49,7 @@ class CLIArgs:
     upstream: list[str]
     log_level: LogLevel
     worker_threads: int
+    io_threads: int
     lifespan: bool | None
     loop: Loop | None
     websockets: bool
@@ -206,6 +207,13 @@ async def amain() -> None:
         help="positive number of worker threads to use (default: 1 for ASGI, 200 for WSGI)",
         type=_positive_int,
         default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "--io-threads",
+        help="positive number of threads handling connections and HTTP in Envoy (default: 1)",
+        type=_positive_int,
+        default=1,
     )
 
     parser.add_argument(
@@ -391,6 +399,7 @@ async def amain() -> None:
         root_path=args.root_path,
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
+        io_threads=args.io_threads,
         lifespan=args.lifespan,
         loop=args.loop,
         websockets=args.websockets,

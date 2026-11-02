@@ -202,6 +202,7 @@ class PyvoyServer:
     _log_level: LogLevel
     _tls_require_client_certificate: bool
     _worker_threads: int | None
+    _io_threads: int
     _lifespan: bool | None
     _loop: Loop | None
     _additional_envoy_args: list[str] | None
@@ -232,6 +233,7 @@ class PyvoyServer:
         root_path: str = "",
         log_level: LogLevel = "error",
         worker_threads: int | None = None,
+        io_threads: int = 1,
         lifespan: bool | None = None,
         loop: Loop | None = None,
         websockets: bool = False,
@@ -267,6 +269,10 @@ class PyvoyServer:
             root_path: The root path to mount the application at.
             log_level: The log level for Envoy.
             worker_threads: The positive number of worker threads to use.
+            io_threads: The positive number of threads handling connections and HTTP
+                in Envoy, passed to Envoy as --concurrency. One is generally enough
+                since Python serializes the application, and more threads use more
+                CPU per request.
             lifespan: Whether to enable ASGI lifespan support. Unsets means auto-detect.
             loop: The event loop ASGI applications run on. 'asyncio' is the
                 standard library event loop. Unset uses uvloop, or winloop on
@@ -296,9 +302,10 @@ class PyvoyServer:
             stderr: Where to redirect the server's stderr.
 
         Raises:
-            TypeError: If worker_threads or websockets_max_message_size is not an
-                integer.
-            ValueError: If worker_threads is not between 1 and sys.maxsize,
+            TypeError: If worker_threads, io_threads, or
+                websockets_max_message_size is not an integer.
+            ValueError: If worker_threads or io_threads is not between 1 and
+                sys.maxsize,
                 websockets_max_message_size is not between 0 and sys.maxsize, or
                 content_encodings contains an unknown or duplicate encoding.
                 When the Envoy config is generated, if enable_otel is set and an
@@ -311,6 +318,12 @@ class PyvoyServer:
             if not 1 <= worker_threads <= sys.maxsize:
                 msg = f"worker_threads must be between 1 and {sys.maxsize}"
                 raise ValueError(msg)
+        if not isinstance(io_threads, int) or isinstance(io_threads, bool):
+            msg = "io_threads must be an integer"
+            raise TypeError(msg)
+        if not 1 <= io_threads <= sys.maxsize:
+            msg = f"io_threads must be between 1 and {sys.maxsize}"
+            raise ValueError(msg)
         if websockets_max_message_size is not None:
             if not isinstance(websockets_max_message_size, int) or isinstance(
                 websockets_max_message_size, bool
@@ -349,6 +362,7 @@ class PyvoyServer:
         self._stderr = stderr
         self._log_level = log_level
         self._worker_threads = worker_threads
+        self._io_threads = io_threads
         self._lifespan = lifespan
         self._loop = loop
         self._additional_envoy_args = additional_envoy_args
@@ -407,6 +421,8 @@ class PyvoyServer:
                 "--use-dynamic-base-id",
                 "--log-level",
                 self._log_level,
+                "--concurrency",
+                str(self._io_threads),
             ]
             if self._additional_envoy_args:
                 args.extend(self._additional_envoy_args)
