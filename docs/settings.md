@@ -14,8 +14,9 @@ pyvoy for even further customization.
   be kept at 1 unless using free-threaded Python. **Default**: 1 for ASGI, 200 for WSGI.
 - `--io-threads` - The positive number of threads handling connections and HTTP in Envoy, passed to Envoy as
   `--concurrency`. Since Python serializes the application, one is generally enough and more threads use more CPU
-  per request without increasing throughput.
-  Consider raising it when serving large responses or using free-threaded Python with multiple worker threads.
+  per request without increasing throughput. `auto` uses one thread per CPU core.
+  Consider raising it when serving large or compressed responses, serving [static files](#static-files),
+  or using free-threaded Python with multiple worker threads.
   **Default**: 1.
 - `--[no-]lifespan` - Whether to require or disable ASGI lifespan support. By default, we try to run the application
   with lifespan and ignore any exception that is raised. If enabled explicitly, an exception will cause the server to

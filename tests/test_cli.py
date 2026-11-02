@@ -266,9 +266,12 @@ def test_otel_flag(
     assert captured_server._enable_otel is expected
 
 
-@pytest.mark.parametrize(("args", "expected"), [([], 1), (["--io-threads", "4"], 4)])
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [([], 1), (["--io-threads", "4"], 4), (["--io-threads", "auto"], "auto")],
+)
 def test_io_threads_flag(
-    args: list[str], expected: int, monkeypatch: pytest.MonkeyPatch
+    args: list[str], expected: int | str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured_server: PyvoyServer | None = None
 

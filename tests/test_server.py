@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -46,9 +47,9 @@ def test_io_threads_must_be_positive(io_threads: int) -> None:
         PyvoyServer("tests.apps.asgi.kitchensink", io_threads=io_threads)
 
 
-@pytest.mark.parametrize("io_threads", [True, 1.5])
+@pytest.mark.parametrize("io_threads", [True, 1.5, "4"])
 def test_io_threads_must_be_an_integer(io_threads: object) -> None:
-    with pytest.raises(TypeError, match="io_threads must be an integer"):
+    with pytest.raises(TypeError, match="io_threads must be an integer or 'auto'"):
         PyvoyServer(
             "tests.apps.asgi.kitchensink",
             io_threads=io_threads,  # pyright: ignore[reportArgumentType]
@@ -56,7 +57,10 @@ def test_io_threads_must_be_an_integer(io_threads: object) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("kwargs", "expected"), [({}, 1), ({"io_threads": 2}, 2)])
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [({}, 1), ({"io_threads": 2}, 2), ({"io_threads": "auto"}, os.cpu_count())],
+)
 async def test_io_threads(kwargs: dict[str, object], expected: int) -> None:
     async with PyvoyServer(
         "tests.apps.asgi.kitchensink",
