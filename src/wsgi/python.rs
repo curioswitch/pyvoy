@@ -11,6 +11,7 @@ use pyo3::{
 
 use super::types::*;
 use crate::wsgi::pool::{BlockingPool, PoolHandle};
+use crate::wsgi::queue::WorkQueue;
 use crate::wsgi::transport::{TransportBridge, TransportEvent};
 use crate::{eventbridge::EventBridge, ondrop::RunOnDrop, wsgi::response::ResponseSenderEvent};
 use crate::{headernames::HeaderNameExt as _, types::*, wsgi::response::ResponseSender};
@@ -37,7 +38,7 @@ struct ExecutorInner {
     root_path: Arc<Py<PyString>>,
     constants: Arc<Constants>,
     pool: PoolHandle,
-    rx: crossbeam_channel::Receiver<ExecuteAppEvent>,
+    queue: Arc<WorkQueue<ExecuteAppEvent>>,
 }
 
 /// The Python executor of the WSGI application. Because WSGI applications will block,
@@ -45,7 +46,7 @@ struct ExecutorInner {
 /// the application.
 #[derive(Clone)]
 pub(crate) struct Executor {
-    tx: Option<crossbeam_channel::Sender<ExecuteAppEvent>>,
+    queue: Arc<WorkQueue<ExecuteAppEvent>>,
     pool: Arc<Mutex<BlockingPool>>,
     handles: Arc<Vec<JoinHandle<()>>>,
 }
@@ -66,13 +67,13 @@ impl Executor {
         })?;
 
         let pool = BlockingPool::new();
-        let (tx, rx) = crossbeam_channel::unbounded::<ExecuteAppEvent>();
+        let queue = Arc::new(WorkQueue::new());
         let inner = ExecutorInner {
             app: Arc::new(app),
             root_path: Arc::new(root_path),
             constants,
             pool: pool.handle(),
-            rx,
+            queue: queue.clone(),
         };
 
         let handles: Vec<_> = (0..num_threads)
@@ -80,7 +81,7 @@ impl Executor {
                 let inner = inner.clone();
                 thread::spawn(move || {
                     let _ = Python::attach(|py| {
-                        while let Ok(event) = py.detach(|| inner.rx.recv()) {
+                        while let Some(event) = py.detach(|| inner.queue.pop()) {
                             let scheduler = Arc::new(event.scheduler);
                             let response_bridge = event.response_bridge;
                             if let Err(e) = inner.execute_app(
@@ -112,7 +113,7 @@ impl Executor {
             .collect();
 
         Ok(Self {
-            tx: Some(tx),
+            queue,
             pool: Arc::new(Mutex::new(pool)),
             handles: Arc::new(handles),
         })
@@ -130,31 +131,25 @@ impl Executor {
         transport_bridge: Option<EventBridge<TransportEvent>>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
-        // The channel would only be closed during shutdown, when there
-        // are no requests being handled, so we unwrap here.
-        self.tx
-            .as_ref()
-            .unwrap()
-            .send(ExecuteAppEvent {
-                scope,
-                request_closed,
-                request_read_bridge,
-                request_body_rx,
-                response_bridge,
-                response_written_rx,
-                transport_bridge,
-                scheduler,
-            })
-            .unwrap();
+        self.queue.push(ExecuteAppEvent {
+            scope,
+            request_closed,
+            request_read_bridge,
+            request_body_rx,
+            response_bridge,
+            response_written_rx,
+            transport_bridge,
+            scheduler,
+        });
     }
 
     /// Shutdown the executor, waiting for all threads to complete.
     pub fn shutdown(&mut self) {
-        // Close the app channel and join the app workers first. They are the only
+        // Close the app queue and join the app workers first. They are the only
         // submitters of request-iteration work, so once they exit the pool can shut
         // down without racing a concurrent submission, and any in-flight request still
         // has its body iteration serviced until it completes.
-        drop(self.tx.take());
+        self.queue.close();
         for handle in Arc::get_mut(&mut self.handles).unwrap().drain(..) {
             handle.join().unwrap();
         }

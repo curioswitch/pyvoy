@@ -1,16 +1,10 @@
-use std::{
-    sync::{
-        Arc,
-        mpsc::{self, Sender},
-    },
-    thread,
-};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilterScheduler;
 use http::{HeaderName, HeaderValue};
 use pyo3::{
-    Bound, IntoPyObjectExt as _, Py, PyAny, PyErr, PyResult, Python,
+    Bound, IntoPyObjectExt as _, Py, PyAny, PyResult, Python,
     exceptions::{PyRuntimeError, PyValueError},
     pyclass, pymethods,
     types::{
@@ -25,13 +19,12 @@ use crate::{
         ExecutorHandles,
         app::load_app,
         awaitable::{EmptyAwaitable, ErrorAwaitable},
-        eventloop::{EventLoops, LoopKind},
-        get_gil_batch_size,
+        eventloop::{EventLoops, LoopHandle, LoopKind},
         headers::extract_headers_from_event,
         scope::new_scope_dict,
     },
     eventbridge::EventBridge,
-    types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
+    types::{ClientDisconnectedError, Constants, Scope},
 };
 
 struct ExecutorInner {
@@ -41,12 +34,11 @@ struct ExecutorInner {
     root_path: Py<PyString>,
     loops: EventLoops,
     constants: Arc<Constants>,
-    executor: WebSocketExecutor,
 }
 
 #[derive(Clone)]
 pub(super) struct WebSocketExecutor {
-    tx: Sender<Event>,
+    inner: Arc<ExecutorInner>,
 }
 
 impl WebSocketExecutor {
@@ -73,55 +65,17 @@ impl WebSocketExecutor {
                 PyString::new(py, root_path).unbind(),
             )
         });
-        let (tx, rx) = mpsc::channel::<Event>();
-        let executor = Self { tx };
-
-        let inner = ExecutorInner {
-            app,
-            asgi,
-            extensions,
-            root_path,
-            loops: loops.clone(),
-            constants,
-            executor: executor.clone(),
+        let executor = Self {
+            inner: Arc::new(ExecutorInner {
+                app,
+                asgi,
+                extensions,
+                root_path,
+                loops: loops.clone(),
+                constants,
+            }),
         };
-
-        let gil_handle = thread::spawn(move || {
-            let rx = SyncReceiver::new(rx);
-            let gil_batch_size = get_gil_batch_size();
-            let mut shutdown = false;
-            if let Err(e) = Python::attach(|py| {
-                while let Ok(event) = py.detach(|| rx.recv()) {
-                    if !inner.handle_event(py, event)? {
-                        shutdown = true;
-                    } else {
-                        // We don't want to be too agressive and starve the event loop but do
-                        // suffer significantly reduced throughput when acquiring the GIL each
-                        // event since the operations are very fast (we just schedule on the
-                        // event loop without actually executing logic). We go ahead and
-                        // process any more events that may be present up to a cap to improve
-                        // throughput while still having a relatively low upper bound on time.
-                        for event in rx.try_iter().take(gil_batch_size) {
-                            if !inner.handle_event(py, event)? {
-                                shutdown = true;
-                                break;
-                            }
-                        }
-                    }
-                    if shutdown {
-                        break;
-                    }
-                }
-
-                Ok::<_, PyErr>(())
-            }) {
-                eprintln!(
-                    "Unexpected Python exception in ASGI executor thread. This likely a bug in pyvoy: {}",
-                    e
-                );
-            }
-        });
-        Ok((executor, ExecutorHandles { loops, gil_handle }))
+        Ok((executor, ExecutorHandles { loops }))
     }
 
     pub(crate) fn execute_app(
@@ -132,228 +86,153 @@ impl WebSocketExecutor {
         send_bridge: EventBridge<SendEvent>,
         scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
     ) {
-        self.tx
-            .send(Event::ExecuteApp(ExecuteAppEvent {
-                scope: WebSocketScope {
-                    scope,
-                    subprotocols,
-                },
-                recv_bridge,
-                send_bridge,
-                scheduler,
-            }))
-            .unwrap();
+        let event = ExecuteAppEvent {
+            scope: WebSocketScope {
+                scope,
+                subprotocols,
+            },
+            recv_bridge,
+            send_bridge,
+            scheduler,
+        };
+        let executor = self.clone();
+        self.inner
+            .loops
+            .next()
+            .dispatch(Box::new(move |py, handle| {
+                executor.run_app(py, handle, event)
+            }));
     }
 
-    pub(crate) fn handle_recv_future_connect(&self, future: RecvFuture) {
-        self.tx
-            .send(Event::HandleRecvFutureConnect(future))
-            .unwrap();
+    pub(crate) fn handle_recv_future_connect(&self, mut future: RecvFuture) {
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let executor = ConnectFutureExecutor {
+            future: future.future,
+            constants: self.inner.constants.clone(),
+        };
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_recv_future_message(&self, body: Body, future: RecvFuture) {
-        self.tx
-            .send(Event::HandleRecvFutureMessage { body, future })
-            .unwrap();
+    pub(crate) fn handle_recv_future_message(&self, body: Body, mut future: RecvFuture) {
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let executor = RecvFutureMessageExecutor {
+            body,
+            future: future.future,
+            constants: self.inner.constants.clone(),
+        };
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
     pub(crate) fn handle_recv_future_disconnect(
         &self,
         code: u16,
         reason: Utf8Bytes,
-        future: RecvFuture,
+        mut future: RecvFuture,
     ) {
-        self.tx
-            .send(Event::HandleRecvFutureDisconnect {
-                code,
-                reason,
-                future,
-            })
-            .unwrap();
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let executor = RecvFutureDisconnectExecutor {
+            code,
+            reason,
+            future: future.future,
+            constants: self.inner.constants.clone(),
+        };
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
     pub(crate) fn handle_dropped_recv_future(&self, future: LoopFuture) {
-        self.tx
-            .send(Event::HandleDroppedRecvFuture(future))
-            .unwrap();
+        let executor = DroppedRecvFutureExecutor {
+            future: future.future,
+            constants: self.inner.constants.clone(),
+        };
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_send_future(&self, future: SendFuture) {
-        self.tx.send(Event::HandleSendFuture(future)).unwrap();
+    pub(crate) fn handle_send_future(&self, mut future: SendFuture) {
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                future
+                    .future
+                    .call_method1(py, &constants.set_result, (py.None(),))?;
+                Ok(())
+            }));
     }
 
     pub(crate) fn handle_dropped_send_future(&self, future: LoopFuture) {
-        self.tx
-            .send(Event::HandleDroppedSendFuture(future))
-            .unwrap();
-    }
-
-    pub(crate) fn shutdown(&self) {
-        self.tx.send(Event::Shutdown).unwrap();
-    }
-}
-
-impl ExecutorInner {
-    fn handle_event<'py>(&self, py: Python<'py>, event: Event) -> PyResult<bool> {
-        match event {
-            Event::ExecuteApp(event) => {
-                let (loop_, state) = self.loops.get(py);
-                let app_executor = AppExecutor {
-                    loop_: loop_.clone().unbind(),
-                    state: state.map(|s| s.unbind()),
-                    app: self.app.clone_ref(py),
-                    asgi: self.asgi.clone_ref(py),
-                    extensions: self.extensions.clone_ref(py),
-                    root_path: self.root_path.clone_ref(py),
-                    event: Some(event),
-                    constants: self.constants.clone(),
-                    executor: self.executor.clone(),
-                };
-                loop_.call_method1(&self.constants.call_soon_threadsafe, (app_executor,))?;
-            }
-            Event::HandleRecvFutureConnect(mut future) => {
-                if let Some(future) = future.future.take() {
-                    let connect_future_executor = ConnectFutureExecutor {
-                        future: future.future,
-                        constants: self.constants.clone(),
-                    };
-                    future.loop_.call_method1(
-                        py,
-                        &self.constants.call_soon_threadsafe,
-                        (connect_future_executor,),
-                    )?;
-                }
-            }
-            Event::HandleRecvFutureMessage { body, mut future } => {
-                if let Some(future) = future.future.take() {
-                    let recv_future_executor = RecvFutureMessageExecutor {
-                        body,
-                        future: future.future,
-                        constants: self.constants.clone(),
-                    };
-                    future.loop_.call_method1(
-                        py,
-                        &self.constants.call_soon_threadsafe,
-                        (recv_future_executor,),
-                    )?;
-                }
-            }
-            Event::HandleRecvFutureDisconnect {
-                code,
-                reason,
-                mut future,
-            } => {
-                if let Some(future) = future.future.take() {
-                    let recv_future_executor = RecvFutureDisconnectExecutor {
-                        code,
-                        reason,
-                        future: future.future,
-                        constants: self.constants.clone(),
-                    };
-                    future.loop_.call_method1(
-                        py,
-                        &self.constants.call_soon_threadsafe,
-                        (recv_future_executor,),
-                    )?;
-                }
-            }
-            Event::HandleDroppedRecvFuture(future) => {
-                let dropped_recv_future_executor = DroppedRecvFutureExecutor {
-                    future: future.future,
-                    constants: self.constants.clone(),
-                };
-                future.loop_.call_method1(
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                future.future.call_method1(
                     py,
-                    &self.constants.call_soon_threadsafe,
-                    (dropped_recv_future_executor,),
+                    &constants.set_exception,
+                    (&constants.client_disconnected_err,),
                 )?;
-            }
-            // No real logic in handling send futures so we don't bother with
-            // running on the event loop.
-            Event::HandleSendFuture(future) => {
-                self.handle_send_future(py, future)?;
-            }
-            Event::HandleDroppedSendFuture(future) => {
-                self.handle_dropped_send_future(py, future)?;
-            }
-            Event::Shutdown => {
-                self.shutdown(py)?;
-                return Ok(false);
-            }
-        }
-        Ok(true)
+                Ok(())
+            }));
     }
 
-    fn handle_send_future<'py>(&self, py: Python<'py>, mut future: SendFuture) -> PyResult<()> {
-        let f = match future.future.take() {
-            Some(f) => f,
-            None => {
-                return Ok(());
+    /// Stops the event loops, executing shutdown lifespan if needed.
+    pub(crate) fn shutdown(&self) {
+        Python::attach(|py| {
+            if let Err(e) = self.inner.loops.stop(py) {
+                eprintln!(
+                    "Unexpected Python exception stopping ASGI event loops. This likely a bug in pyvoy: {}",
+                    e
+                );
             }
-        };
-        let set_result = f.future.getattr(py, &self.constants.set_result)?;
-        f.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, py.None()),
-        )?;
-        Ok(())
+        });
     }
 
-    fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let set_exception = future.future.getattr(py, &self.constants.set_exception)?;
-        future.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_exception, &self.constants.client_disconnected_err),
-        )?;
-        Ok(())
-    }
-
-    fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        self.loops.stop(py)?;
-        Ok(())
-    }
-}
-
-/// The callable scheduled on the event loop to execute the ASGI application.
-#[pyclass(module = "_pyvoy.asgi.websocket")]
-struct AppExecutor {
-    loop_: Py<PyAny>,
-    state: Option<Py<PyDict>>,
-    app: Py<PyAny>,
-    asgi: Py<PyDict>,
-    extensions: Py<PyDict>,
-    root_path: Py<PyString>,
-    event: Option<ExecuteAppEvent>,
-    constants: Arc<Constants>,
-    executor: WebSocketExecutor,
-}
-
-#[pymethods]
-impl AppExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    /// Executes the ASGI application on the event loop thread.
+    fn run_app(&self, py: Python<'_>, handle: &LoopHandle, event: ExecuteAppEvent) -> PyResult<()> {
         let ExecuteAppEvent {
             scope,
             recv_bridge,
             send_bridge,
             scheduler,
-        } = self.event.take().unwrap();
+        } = event;
+        let inner = self.inner.as_ref();
+        let constants = &inner.constants;
 
-        let loop_ = self.loop_.bind(py);
+        let loop_ = handle.loop_.bind(py);
 
         let scope_dict = new_scope_dict(
             py,
             scope.scope,
-            &self.constants.websocket,
-            &self.asgi,
-            &self.extensions,
-            Some(&self.root_path),
-            &self.state,
-            &self.constants,
+            &constants.websocket,
+            &inner.asgi,
+            &inner.extensions,
+            Some(&inner.root_path),
+            handle.state(),
+            constants,
         )?;
         scope_dict.set_item(
-            &self.constants.subprotocols,
+            &constants.subprotocols,
             PyList::new(py, scope.subprotocols)?,
         )?;
 
@@ -363,12 +242,12 @@ impl AppExecutor {
             recv_bridge,
             scheduler: scheduler.clone(),
             loop_: loop_.clone().unbind(),
-            executor: self.executor.clone(),
-            constants: self.constants.clone(),
+            executor: self.clone(),
+            constants: constants.clone(),
         }
         .into_bound_py_any(py)?;
 
-        let coro = self.app.bind(py).call1((
+        let coro = inner.app.bind(py).call1((
             scope_dict,
             recv,
             SendCallable {
@@ -376,17 +255,17 @@ impl AppExecutor {
                 send_bridge: send_bridge.clone(),
                 scheduler: scheduler.clone(),
                 loop_: loop_.clone().unbind(),
-                executor: self.executor.clone(),
-                constants: self.constants.clone(),
+                executor: self.clone(),
+                constants: constants.clone(),
             },
         ))?;
-        let future = loop_.call_method1(&self.constants.create_task, (coro,))?;
+        let future = loop_.call_method1(&constants.create_task, (coro,))?;
         future.call_method1(
-            &self.constants.add_done_callback,
+            &constants.add_done_callback,
             (AppFutureHandler {
                 send_bridge,
                 scheduler,
-                constants: self.constants.clone(),
+                constants: constants.clone(),
             },),
         )?;
 
@@ -394,15 +273,13 @@ impl AppExecutor {
     }
 }
 
-#[pyclass(module = "_pyvoy.asgi.websocket")]
 struct ConnectFutureExecutor {
     future: Py<PyAny>,
     constants: Arc<Constants>,
 }
 
-#[pymethods]
 impl ConnectFutureExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    fn run(&self, py: Python<'_>) -> PyResult<()> {
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.websocket_connect)?;
         self.future
@@ -411,17 +288,15 @@ impl ConnectFutureExecutor {
     }
 }
 
-/// The callable scheduled on the event loop to handle a receive future.
-#[pyclass(module = "_pyvoy.asgi.websocket")]
+/// Completes a receive future with a message, on the event loop thread.
 struct RecvFutureMessageExecutor {
     body: Body,
     future: Py<PyAny>,
     constants: Arc<Constants>,
 }
 
-#[pymethods]
 impl RecvFutureMessageExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    fn run(&self, py: Python<'_>) -> PyResult<()> {
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.websocket_receive)?;
         match &self.body {
@@ -438,8 +313,7 @@ impl RecvFutureMessageExecutor {
     }
 }
 
-/// The callable scheduled on the event loop to handle a receive future.
-#[pyclass(module = "_pyvoy.asgi.websocket")]
+/// Completes a receive future with a disconnect, on the event loop thread.
 struct RecvFutureDisconnectExecutor {
     code: u16,
     reason: Utf8Bytes,
@@ -447,9 +321,8 @@ struct RecvFutureDisconnectExecutor {
     constants: Arc<Constants>,
 }
 
-#[pymethods]
 impl RecvFutureDisconnectExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    fn run(&self, py: Python<'_>) -> PyResult<()> {
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
         event.set_item(&self.constants.code, self.code)?;
@@ -460,16 +333,14 @@ impl RecvFutureDisconnectExecutor {
     }
 }
 
-/// The callable scheduled on the event loop to handle a dropped receive future.
-#[pyclass(module = "_pyvoy.asgi.websocket")]
+/// Completes a dropped receive future with a disconnect, on the event loop thread.
 struct DroppedRecvFutureExecutor {
     future: Py<PyAny>,
     constants: Arc<Constants>,
 }
 
-#[pymethods]
 impl DroppedRecvFutureExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    fn run(&self, py: Python<'_>) -> PyResult<()> {
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
         event.set_item(&self.constants.code, 1005u16)?;
@@ -495,24 +366,6 @@ struct WebSocketScope {
 pub(super) enum Body {
     Bytes(Bytes),
     Text(Utf8Bytes),
-}
-
-enum Event {
-    ExecuteApp(ExecuteAppEvent),
-    HandleRecvFutureConnect(RecvFuture),
-    HandleRecvFutureMessage {
-        body: Body,
-        future: RecvFuture,
-    },
-    HandleRecvFutureDisconnect {
-        code: u16,
-        reason: Utf8Bytes,
-        future: RecvFuture,
-    },
-    HandleDroppedRecvFuture(LoopFuture),
-    HandleSendFuture(SendFuture),
-    HandleDroppedSendFuture(LoopFuture),
-    Shutdown,
 }
 
 /// The receive callable we pass to the application.

@@ -15,6 +15,8 @@ from pyvoy import PyvoyServer
 if TYPE_CHECKING:
     from pyqwest import Client
 
+    from pyvoy import Loop
+
 
 @pytest.mark.asyncio
 async def test_wait_returns_child_exit_status() -> None:
@@ -72,6 +74,21 @@ async def test_io_threads(kwargs: dict[str, object], expected: int) -> None:
         )
         server_info = json.loads(response.read())
     assert server_info["command_line_options"]["concurrency"] == expected
+
+
+@pytest.mark.asyncio
+async def test_async_task_batch_size(client: Client, loop: Loop | None) -> None:
+    # With one task per drain, concurrent requests that queue together are run
+    # across several passes through the event loop.
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        lifespan=False,
+        loop=loop,
+        env={"PYVOY_ASYNC_TASK_BATCH_SIZE": "1"},
+    ) as server:
+        url = f"http://{server.listener_address}:{server.listener_port}/controlled"
+        responses = await asyncio.gather(*(client.get(url) for _ in range(50)))
+    assert [response.status for response in responses] == [200] * 50
 
 
 @pytest.mark.parametrize("worker_threads", [True, 1.5])

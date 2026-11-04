@@ -51,6 +51,7 @@ dev = [
   "connectrpc==0.13.0",
   "granian==2.8.7",
   "gunicorn==26.2.0",
+  "h2corn==2.0.0",
   "hypercorn==0.18.0",
   "kosoku==0.1.0",
   "opentelemetry-instrumentation-asgi==0.66b2",

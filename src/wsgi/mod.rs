@@ -4,6 +4,8 @@ pub(crate) mod filter;
 mod pool;
 /// The Python side of the WSGI handler.
 mod python;
+/// The queue of requests for the WSGI worker threads.
+mod queue;
 /// Utilities for sending the WSGI response.
 mod response;
 /// The pyqwest transport implementation.
