@@ -45,6 +45,23 @@ async def test_normal(client: Client, loop: Loop | None):
 
 
 @pytest.mark.asyncio
+async def test_task_factory(client: Client, loop: Loop | None):
+    if loop == "trio":
+        pytest.skip("trio has no task factories")
+    async with PyvoyServer(
+        "tests.apps.asgi.lifespan:task_factory",
+        loop=loop,
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+    ) as server:
+        url = f"http://{server.listener_address}:{server.listener_port}"
+        response = await client.get(url)
+
+    assert response.status == 200
+    assert response.text() == "_FactoryTask"
+
+
+@pytest.mark.asyncio
 async def test_state_isolation(client: Client, loop: Loop | None):
     async with PyvoyServer(
         "tests.apps.asgi.lifespan:state_isolation",

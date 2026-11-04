@@ -46,11 +46,22 @@ struct ExecutorInner {
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
     root_path: Py<PyString>,
-    /// The asyncio.Task class that starts applications eagerly. It is set only
-    /// for asyncio event loops on Python 3.12 or later.
-    eager_task: Option<Py<PyAny>>,
+    /// Starts applications as eager tasks. It is set only for asyncio event
+    /// loops on Python 3.12 or later.
+    eager_task: Option<EagerTask>,
     loops: EventLoops,
     constants: Arc<Constants>,
+}
+
+/// Creates eager tasks, which run the application until it first waits, so a
+/// response that needs no I/O completes without another pass through the
+/// event loop.
+struct EagerTask {
+    /// Holds the asyncio.Task class.
+    task: Py<PyAny>,
+    /// Holds the keyword arguments for creating a task. A task without a loop
+    /// argument runs on the running loop, so every loop can share them.
+    kwargs: Py<PyDict>,
 }
 
 impl Executor {
@@ -76,11 +87,13 @@ impl Executor {
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
             let root_path = PyString::new(py, root_path);
-            // An eager task runs the application until it first waits, so a
-            // response that needs no I/O completes without another pass through
-            // the event loop.
             let eager_task = if loop_kind != LoopKind::Trio && py.version_info() >= (3, 12) {
-                Some(py.import("asyncio")?.getattr("Task")?.unbind())
+                let kwargs = PyDict::new(py);
+                kwargs.set_item("eager_start", true)?;
+                Some(EagerTask {
+                    task: py.import("asyncio")?.getattr("Task")?.unbind(),
+                    kwargs: kwargs.unbind(),
+                })
             } else {
                 None
             };
@@ -335,6 +348,14 @@ impl Executor {
             },
         ))?;
 
+        // A task factory set by the application decides how its tasks are
+        // created, so tasks only start eagerly without one.
+        let eager = match &inner.eager_task {
+            Some(eager_task) if loop_.call_method0(&constants.get_task_factory)?.is_none() => {
+                Some(eager_task)
+            }
+            _ => None,
+        };
         let task = {
             // The task copies the current context, so the bridge only needs to be
             // set while creating it. Without an HTTP client, we skip touching the
@@ -357,13 +378,11 @@ impl Executor {
                 }
                 None => None,
             };
-            match &inner.eager_task {
-                Some(eager_task) => {
-                    let kwargs = PyDict::new(py);
-                    kwargs.set_item(&constants.loop_, loop_)?;
-                    kwargs.set_item(&constants.eager_start, true)?;
-                    eager_task.bind(py).call((coro,), Some(&kwargs))?
-                }
+            match eager {
+                Some(eager_task) => eager_task
+                    .task
+                    .bind(py)
+                    .call((coro,), Some(eager_task.kwargs.bind(py)))?,
                 None => loop_.call_method1(&constants.create_task, (coro,))?,
             }
         };
@@ -374,7 +393,7 @@ impl Executor {
         };
         // An eager task that already completed would only run the callback on
         // the next pass through the event loop.
-        if inner.eager_task.is_some() && task.call_method0(&constants.done)?.is_truthy()? {
+        if eager.is_some() && task.call_method0(&constants.done)?.is_truthy()? {
             handler.__call__(py, task)?;
         } else {
             task.call_method1(&constants.add_done_callback, (handler,))?;

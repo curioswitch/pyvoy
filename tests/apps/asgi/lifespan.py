@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Iterator
+    from collections.abc import Awaitable, Coroutine, Iterator
     from typing import Any
 
     from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
@@ -107,6 +108,43 @@ async def state_isolation(
     # Updates our copied state, not shared.
     state["isolated"] += 1
     body = f"{state['shared'].count},{state['isolated']}".encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+class _FactoryTask(asyncio.Task):
+    pass
+
+
+def _task_factory(
+    loop: asyncio.AbstractEventLoop,
+    coro: Coroutine[object, object, object],
+    **kwargs: object,
+) -> asyncio.Task:
+    return _FactoryTask(coro, loop=loop, **kwargs)  # pyright: ignore[reportArgumentType]
+
+
+async def task_factory(
+    scope: Scope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    if scope["type"] == "lifespan":
+        while True:
+            msg = await recv()
+            if msg["type"] == "lifespan.startup":
+                asyncio.get_running_loop().set_task_factory(_task_factory)
+                await send({"type": "lifespan.startup.complete"})
+            elif msg["type"] == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    body = type(asyncio.current_task()).__name__.encode()
     await send(
         {
             "type": "http.response.start",
