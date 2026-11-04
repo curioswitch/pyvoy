@@ -46,22 +46,13 @@ struct ExecutorInner {
     asgi: Py<PyDict>,
     extensions: Py<PyDict>,
     root_path: Py<PyString>,
-    /// Starts applications as eager tasks. It is set only for asyncio event
-    /// loops on Python 3.12 or later.
-    eager_task: Option<EagerTask>,
+    /// Holds the asyncio.Task class, which starts applications as eager tasks.
+    /// An eager task runs the application until it first waits, so a response
+    /// that needs no I/O completes without another pass through the event loop.
+    /// It is set only for asyncio event loops on Python 3.12 or later.
+    eager_task: Option<Py<PyAny>>,
     loops: EventLoops,
     constants: Arc<Constants>,
-}
-
-/// Creates eager tasks, which run the application until it first waits, so a
-/// response that needs no I/O completes without another pass through the
-/// event loop.
-struct EagerTask {
-    /// Holds the asyncio.Task class.
-    task: Py<PyAny>,
-    /// Holds the keyword arguments for creating a task. A task without a loop
-    /// argument runs on the running loop, so every loop can share them.
-    kwargs: Py<PyDict>,
 }
 
 impl Executor {
@@ -88,12 +79,7 @@ impl Executor {
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
             let root_path = PyString::new(py, root_path);
             let eager_task = if loop_kind != LoopKind::Trio && py.version_info() >= (3, 12) {
-                let kwargs = PyDict::new(py);
-                kwargs.set_item("eager_start", true)?;
-                Some(EagerTask {
-                    task: py.import("asyncio")?.getattr("Task")?.unbind(),
-                    kwargs: kwargs.unbind(),
-                })
+                Some(py.import("asyncio")?.getattr("Task")?.unbind())
             } else {
                 None
             };
@@ -380,9 +366,8 @@ impl Executor {
             };
             match eager {
                 Some(eager_task) => eager_task
-                    .task
                     .bind(py)
-                    .call((coro,), Some(eager_task.kwargs.bind(py)))?,
+                    .call((coro,), Some(handle.eager_task_kwargs(py)?))?,
                 None => loop_.call_method1(&constants.create_task, (coro,))?,
             }
         };

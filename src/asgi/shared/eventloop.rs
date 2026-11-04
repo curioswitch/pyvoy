@@ -7,6 +7,7 @@ use pyo3::{
     Bound, Py, PyAny, PyErr, PyResult, Python,
     exceptions::PyRuntimeError,
     pyclass, pymethods,
+    sync::PyOnceLock,
     types::{PyAnyMethods as _, PyDict, PyDictMethods as _},
 };
 
@@ -84,6 +85,7 @@ pub(crate) struct LoopHandle {
     /// The tasks run on this Python event loop.
     pub(crate) loop_: Py<PyAny>,
     state: OnceLock<Option<Py<PyDict>>>,
+    eager_task_kwargs: PyOnceLock<Py<PyDict>>,
     queue: Mutex<LoopQueue>,
     waker: Waker,
 }
@@ -117,6 +119,20 @@ impl LoopHandle {
     /// any.
     pub(crate) fn state(&self) -> &Option<Py<PyDict>> {
         self.state.get().unwrap_or(&NO_STATE)
+    }
+
+    /// Returns the keyword arguments for starting an eager `asyncio.Task` on
+    /// this loop. The loop must be passed explicitly because the task checks
+    /// that it is running before starting eagerly.
+    pub(crate) fn eager_task_kwargs<'py>(&self, py: Python<'py>) -> PyResult<&Bound<'py, PyDict>> {
+        self.eager_task_kwargs
+            .get_or_try_init(py, || {
+                let kwargs = PyDict::new(py);
+                kwargs.set_item("loop", self.loop_.bind(py))?;
+                kwargs.set_item("eager_start", true)?;
+                Ok::<_, PyErr>(kwargs.unbind())
+            })
+            .map(|kwargs| kwargs.bind(py))
     }
 
     /// Queues a task to run on the event loop thread. Callers do not need to
@@ -349,6 +365,7 @@ impl EventLoop {
                 let handle = Arc::new(LoopHandle {
                     loop_: loop_.clone().unbind(),
                     state: OnceLock::new(),
+                    eager_task_kwargs: PyOnceLock::new(),
                     queue: Mutex::default(),
                     waker,
                 });
