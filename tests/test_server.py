@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
+import urllib.request
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -37,6 +39,39 @@ async def test_wait_before_start_returns_none() -> None:
 def test_worker_threads_must_be_positive(worker_threads: int) -> None:
     with pytest.raises(ValueError, match="worker_threads must be between 1 and"):
         PyvoyServer("tests.apps.asgi.kitchensink", worker_threads=worker_threads)
+
+
+@pytest.mark.parametrize("io_threads", [0, -1, sys.maxsize + 1])
+def test_io_threads_must_be_positive(io_threads: int) -> None:
+    with pytest.raises(ValueError, match="io_threads must be between 1 and"):
+        PyvoyServer("tests.apps.asgi.kitchensink", io_threads=io_threads)
+
+
+@pytest.mark.parametrize("io_threads", [True, 1.5, "4"])
+def test_io_threads_must_be_an_integer(io_threads: object) -> None:
+    with pytest.raises(TypeError, match="io_threads must be an integer or 'auto'"):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink",
+            io_threads=io_threads,  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [({}, os.cpu_count()), ({"io_threads": 1}, 1), ({"io_threads": 2}, 2)],
+)
+async def test_io_threads(kwargs: dict[str, object], expected: int) -> None:
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        lifespan=False,
+        **kwargs,  # pyright: ignore[reportArgumentType]
+    ) as server:
+        response = await asyncio.to_thread(
+            urllib.request.urlopen, f"http://{server._admin_address}/server_info"
+        )
+        server_info = json.loads(response.read())
+    assert server_info["command_line_options"]["concurrency"] == expected
 
 
 @pytest.mark.parametrize("worker_threads", [True, 1.5])
