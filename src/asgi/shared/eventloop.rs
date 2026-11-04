@@ -1,12 +1,13 @@
 use std::{
-    sync::{Arc, Mutex, atomic::AtomicU64, mpsc},
+    sync::{Arc, Mutex, OnceLock, atomic::AtomicU64, mpsc},
     thread::{self, JoinHandle},
 };
 
 use pyo3::{
-    Bound, Py, PyAny, PyResult, Python,
+    Bound, Py, PyAny, PyErr, PyResult, Python,
     exceptions::PyRuntimeError,
-    types::{PyAnyMethods as _, PyDict},
+    pyclass, pymethods,
+    types::{PyAnyMethods as _, PyDict, PyDictMethods as _},
 };
 
 use super::lifespan::{Lifespan, execute_lifespan};
@@ -59,6 +60,141 @@ impl LoopKind {
             Self::Zuvloop => "zuvloop",
             Self::Trio => "pyvoy._trio",
         }
+    }
+
+    /// Returns whether the event loop can watch a socket with `add_reader`,
+    /// which lets Envoy threads wake it without the GIL.
+    fn watches_sockets(self) -> bool {
+        // trio has no add_reader, and the default asyncio event loop on Windows
+        // does not support it.
+        cfg!(unix) && self != Self::Trio
+    }
+}
+
+/// Each task runs on an event loop thread while attached to the interpreter.
+pub(crate) type LoopTask = Box<dyn FnOnce(Python<'_>, &LoopHandle) -> PyResult<()> + Send>;
+
+/// Holds an event loop and the tasks that Envoy threads hand to it without the
+/// GIL.
+pub(crate) struct LoopHandle {
+    /// The tasks run on this Python event loop.
+    pub(crate) loop_: Py<PyAny>,
+    state: OnceLock<Option<Py<PyDict>>>,
+    queue: Mutex<LoopQueue>,
+    waker: Waker,
+}
+
+#[derive(Default)]
+struct LoopQueue {
+    tasks: Vec<LoopTask>,
+    /// Is set when the loop has been woken and has not drained its tasks yet,
+    /// so tasks dispatched together wake it only once.
+    wake_pending: bool,
+}
+
+/// Describes how Envoy threads wake an event loop that has tasks to run.
+enum Waker {
+    /// The event loop watches this socket with `add_reader`.
+    #[cfg(unix)]
+    Socket(std::os::unix::net::UnixStream),
+    /// A thread attaches to the interpreter and schedules draining with
+    /// `call_soon_threadsafe`. Event loops that cannot watch a socket use it.
+    Thread(mpsc::Sender<WakerMessage>),
+}
+
+enum WakerMessage {
+    Wake,
+    Stop,
+}
+
+static NO_STATE: Option<Py<PyDict>> = None;
+
+impl LoopHandle {
+    /// Returns the lifespan state to copy into each scope, if lifespan returned
+    /// any.
+    pub(crate) fn state(&self) -> &Option<Py<PyDict>> {
+        self.state.get().unwrap_or(&NO_STATE)
+    }
+
+    /// Queues a task to run on the event loop thread. Callers do not need to
+    /// hold the GIL.
+    pub(crate) fn dispatch(&self, task: LoopTask) {
+        let wake = {
+            let mut queue = self.queue.lock().unwrap();
+            queue.tasks.push(task);
+            !std::mem::replace(&mut queue.wake_pending, true)
+        };
+        if !wake {
+            return;
+        }
+        match &self.waker {
+            #[cfg(unix)]
+            Waker::Socket(writer) => {
+                use std::io::Write as _;
+                // A full socket buffer means a wakeup is already pending, so the
+                // write can be skipped.
+                let _ = (&*writer).write(&[0]);
+            }
+            Waker::Thread(tx) => {
+                let _ = tx.send(WakerMessage::Wake);
+            }
+        }
+    }
+}
+
+/// Runs the tasks dispatched to an event loop. The event loop calls it on its
+/// own thread.
+#[pyclass(module = "_pyvoy.asgi")]
+struct LoopDrainer {
+    handle: Arc<LoopHandle>,
+    #[cfg(unix)]
+    reader: Option<std::os::unix::net::UnixStream>,
+}
+
+#[pymethods]
+impl LoopDrainer {
+    fn __call__(&self, py: Python<'_>) {
+        // Clear the wakeup before taking the tasks, so a task dispatched in
+        // between wakes the loop again rather than being missed.
+        #[cfg(unix)]
+        if let Some(reader) = &self.reader {
+            use std::io::Read as _;
+            let mut buf = [0u8; 64];
+            while let Ok(n) = (&*reader).read(&mut buf) {
+                if n < buf.len() {
+                    break;
+                }
+            }
+        }
+        let tasks = {
+            let mut queue = self.handle.queue.lock().unwrap();
+            queue.wake_pending = false;
+            std::mem::take(&mut queue.tasks)
+        };
+        for task in tasks {
+            if let Err(e) = task(py, &self.handle) {
+                report_task_error(py, &self.handle, e);
+            }
+        }
+    }
+}
+
+/// Reports an exception from a task as the event loop reports one from a
+/// callback.
+fn report_task_error(py: Python<'_>, handle: &LoopHandle, err: PyErr) {
+    let report = || {
+        let context = PyDict::new(py);
+        context.set_item("message", "Exception in pyvoy event loop task")?;
+        context.set_item("exception", err.value(py))?;
+        handle
+            .loop_
+            .bind(py)
+            .call_method1("call_exception_handler", (context,))?;
+        Ok::<_, PyErr>(())
+    };
+    // The trio adapter has no exception handler.
+    if report().is_err() {
+        err.display(py);
     }
 }
 
@@ -122,27 +258,31 @@ impl EventLoops {
         }
     }
 
-    /// Gets an event loop and possible lifespan state from the pool for executing
-    /// the ASGI application.
-    pub(crate) fn get<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> (Bound<'py, PyAny>, Option<Bound<'py, PyDict>>) {
+    /// Gets the event loop to execute a new ASGI application on.
+    pub(crate) fn next(&self) -> &LoopHandle {
         match self.inner.as_ref() {
-            EventLoopsInner::Single(event_loop) => (
-                event_loop.loop_.bind(py).clone(),
-                event_loop.state.as_ref().map(|s| s.bind(py).clone()),
-            ),
+            EventLoopsInner::Single(event_loop) => &event_loop.handle,
             // For now do simple round-robin balancing across event loops. While keeping track
             // of current requests could make sense, it's also hard to know when requests take a
             // while due to I/O, where it's not so bad to have unbalanced but fair load.
             EventLoopsInner::Multiple { loops, next } => {
                 let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let event_loop = &loops[(idx as usize) % loops.len()];
-                (
-                    event_loop.loop_.bind(py).clone(),
-                    event_loop.state.as_ref().map(|s| s.bind(py).clone()),
-                )
+                &loops[(idx as usize) % loops.len()].handle
+            }
+        }
+    }
+
+    /// Gets the handle of a Python event loop in the pool, which owns futures
+    /// created on it.
+    pub(crate) fn find(&self, loop_: &Py<PyAny>) -> &LoopHandle {
+        match self.inner.as_ref() {
+            EventLoopsInner::Single(event_loop) => &event_loop.handle,
+            EventLoopsInner::Multiple { loops, .. } => {
+                let handle = loops
+                    .iter()
+                    .find(|event_loop| event_loop.handle.loop_.as_ptr() == loop_.as_ptr())
+                    .unwrap_or(&loops[0]);
+                &handle.handle
             }
         }
     }
@@ -163,12 +303,10 @@ impl EventLoops {
     /// Joins the event loop threads.
     pub(crate) fn join(self) {
         match self.inner.as_ref() {
-            EventLoopsInner::Single(event_loop) => {
-                let _ = event_loop.handle.lock().unwrap().take().unwrap().join();
-            }
+            EventLoopsInner::Single(event_loop) => event_loop.join(),
             EventLoopsInner::Multiple { loops, .. } => {
                 for event_loop in loops.iter() {
-                    let _ = event_loop.handle.lock().unwrap().take().unwrap().join();
+                    event_loop.join();
                 }
             }
         }
@@ -181,10 +319,9 @@ impl EventLoops {
 const THREAD_JOIN_TIMEOUT: usize = 300;
 
 struct EventLoop {
-    loop_: Py<PyAny>,
-    handle: Mutex<Option<JoinHandle<()>>>,
+    handle: Arc<LoopHandle>,
+    threads: Mutex<Vec<JoinHandle<()>>>,
     lifespan: Option<Lifespan>,
-    state: Option<Py<PyDict>>,
     constants: Arc<Constants>,
 }
 
@@ -203,15 +340,22 @@ impl EventLoop {
             .import(loop_kind.module())?
             .getattr("new_event_loop")?
             .unbind();
+        let (waker, reader, waker_rx) = new_waker(loop_kind)?;
         let (tx, rx) = mpsc::channel();
         let rx = SyncReceiver::new(rx);
-        let handle = thread::spawn(move || {
+        let loop_thread = thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let loop_ = new_event_loop.bind(py).call0()?;
+                let handle = Arc::new(LoopHandle {
+                    loop_: loop_.clone().unbind(),
+                    state: OnceLock::new(),
+                    queue: Mutex::default(),
+                    waker,
+                });
                 if loop_kind == LoopKind::Trio {
                     // trio finalizes async generators and its worker threads
                     // itself when the run returns.
-                    tx.send(loop_.clone().unbind()).unwrap();
+                    tx.send(handle).unwrap();
                     drop(tx);
                     loop_.call_method0("run_forever")?;
                     return Ok(());
@@ -219,7 +363,19 @@ impl EventLoop {
 
                 let asyncio = py.import("asyncio")?;
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
-                tx.send(loop_.clone().unbind()).unwrap();
+                #[cfg(unix)]
+                if let Some(reader) = reader {
+                    use std::os::fd::AsRawFd as _;
+                    let fd = reader.as_raw_fd();
+                    let drainer = LoopDrainer {
+                        handle: handle.clone(),
+                        reader: Some(reader),
+                    };
+                    loop_.call_method1("add_reader", (fd, drainer))?;
+                }
+                #[cfg(not(unix))]
+                let _ = reader;
+                tx.send(handle).unwrap();
                 drop(tx);
                 loop_.call_method0("run_forever")?;
                 let shutdown_asyncgens_coro = loop_.call_method0("shutdown_asyncgens")?;
@@ -233,7 +389,7 @@ impl EventLoop {
             res.unwrap();
         });
 
-        let loop_ = py.detach(|| rx.recv()).map_err(|e| {
+        let handle = py.detach(|| rx.recv()).map_err(|e| {
             PyRuntimeError::new_err(format!(
                 "Failed to initialize event loop for ASGI executor: {}",
                 e
@@ -241,36 +397,116 @@ impl EventLoop {
         })?;
         drop(rx);
 
+        let mut threads = vec![loop_thread];
+        if let Some(waker_rx) = waker_rx {
+            threads.push(spawn_waker_thread(py, &handle, waker_rx, constants)?);
+        }
+
         let (lifespan, state) = match enable_lifespan {
             Some(false) => (None, None),
             _ => execute_lifespan(
                 app,
                 asgi,
-                loop_.bind(py),
+                handle.loop_.bind(py),
                 enable_lifespan.unwrap_or(false),
                 loop_kind,
                 constants,
             )?,
         };
+        let _ = handle.state.set(state);
 
         Ok(Self {
-            loop_,
-            handle: Mutex::new(Some(handle)),
+            handle,
+            threads: Mutex::new(threads),
             lifespan,
-            state,
             constants: constants.clone(),
         })
     }
 
     fn stop<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        let loop_ = self.loop_.bind(py);
+        let loop_ = self.handle.loop_.bind(py);
 
         if let Some(lifespan) = self.lifespan.as_ref() {
             lifespan.shutdown(py, loop_);
         }
 
+        if let Waker::Thread(tx) = &self.handle.waker {
+            let _ = tx.send(WakerMessage::Stop);
+        }
         let stop = loop_.getattr(&self.constants.stop)?;
         loop_.call_method1(&self.constants.call_soon_threadsafe, (stop,))?;
         Ok(())
     }
+
+    fn join(&self) {
+        for thread in self.threads.lock().unwrap().drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The event loop watches this reader end of the waker socket.
+#[cfg(unix)]
+type WakerReader = std::os::unix::net::UnixStream;
+#[cfg(not(unix))]
+type WakerReader = ();
+
+/// Creates the waker for an event loop of the given kind. It also returns the
+/// socket reader for the event loop to watch, or the receiver for a waker
+/// thread.
+fn new_waker(
+    loop_kind: LoopKind,
+) -> PyResult<(
+    Waker,
+    Option<WakerReader>,
+    Option<mpsc::Receiver<WakerMessage>>,
+)> {
+    if loop_kind.watches_sockets() {
+        #[cfg(unix)]
+        {
+            let (reader, writer) = std::os::unix::net::UnixStream::pair()
+                .and_then(|(reader, writer)| {
+                    reader.set_nonblocking(true)?;
+                    writer.set_nonblocking(true)?;
+                    Ok((reader, writer))
+                })
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!("Failed to create event loop waker: {}", e))
+                })?;
+            return Ok((Waker::Socket(writer), Some(reader), None));
+        }
+    }
+    let (tx, rx) = mpsc::channel();
+    Ok((Waker::Thread(tx), None, Some(rx)))
+}
+
+/// Spawns the thread that schedules draining of an event loop that cannot
+/// watch a socket.
+fn spawn_waker_thread(
+    py: Python<'_>,
+    handle: &Arc<LoopHandle>,
+    rx: mpsc::Receiver<WakerMessage>,
+    constants: &Arc<Constants>,
+) -> PyResult<JoinHandle<()>> {
+    let drainer = Py::new(
+        py,
+        LoopDrainer {
+            handle: handle.clone(),
+            #[cfg(unix)]
+            reader: None,
+        },
+    )?;
+    let loop_ = handle.loop_.clone_ref(py);
+    let constants = constants.clone();
+    Ok(thread::spawn(move || {
+        while let Ok(WakerMessage::Wake) = rx.recv() {
+            Python::attach(|py| {
+                // This call fails once the event loop has stopped, when there is
+                // nothing left to run.
+                let _ = loop_
+                    .bind(py)
+                    .call_method1(&constants.call_soon_threadsafe, (drainer.bind(py),));
+            });
+        }
+    }))
 }

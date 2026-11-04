@@ -253,7 +253,8 @@ impl HTTPTransport {
     }
 }
 
-#[pyclass(module = "_pyvoy.asgi.httpclient", frozen)]
+/// Holds the response headers that Envoy received, to complete the request's
+/// response future.
 pub(crate) struct ReceivedResponseHeadersExecutor {
     status: StatusCode,
     headers: Vec<(HeaderName, HeaderValue)>,
@@ -286,9 +287,9 @@ impl ReceivedResponseHeadersExecutor {
     }
 }
 
-#[pymethods]
 impl ReceivedResponseHeadersExecutor {
-    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
+    /// Completes the response future, on the event loop thread.
+    pub(crate) fn run(&self, py: Python<'_>) -> PyResult<()> {
         let response_future = self.response_future.bind(py);
         if response_future
             .call_method0(&self.constants.cancelled)?
@@ -459,6 +460,58 @@ impl ResponseContent {
         state.exception = Some(exception);
     }
 
+    /// Hands data received from Envoy to a pending read, on the event loop thread.
+    pub(crate) fn notify(&self, py: Python<'_>) -> PyResult<()> {
+        let inner = &self.inner;
+        let mut state = inner.state.lock_py_attached(py).unwrap();
+
+        Self::maybe_copy_trailers_to_py(py, &mut state, inner)?;
+
+        if state.body.is_empty() && !state.end_stream {
+            return Ok(());
+        }
+        let Some(pending_future) = state.pending_future.take() else {
+            return Ok(());
+        };
+        // The application cancelled the read, so the data stays buffered for
+        // the next one.
+        if pending_future
+            .call_method0(py, &inner.constants.done)?
+            .is_truthy(py)?
+        {
+            return Ok(());
+        }
+
+        // Deliver any buffered data before surfacing errors or end of stream, matching the
+        // ordering in `__anext__`. Otherwise a reset arriving alongside a final chunk while a
+        // read is pending would drop the buffered data.
+        if !state.body.is_empty() {
+            let chunk = PyBytes::new(py, &state.body).into_any();
+            state.body.clear();
+            pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
+        } else if let Some(exception) = &state.exception {
+            pending_future.call_method1(
+                py,
+                &inner.constants.set_exception,
+                (PyErr::from_value(exception.bind(py).clone()),),
+            )?;
+        } else if let Some(reason) = state.reset_reason {
+            pending_future.call_method1(
+                py,
+                &inner.constants.set_exception,
+                (map_reset_reason(py, reason, &inner.constants)?,),
+            )?;
+        } else {
+            // state.end_stream
+            pending_future.call_method1(
+                py,
+                &inner.constants.set_exception,
+                (PyStopAsyncIteration::new_err(()),),
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn take_exception(&self) -> Option<Py<PyAny>> {
         let mut state = self.inner.state.lock().unwrap();
         state.exception.take()
@@ -534,58 +587,6 @@ impl ResponseContent {
         state.pending_future = Some(future.clone().unbind());
 
         Ok(future)
-    }
-
-    /// Called by the event loop when notifying of events from Envoy.
-    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
-        let inner = &self.inner;
-        let mut state = inner.state.lock_py_attached(py).unwrap();
-
-        Self::maybe_copy_trailers_to_py(py, &mut state, inner)?;
-
-        if state.body.is_empty() && !state.end_stream {
-            return Ok(());
-        }
-        let Some(pending_future) = state.pending_future.take() else {
-            return Ok(());
-        };
-        // The application cancelled the read, so the data stays buffered for
-        // the next one.
-        if pending_future
-            .call_method0(py, &inner.constants.done)?
-            .is_truthy(py)?
-        {
-            return Ok(());
-        }
-
-        // Deliver any buffered data before surfacing errors or end of stream, matching the
-        // ordering in `__anext__`. Otherwise a reset arriving alongside a final chunk while a
-        // read is pending would drop the buffered data.
-        if !state.body.is_empty() {
-            let chunk = PyBytes::new(py, &state.body).into_any();
-            state.body.clear();
-            pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
-        } else if let Some(exception) = &state.exception {
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (PyErr::from_value(exception.bind(py).clone()),),
-            )?;
-        } else if let Some(reason) = state.reset_reason {
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (map_reset_reason(py, reason, &inner.constants)?,),
-            )?;
-        } else {
-            // state.end_stream
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (PyStopAsyncIteration::new_err(()),),
-            )?;
-        }
-        Ok(())
     }
 
     #[getter]
@@ -728,9 +729,9 @@ impl RequestContent {
     }
 }
 
-#[pymethods]
 impl RequestContent {
-    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
+    /// Starts forwarding the request body to Envoy, on the event loop thread.
+    pub(crate) fn start_forwarding(&self, py: Python<'_>) -> PyResult<()> {
         if let Some(request_iter) = &self.inner.request_iter {
             let request_content = RequestContentForwarder {
                 stream_handle: self
@@ -762,7 +763,7 @@ impl RequestContent {
     }
 }
 
-#[pyclass]
+/// Holds the reason Envoy reset a request, to fail its response future.
 pub(crate) struct SetResponseFutureException {
     pub(crate) future: Py<PyAny>,
     pub(crate) reason: ResetReason,
@@ -771,9 +772,9 @@ pub(crate) struct SetResponseFutureException {
     pub(crate) constants: Arc<Constants>,
 }
 
-#[pymethods]
 impl SetResponseFutureException {
-    fn __call__(&self, py: Python<'_>) -> PyResult<()> {
+    /// Fails the response future, on the event loop thread.
+    pub(crate) fn run(&self, py: Python<'_>) -> PyResult<()> {
         // The application may have cancelled its wait for the response already.
         if !self
             .future

@@ -158,6 +158,10 @@ pub(crate) struct Constants {
     pub cancelled: Py<PyString>,
     /// The string "done".
     pub done: Py<PyString>,
+    /// The string "eager_start".
+    pub eager_start: Py<PyString>,
+    /// The string "loop".
+    pub loop_: Py<PyString>,
     /// The string "run_coroutine_threadsafe".
     pub run_coroutine_threadsafe: Py<PyString>,
     /// The string "create_task".
@@ -396,6 +400,8 @@ impl Constants {
             cancel: PyString::new(py, "cancel").unbind(),
             cancelled: PyString::new(py, "cancelled").unbind(),
             done: PyString::new(py, "done").unbind(),
+            eager_start: PyString::new(py, "eager_start").unbind(),
+            loop_: PyString::new(py, "loop").unbind(),
             run_coroutine_threadsafe: PyString::new(py, "run_coroutine_threadsafe").unbind(),
             create_task: PyString::new(py, "create_task").unbind(),
             add_done_callback: PyString::new(py, "add_done_callback").unbind(),

@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, atomic::AtomicBool},
-    thread::{self},
-};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::{
     asgi::{
@@ -9,8 +6,7 @@ use crate::{
             ExecutorHandles,
             app::load_app,
             awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
-            eventloop::{EventLoops, LoopKind},
-            get_gil_batch_size,
+            eventloop::{EventLoops, LoopHandle, LoopKind},
             headers::extract_headers_from_event,
             scope::new_scope_dict,
         },
@@ -21,7 +17,7 @@ use crate::{
     },
     eventbridge::EventBridge,
     ondrop::RunOnDrop,
-    types::{ClientDisconnectedError, Constants, Scope, SyncReceiver},
+    types::{ClientDisconnectedError, Constants, Scope},
 };
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
@@ -31,18 +27,6 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyNone, PyString},
 };
-use std::sync::mpsc;
-use std::sync::mpsc::Sender;
-
-struct ExecutorInner {
-    app: Py<PyAny>,
-    asgi: Py<PyDict>,
-    extensions: Py<PyDict>,
-    root_path: Py<PyString>,
-    loops: EventLoops,
-    constants: Arc<Constants>,
-    executor: Executor,
-}
 
 /// An executor of Python code.
 ///
@@ -50,13 +34,22 @@ struct ExecutorInner {
 /// must be held when executing Python code, and we don't want to potentially
 /// block on it from envoy request threads.
 ///
-/// We use two threads, one for the asyncio event loop and one to schedule tasks
-/// on it. The task scheduler does some marshaling of Python dictionaries while
-/// holding the GIL and then schedules execution of the actual tasks on the
-/// asyncio event loop thread.
+/// Envoy threads hand work to the event loop threads without the GIL, and the
+/// event loops run it while attached to the interpreter.
 #[derive(Clone)]
 pub(crate) struct Executor {
-    tx: Sender<Event>,
+    inner: Arc<ExecutorInner>,
+}
+
+struct ExecutorInner {
+    app: Py<PyAny>,
+    asgi: Py<PyDict>,
+    extensions: Py<PyDict>,
+    root_path: Py<PyString>,
+    /// The asyncio.Task class that starts applications eagerly. It is set only
+    /// for asyncio event loops on Python 3.12 or later.
+    eager_task: Option<Py<PyAny>>,
+    loops: EventLoops,
     constants: Arc<Constants>,
 }
 
@@ -79,64 +72,33 @@ impl Executor {
             loop_kind,
         )?;
 
-        let (extensions, root_path) = Python::attach(|py| {
+        let (extensions, root_path, eager_task) = Python::attach(|py| {
             let extensions = PyDict::new(py);
             extensions.set_item("http.response.trailers", PyDict::new(py))?;
             let root_path = PyString::new(py, root_path);
-            Ok::<_, PyErr>((extensions.unbind(), root_path.unbind()))
+            // An eager task runs the application until it first waits, so a
+            // response that needs no I/O completes without another pass through
+            // the event loop.
+            let eager_task = if loop_kind != LoopKind::Trio && py.version_info() >= (3, 12) {
+                Some(py.import("asyncio")?.getattr("Task")?.unbind())
+            } else {
+                None
+            };
+            Ok::<_, PyErr>((extensions.unbind(), root_path.unbind(), eager_task))
         })?;
 
-        let (tx, rx) = mpsc::channel::<Event>();
         let executor = Self {
-            tx,
-            constants: constants.clone(),
+            inner: Arc::new(ExecutorInner {
+                app,
+                asgi,
+                extensions,
+                root_path,
+                eager_task,
+                loops: loops.clone(),
+                constants,
+            }),
         };
-
-        let inner = ExecutorInner {
-            app,
-            asgi,
-            extensions,
-            root_path,
-            loops: loops.clone(),
-            constants,
-            executor: executor.clone(),
-        };
-        let gil_handle = thread::spawn(move || {
-            let rx = SyncReceiver::new(rx);
-            let gil_batch_size = get_gil_batch_size();
-            let mut shutdown = false;
-            if let Err(e) = Python::attach(|py| {
-                while let Ok(event) = py.detach(|| rx.recv()) {
-                    if !inner.handle_event(py, event)? {
-                        shutdown = true;
-                    } else {
-                        // We don't want to be too agressive and starve the event loop but do
-                        // suffer significantly reduced throughput when acquiring the GIL each
-                        // event since the operations are very fast (we just schedule on the
-                        // event loop without actually executing logic). We go ahead and
-                        // process any more events that may be present up to a cap to improve
-                        // throughput while still having a relatively low upper bound on time.
-                        for event in rx.try_iter().take(gil_batch_size) {
-                            if !inner.handle_event(py, event)? {
-                                shutdown = true;
-                                break;
-                            }
-                        }
-                    }
-                    if shutdown {
-                        break;
-                    }
-                }
-
-                Ok::<_, PyErr>(())
-            }) {
-                eprintln!(
-                    "Unexpected Python exception in ASGI executor thread. This likely a bug in pyvoy: {}",
-                    e
-                );
-            }
-        });
-        Ok((executor, ExecutorHandles { loops, gil_handle }))
+        Ok((executor, ExecutorHandles { loops }))
     }
 
     pub(crate) fn execute_app(
@@ -150,44 +112,93 @@ impl Executor {
         transport_bridge: Option<EventBridge<TransportEvent>>,
         scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
-        self.tx
-            .send(Event::ExecuteApp(ExecuteAppEvent {
-                scope,
-                request_closed,
-                trailers_accepted,
-                response_closed,
-                recv_bridge,
-                send_bridge,
-                transport_bridge,
-                scheduler,
-            }))
-            .unwrap();
+        let event = ExecuteAppEvent {
+            scope,
+            request_closed,
+            trailers_accepted,
+            response_closed,
+            recv_bridge,
+            send_bridge,
+            transport_bridge,
+            scheduler,
+        };
+        let executor = self.clone();
+        self.inner
+            .loops
+            .next()
+            .dispatch(Box::new(move |py, handle| {
+                executor.run_app(py, handle, event)
+            }));
     }
 
-    pub(crate) fn handle_recv_future(&self, body: Box<[u8]>, more_body: bool, future: RecvFuture) {
-        self.tx
-            .send(Event::HandleRecvFuture {
-                body,
-                more_body,
-                future,
-            })
-            .unwrap();
+    pub(crate) fn handle_recv_future(
+        &self,
+        body: Box<[u8]>,
+        more_body: bool,
+        mut future: RecvFuture,
+    ) {
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                let event = PyDict::new(py);
+                event.set_item(&constants.typ, &constants.http_request)?;
+                event.set_item(&constants.body, PyBytes::new(py, &body))?;
+                event.set_item(&constants.more_body, more_body)?;
+                future
+                    .future
+                    .call_method1(py, &constants.set_result, (event,))?;
+                Ok(())
+            }));
     }
 
     pub(crate) fn handle_dropped_recv_future(&self, future: LoopFuture) {
-        self.tx
-            .send(Event::HandleDroppedRecvFuture(future))
-            .unwrap();
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                let event = constants.asgi_empty_recv_disconnect.bind(py).copy()?;
+                future
+                    .future
+                    .call_method1(py, &constants.set_result, (event,))?;
+                Ok(())
+            }));
     }
 
-    pub(crate) fn handle_send_future(&self, future: SendFuture) {
-        self.tx.send(Event::HandleSendFuture(future)).unwrap();
+    pub(crate) fn handle_send_future(&self, mut future: SendFuture) {
+        let Some(future) = future.future.take() else {
+            return;
+        };
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                future
+                    .future
+                    .call_method1(py, &constants.set_result, (PyNone::get(py),))?;
+                Ok(())
+            }));
     }
 
     pub(crate) fn handle_dropped_send_future(&self, future: LoopFuture) {
-        self.tx
-            .send(Event::HandleDroppedSendFuture(future))
-            .unwrap();
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&future.loop_)
+            .dispatch(Box::new(move |py, _| {
+                future.future.call_method1(
+                    py,
+                    &constants.set_exception,
+                    (&constants.client_disconnected_err,),
+                )?;
+                Ok(())
+            }));
     }
 
     pub(crate) fn handle_transport_received_response_headers(
@@ -199,20 +210,17 @@ impl Executor {
         request_content: Option<RequestContent>,
         end_stream: bool,
     ) {
-        let stream_start_executor = ReceivedResponseHeadersExecutor::new(
+        let handle = self.inner.loops.find(&response_content.inner.loop_);
+        let executor = ReceivedResponseHeadersExecutor::new(
             status,
             response_headers,
             response_future,
             response_content,
             request_content,
             end_stream,
-            self.constants.clone(),
+            self.inner.constants.clone(),
         );
-        self.tx
-            .send(Event::HandleTransportReceivedResponseHeaders(
-                stream_start_executor,
-            ))
-            .unwrap();
+        handle.dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
     pub(crate) fn set_response_future_exception(
@@ -222,183 +230,50 @@ impl Executor {
         response_content: ResponseContent,
         request_content: Option<RequestContent>,
     ) {
-        self.tx
-            .send(Event::SetResponseFutureException(
-                future,
-                reason,
-                response_content,
-                request_content,
-            ))
-            .unwrap();
+        let constants = self.inner.constants.clone();
+        self.inner
+            .loops
+            .find(&response_content.inner.loop_)
+            .dispatch(Box::new(move |py, _| {
+                SetResponseFutureException {
+                    future,
+                    reason,
+                    exception: response_content.take_exception(),
+                    request_content,
+                    constants,
+                }
+                .run(py)
+            }));
     }
 
     pub(crate) fn notify_request(&self, request_content: RequestContent) {
-        self.tx.send(Event::NotifyRequest(request_content)).unwrap();
+        self.inner
+            .loops
+            .find(&request_content.inner.loop_)
+            .dispatch(Box::new(move |py, _| request_content.start_forwarding(py)));
     }
 
     pub(crate) fn notify_response(&self, response_content: ResponseContent) {
-        self.tx
-            .send(Event::NotifyResponse(response_content))
-            .unwrap();
+        self.inner
+            .loops
+            .find(&response_content.inner.loop_)
+            .dispatch(Box::new(move |py, _| response_content.notify(py)));
     }
 
+    /// Stops the event loops, executing shutdown lifespan if needed.
     pub(crate) fn shutdown(&self) {
-        self.tx.send(Event::Shutdown).unwrap();
-    }
-}
-
-impl ExecutorInner {
-    fn handle_event<'py>(&self, py: Python<'py>, event: Event) -> PyResult<bool> {
-        match event {
-            Event::ExecuteApp(event) => {
-                let (loop_, state) = self.loops.get(py);
-                let app_executor = AppExecutor {
-                    loop_: loop_.clone().unbind(),
-                    state: state.map(|s| s.unbind()),
-                    app: self.app.clone_ref(py),
-                    asgi: self.asgi.clone_ref(py),
-                    extensions: self.extensions.clone_ref(py),
-                    root_path: self.root_path.clone_ref(py),
-                    event: Some(event),
-                    constants: self.constants.clone(),
-                    executor: self.executor.clone(),
-                };
-                loop_.call_method1(&self.constants.call_soon_threadsafe, (app_executor,))?;
+        Python::attach(|py| {
+            if let Err(e) = self.inner.loops.stop(py) {
+                eprintln!(
+                    "Unexpected Python exception stopping ASGI event loops. This likely a bug in pyvoy: {}",
+                    e
+                );
             }
-            Event::HandleRecvFuture {
-                body,
-                more_body,
-                mut future,
-            } => {
-                if let Some(future) = future.future.take() {
-                    let recv_future_executor = RecvFutureExecutor {
-                        body,
-                        more_body,
-                        future: future.future,
-                        constants: self.constants.clone(),
-                    };
-                    future.loop_.call_method1(
-                        py,
-                        &self.constants.call_soon_threadsafe,
-                        (recv_future_executor,),
-                    )?;
-                }
-            }
-            Event::HandleDroppedRecvFuture(future) => {
-                let dropped_recv_future_executor = DroppedRecvFutureExecutor {
-                    future: future.future,
-                    constants: self.constants.clone(),
-                };
-                future.loop_.call_method1(
-                    py,
-                    &self.constants.call_soon_threadsafe,
-                    (dropped_recv_future_executor,),
-                )?;
-            }
-            // No real logic in handling send or canceled futures so we don't bother with
-            // running on the event loop.
-            Event::HandleSendFuture(future) => {
-                self.handle_send_future(py, future)?;
-            }
-            Event::HandleDroppedSendFuture(future) => {
-                self.handle_dropped_send_future(py, future)?;
-            }
-            Event::HandleTransportReceivedResponseHeaders(executor) => {
-                let loop_ = executor.response_content.inner.loop_.bind(py).clone();
-                loop_.call_method1(
-                    &self.constants.call_soon_threadsafe,
-                    (executor.into_py_any(py)?,),
-                )?;
-            }
-            Event::SetResponseFutureException(
-                future,
-                reason,
-                response_content,
-                request_content,
-            ) => {
-                let loop_ = response_content.inner.loop_.bind(py).clone();
-                loop_.call_method1(
-                    &self.constants.call_soon_threadsafe,
-                    (SetResponseFutureException {
-                        future,
-                        reason,
-                        exception: response_content.take_exception(),
-                        request_content,
-                        constants: self.constants.clone(),
-                    },),
-                )?;
-            }
-            Event::NotifyRequest(content) => {
-                let loop_ = content.inner.loop_.bind(py).clone();
-                loop_.call_method1(
-                    &self.constants.call_soon_threadsafe,
-                    (content.into_py_any(py)?,),
-                )?;
-            }
-            Event::NotifyResponse(content) => {
-                let loop_ = content.inner.loop_.bind(py).clone();
-                loop_.call_method1(
-                    &self.constants.call_soon_threadsafe,
-                    (content.into_py_any(py)?,),
-                )?;
-            }
-            Event::Shutdown => {
-                self.shutdown(py)?;
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        });
     }
 
-    fn handle_send_future<'py>(&self, py: Python<'py>, mut future: SendFuture) -> PyResult<()> {
-        let f = match future.future.take() {
-            Some(f) => f,
-            None => {
-                return Ok(());
-            }
-        };
-        let set_result = f.future.getattr(py, &self.constants.set_result)?;
-        f.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_result, PyNone::get(py)),
-        )?;
-        Ok(())
-    }
-
-    fn handle_dropped_send_future<'py>(&self, py: Python<'py>, future: LoopFuture) -> PyResult<()> {
-        let set_exception = future.future.getattr(py, &self.constants.set_exception)?;
-        future.loop_.call_method1(
-            py,
-            &self.constants.call_soon_threadsafe,
-            (set_exception, &self.constants.client_disconnected_err),
-        )?;
-        Ok(())
-    }
-
-    fn shutdown<'py>(&self, py: Python<'py>) -> PyResult<()> {
-        self.loops.stop(py)?;
-        Ok(())
-    }
-}
-
-/// The callable scheduled on the event loop to execute the ASGI application.
-#[pyclass(module = "_pyvoy.asgi")]
-struct AppExecutor {
-    loop_: Py<PyAny>,
-    state: Option<Py<PyDict>>,
-    app: Py<PyAny>,
-    asgi: Py<PyDict>,
-    extensions: Py<PyDict>,
-    root_path: Py<PyString>,
-    event: Option<ExecuteAppEvent>,
-    constants: Arc<Constants>,
-    executor: Executor,
-}
-
-#[pymethods]
-impl AppExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
+    /// Executes the ASGI application on the event loop thread.
+    fn run_app(&self, py: Python<'_>, handle: &LoopHandle, event: ExecuteAppEvent) -> PyResult<()> {
         let ExecuteAppEvent {
             scope,
             request_closed,
@@ -408,19 +283,21 @@ impl AppExecutor {
             send_bridge,
             transport_bridge,
             scheduler,
-        } = self.event.take().unwrap();
+        } = event;
+        let inner = self.inner.as_ref();
+        let constants = &inner.constants;
 
-        let loop_ = self.loop_.bind(py);
+        let loop_ = handle.loop_.bind(py);
 
         let scope_dict = new_scope_dict(
             py,
             scope,
-            &self.constants.http,
-            &self.asgi,
-            &self.extensions,
-            Some(&self.root_path),
-            &self.state,
-            &self.constants,
+            &constants.http,
+            &inner.asgi,
+            &inner.extensions,
+            Some(&inner.root_path),
+            handle.state(),
+            constants,
         )?;
 
         let scheduler = Arc::new(scheduler);
@@ -428,7 +305,7 @@ impl AppExecutor {
         let recv = if request_closed {
             EmptyRecvCallable {
                 response_closed,
-                constants: self.constants.clone(),
+                constants: constants.clone(),
             }
             .into_bound_py_any(py)?
         } else {
@@ -436,13 +313,13 @@ impl AppExecutor {
                 recv_bridge,
                 scheduler: scheduler.clone(),
                 loop_: loop_.clone().unbind(),
-                executor: self.executor.clone(),
-                constants: self.constants.clone(),
+                executor: self.clone(),
+                constants: constants.clone(),
             }
             .into_bound_py_any(py)?
         };
 
-        let coro = self.app.bind(py).call1((
+        let coro = inner.app.bind(py).call1((
             scope_dict,
             recv,
             SendCallable {
@@ -453,12 +330,12 @@ impl AppExecutor {
                 send_bridge: send_bridge.clone(),
                 scheduler: scheduler.clone(),
                 loop_: loop_.clone().unbind(),
-                executor: self.executor.clone(),
-                constants: self.constants.clone(),
+                executor: self.clone(),
+                constants: constants.clone(),
             },
         ))?;
 
-        let future = {
+        let task = {
             // The task copies the current context, so the bridge only needs to be
             // set while creating it. Without an HTTP client, we skip touching the
             // context entirely.
@@ -470,70 +347,39 @@ impl AppExecutor {
                         scheduler.clone(),
                     )
                     .into_py_any(py)?;
-                    let token = self
-                        .constants
+                    let token = constants
                         .transport_bridge_contextvar_set
                         .call1(py, (transport_bridge,))?;
                     Some(RunOnDrop(
-                        self.constants
-                            .transport_bridge_contextvar_reset
-                            .bind(py)
-                            .clone(),
+                        constants.transport_bridge_contextvar_reset.bind(py).clone(),
                         Some((token,)),
                     ))
                 }
                 None => None,
             };
-            loop_.call_method1(&self.constants.create_task, (coro,))?
+            match &inner.eager_task {
+                Some(eager_task) => {
+                    let kwargs = PyDict::new(py);
+                    kwargs.set_item(&constants.loop_, loop_)?;
+                    kwargs.set_item(&constants.eager_start, true)?;
+                    eager_task.bind(py).call((coro,), Some(&kwargs))?
+                }
+                None => loop_.call_method1(&constants.create_task, (coro,))?,
+            }
         };
-        future.call_method1(
-            &self.constants.add_done_callback,
-            (AppFutureHandler {
-                send_bridge,
-                scheduler,
-                constants: self.constants.clone(),
-            },),
-        )?;
+        let mut handler = AppFutureHandler {
+            send_bridge,
+            scheduler,
+            constants: constants.clone(),
+        };
+        // An eager task that already completed would only run the callback on
+        // the next pass through the event loop.
+        if inner.eager_task.is_some() && task.call_method0(&constants.done)?.is_truthy()? {
+            handler.__call__(py, task)?;
+        } else {
+            task.call_method1(&constants.add_done_callback, (handler,))?;
+        }
 
-        Ok(())
-    }
-}
-
-/// The callable scheduled on the event loop to handle a receive future.
-#[pyclass(module = "_pyvoy.asgi")]
-struct RecvFutureExecutor {
-    body: Box<[u8]>,
-    more_body: bool,
-    future: Py<PyAny>,
-    constants: Arc<Constants>,
-}
-
-#[pymethods]
-impl RecvFutureExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
-        let event = PyDict::new(py);
-        event.set_item(&self.constants.typ, &self.constants.http_request)?;
-        event.set_item(&self.constants.body, PyBytes::new(py, &self.body))?;
-        event.set_item(&self.constants.more_body, self.more_body)?;
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
-        Ok(())
-    }
-}
-
-/// The callable scheduled on the event loop to handle a dropped receive future.
-#[pyclass(module = "_pyvoy.asgi")]
-struct DroppedRecvFutureExecutor {
-    future: Py<PyAny>,
-    constants: Arc<Constants>,
-}
-
-#[pymethods]
-impl DroppedRecvFutureExecutor {
-    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<()> {
-        let event = self.constants.asgi_empty_recv_disconnect.bind(py).copy()?;
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
         Ok(())
     }
 }
@@ -547,28 +393,6 @@ struct ExecuteAppEvent {
     send_bridge: EventBridge<SendEvent>,
     transport_bridge: Option<EventBridge<TransportEvent>>,
     scheduler: Box<dyn EnvoyHttpFilterScheduler>,
-}
-
-enum Event {
-    ExecuteApp(ExecuteAppEvent),
-    HandleRecvFuture {
-        body: Box<[u8]>,
-        more_body: bool,
-        future: RecvFuture,
-    },
-    HandleDroppedRecvFuture(LoopFuture),
-    HandleSendFuture(SendFuture),
-    HandleDroppedSendFuture(LoopFuture),
-    HandleTransportReceivedResponseHeaders(ReceivedResponseHeadersExecutor),
-    SetResponseFutureException(
-        Py<PyAny>,
-        ResetReason,
-        ResponseContent,
-        Option<RequestContent>,
-    ),
-    NotifyRequest(RequestContent),
-    NotifyResponse(ResponseContent),
-    Shutdown,
 }
 
 /// The receive callable we pass to the application.
