@@ -19,22 +19,9 @@ if TYPE_CHECKING:
     from pyvoy import Loop
 
 
-def _pyqwest_supports_uds() -> bool:
-    try:
-        HTTPTransport(uds="pyvoy.sock")
-    except TypeError:
-        return False
-    return True
-
-
-pytestmark = [
-    pytest.mark.skipif(
-        sys.platform == "win32", reason="pyqwest only supports Unix sockets on Unix"
-    ),
-    pytest.mark.skipif(
-        not _pyqwest_supports_uds(), reason="pyqwest does not support Unix sockets"
-    ),
-]
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="pyqwest only supports Unix sockets on Unix"
+)
 
 
 @pytest.fixture(scope="module")
