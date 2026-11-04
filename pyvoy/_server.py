@@ -438,7 +438,7 @@ class PyvoyServer:
             self._admin_address = None
             started = False
             try:
-                for _ in range(100):
+                for _ in range(600):
                     if self._process.returncode is not None:
                         msg = "Envoy server failed to start."
                         raise StartupError(msg)  # noqa: TRY301
