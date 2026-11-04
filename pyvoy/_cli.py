@@ -7,7 +7,7 @@ import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pathlib import Path
-from typing import cast, get_args
+from typing import Literal, cast, get_args
 
 import yaml
 from envoy import get_envoy_path
@@ -50,6 +50,7 @@ class CLIArgs:
     upstream: list[str]
     log_level: LogLevel
     worker_threads: int
+    io_threads: int | Literal["auto"]
     lifespan: bool | None
     loop: Loop | None
     websockets: bool
@@ -77,6 +78,12 @@ def _positive_int(value: str) -> int:
 
 def _non_negative_int(value: str) -> int:
     return _bounded_int(value, minimum=0)
+
+
+def _io_threads(value: str) -> int | Literal["auto"]:
+    if value == "auto":
+        return "auto"
+    return _positive_int(value)
 
 
 def _content_encodings(value: str) -> list[ContentEncoding]:
@@ -213,6 +220,14 @@ async def amain() -> None:
         help="positive number of worker threads to use (default: 1 for ASGI, 200 for WSGI)",
         type=_positive_int,
         default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "--io-threads",
+        help="positive number of threads handling connections and HTTP in Envoy, "
+        "or 'auto' for one per available CPU core (default: auto)",
+        type=_io_threads,
+        default="auto",
     )
 
     parser.add_argument(
@@ -401,6 +416,7 @@ async def amain() -> None:
         root_path=args.root_path,
         log_level=args.log_level,
         worker_threads=getattr(args, "worker_threads", None),
+        io_threads=args.io_threads,
         lifespan=args.lifespan,
         loop=args.loop,
         websockets=args.websockets,

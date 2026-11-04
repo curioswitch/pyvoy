@@ -25,15 +25,20 @@ that acquires the GIL. We will see how this looks for ASGI and WSGI.
 ASGI applications use `asyncio` to run on a Python event loop. At first glance, this sounds perfect,
 and we will just schedule callbacks from Envoy request threads onto the event loop which would run
 with the GIL. However, this does not work because event loops can only have callbacks scheduled
-from threads that have the GIL, which we cannot acquire on an Envoy request thread. Thus, we have
-an additional helper thread, the GIL thread, that has just one purpose - scheduling callbacks on
-the Python event loop while taking the GIL. This thread detaches the GIL to listen on a Rust channel
-for request information from the Envoy thread, blocking until receiving one, and then attaches the GIL
-and uses `call_soon_threadsafe` to schedule actual logic on the event loop. Because acquiring the GIL
-is not trivial, while the logic of just scheduling a callback is, we have an optimization to optimistically
-read a limited number of events in a non-blocking way while holding the GIL. This increases throughput
-while the limit ensures there is no significant impact on latency. We have to make sure we don't
-overdo it since the event loop could never run if we never release the GIL from this thread.
+from threads that have the GIL, which we cannot acquire on an Envoy request thread. Instead, each
+event loop has a queue that Envoy request threads add work to without the GIL, such as starting the
+application for a new request or completing a future. When the queue goes from empty to having work,
+the Envoy thread writes a byte to a socket that the event loop watches with `add_reader`, and the
+event loop runs the queued work while holding the GIL. A burst of requests only wakes the event loop
+once. To keep a large burst from holding up the rest of the event loop, such as requests that are
+already running, one wakeup runs at most 40 queued items and schedules the rest for the next pass
+through the event loop. The `PYVOY_ASYNC_TASK_BATCH_SIZE` environment variable changes this limit.
+On Windows, the socket pair is connected over loopback. trio and the default asyncio
+event loop on Windows cannot watch the socket, so for them a helper thread attaches the GIL when woken
+and schedules the queued work with `call_soon_threadsafe`.
+
+On Python 3.12 and later, applications start as eager tasks, which run until they first wait. A
+response that needs no I/O completes without another pass through the event loop.
 
 Because the Python event loop also cannot block, it needs to be notified of I/O such as request data
 or completion of response data, via `asyncio.Future`. For any invocation of `send` and `receive`, we
@@ -52,8 +57,9 @@ Unlike ASGI, the Python execution under WSGI blocks on I/O. This simplifies the 
 compared to ASGI - because of blocking, it is not enough to have a single Python thread, and we need
 to have at least as many as the expected concurrency of the server - we default to 200 to match
 the Java server Tomcat, but this is a user-workload driven parameter. These threads can directly
-block on channels to receive events from the Envoy threads, meaning there is no additional GIL
-thread. When issuing I/O such as receiving or sending payload, the I/O event is passed to Envoy
+block on a queue to receive requests from the Envoy threads, meaning there is no additional GIL
+thread. A request wakes the most recently idle thread, since waking it is much cheaper than waking
+one that has been idle longer, and it keeps work on only as many threads as are needed. When issuing I/O such as receiving or sending payload, the I/O event is passed to Envoy
 and the thread blocks to receive the reply. If the client disconnects, the channel receives will
 fail with an error which we use to terminate execution of the WSGI application, closing the
 response generator if needed.

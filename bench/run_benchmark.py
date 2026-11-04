@@ -105,9 +105,9 @@ WSGI_APP = "tests.apps.wsgi.kitchensink:app"
 
 PYVOY = AppServer(
     "pyvoy",
-    ["pyvoy"],
+    ["pyvoy", "--io-threads", "1"],
     [ASGI_APP],
-    ["--worker-threads", "8"],
+    ["--worker-threads", "8", "--io-threads", "auto"],
     ["--interface", "wsgi", WSGI_APP],
     ("--tls-key", "--tls-cert"),
 )
@@ -133,6 +133,16 @@ GUNICORN = AppServer(
     None,
     [],
     [WSGI_APP],
+    ("--keyfile", "--certfile"),
+)
+# h2corn runs two runtime threads by default. The bench uses one so it matches
+# the single thread that granian, pyvoy and uvicorn handle connections on.
+H2CORN = AppServer(
+    "h2corn",
+    ["h2corn", "--no-access-log", "--loop", "uvloop", "--runtime-threads", "1"],
+    [ASGI_APP],
+    ["--loop-threads", "8"],
+    None,
     ("--keyfile", "--certfile"),
 )
 UVICORN = AppServer(
@@ -263,12 +273,14 @@ def app_servers(server_arg: str | None) -> tuple[AppServer, ...]:
             return (GRANIAN,)
         case "gunicorn":
             return (GUNICORN,)
+        case "h2corn":
+            return (H2CORN,)
         case "hypercorn":
             return (HYPERCORN,)
         case "uvicorn":
             return (UVICORN,)
         case _:
-            return (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN)
+            return (PYVOY, GRANIAN, GUNICORN, H2CORN, HYPERCORN, UVICORN)
 
 
 def protocols(protocol_arg: str | None) -> tuple[Protocol, ...]:
@@ -344,9 +356,19 @@ def static_configs(static_dir: Path) -> tuple[StaticConfig, ...]:
     return (
         StaticConfig(
             "pyvoy-static",
-            ["pyvoy", noop_app, "--static-mount", f"/static={static_dir}"],
+            [
+                "pyvoy",
+                "--io-threads",
+                "1",
+                noop_app,
+                "--static-mount",
+                f"/static={static_dir}",
+            ],
         ),
-        StaticConfig("pyvoy-starlette", ["pyvoy", "--interface", "asgi", static_app]),
+        StaticConfig(
+            "pyvoy-starlette",
+            ["pyvoy", "--io-threads", "1", "--interface", "asgi", static_app],
+        ),
         StaticConfig(
             "granian-static",
             [
@@ -463,10 +485,12 @@ def compression_configs() -> tuple[CompressionConfig, ...]:
     plain_app = "bench.compression_app:plain"
     return (
         CompressionConfig(
-            "pyvoy-native", ["pyvoy", plain_app, "--content-encodings", "gzip"]
+            "pyvoy-native",
+            ["pyvoy", "--io-threads", "1", plain_app, "--content-encodings", "gzip"],
         ),
         CompressionConfig(
-            "pyvoy-starlette", ["pyvoy", "--interface", "asgi", gzip_app]
+            "pyvoy-starlette",
+            ["pyvoy", "--io-threads", "1", "--interface", "asgi", gzip_app],
         ),
         CompressionConfig(
             "granian-starlette", ["granian", "--interface", "asgi", gzip_app]
@@ -693,7 +717,7 @@ def main() -> None:
                         raise RuntimeError(msg)
 
                     pid = server.pid
-                    if app_server in (GRANIAN, HYPERCORN, PYVOY):
+                    if app_server in (GRANIAN, H2CORN, HYPERCORN, PYVOY):
                         # find the worker process
                         parent = psutil.Process(server.pid)
                         children = parent.children()
