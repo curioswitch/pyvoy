@@ -65,9 +65,13 @@ impl LoopKind {
     /// Returns whether the event loop can watch a socket with `add_reader`,
     /// which lets Envoy threads wake it without the GIL.
     fn watches_sockets(self) -> bool {
-        // trio has no add_reader, and the default asyncio event loop on Windows
-        // does not support it.
-        cfg!(unix) && self != Self::Trio
+        match self {
+            // trio has no add_reader.
+            Self::Trio => false,
+            // The default asyncio event loop on Windows does not support add_reader.
+            Self::Asyncio => cfg!(unix),
+            Self::Uvloop | Self::Winloop | Self::Zuvloop => true,
+        }
     }
 }
 
@@ -95,8 +99,7 @@ struct LoopQueue {
 /// Describes how Envoy threads wake an event loop that has tasks to run.
 enum Waker {
     /// The event loop watches this socket with `add_reader`.
-    #[cfg(unix)]
-    Socket(std::os::unix::net::UnixStream),
+    Socket(WakerSocket),
     /// A thread attaches to the interpreter and schedules draining with
     /// `call_soon_threadsafe`. Event loops that cannot watch a socket use it.
     Thread(mpsc::Sender<WakerMessage>),
@@ -128,7 +131,6 @@ impl LoopHandle {
             return;
         }
         match &self.waker {
-            #[cfg(unix)]
             Waker::Socket(writer) => {
                 use std::io::Write as _;
                 // A full socket buffer means a wakeup is already pending, so the
@@ -147,8 +149,7 @@ impl LoopHandle {
 #[pyclass(module = "_pyvoy.asgi")]
 struct LoopDrainer {
     handle: Arc<LoopHandle>,
-    #[cfg(unix)]
-    reader: Option<std::os::unix::net::UnixStream>,
+    reader: Option<WakerSocket>,
 }
 
 #[pymethods]
@@ -156,7 +157,6 @@ impl LoopDrainer {
     fn __call__(&self, py: Python<'_>) {
         // Clear the wakeup before taking the tasks, so a task dispatched in
         // between wakes the loop again rather than being missed.
-        #[cfg(unix)]
         if let Some(reader) = &self.reader {
             use std::io::Read as _;
             let mut buf = [0u8; 64];
@@ -363,18 +363,14 @@ impl EventLoop {
 
                 let asyncio = py.import("asyncio")?;
                 asyncio.call_method1("set_event_loop", (&loop_,))?;
-                #[cfg(unix)]
                 if let Some(reader) = reader {
-                    use std::os::fd::AsRawFd as _;
-                    let fd = reader.as_raw_fd();
+                    let fd = socket_fd(&reader);
                     let drainer = LoopDrainer {
                         handle: handle.clone(),
                         reader: Some(reader),
                     };
                     loop_.call_method1("add_reader", (fd, drainer))?;
                 }
-                #[cfg(not(unix))]
-                let _ = reader;
                 tx.send(handle).unwrap();
                 drop(tx);
                 loop_.call_method0("run_forever")?;
@@ -445,11 +441,44 @@ impl EventLoop {
     }
 }
 
-/// The event loop watches this reader end of the waker socket.
+/// Envoy threads write to one end of a pair of these sockets to wake the event
+/// loop, which watches the other end.
 #[cfg(unix)]
-type WakerReader = std::os::unix::net::UnixStream;
-#[cfg(not(unix))]
-type WakerReader = ();
+type WakerSocket = std::os::unix::net::UnixStream;
+/// Envoy threads write to one end of a pair of these sockets to wake the event
+/// loop, which watches the other end. The standard library has no Unix domain
+/// sockets on Windows, so the pair is connected over loopback.
+#[cfg(windows)]
+type WakerSocket = std::net::TcpStream;
+
+#[cfg(unix)]
+fn socket_pair() -> std::io::Result<(WakerSocket, WakerSocket)> {
+    std::os::unix::net::UnixStream::pair()
+}
+
+#[cfg(windows)]
+fn socket_pair() -> std::io::Result<(WakerSocket, WakerSocket)> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    let writer = std::net::TcpStream::connect(listener.local_addr()?)?;
+    let (reader, _) = listener.accept()?;
+    // Each wakeup is a single byte that must be sent right away.
+    writer.set_nodelay(true)?;
+    Ok((reader, writer))
+}
+
+/// Returns the descriptor of a socket to pass to `add_reader`.
+#[cfg(unix)]
+fn socket_fd(socket: &WakerSocket) -> i64 {
+    use std::os::fd::AsRawFd as _;
+    i64::from(socket.as_raw_fd())
+}
+
+/// Returns the handle of a socket to pass to `add_reader`.
+#[cfg(windows)]
+fn socket_fd(socket: &WakerSocket) -> u64 {
+    use std::os::windows::io::AsRawSocket as _;
+    socket.as_raw_socket()
+}
 
 /// Creates the waker for an event loop of the given kind. It also returns the
 /// socket reader for the event loop to watch, or the receiver for a waker
@@ -458,23 +487,20 @@ fn new_waker(
     loop_kind: LoopKind,
 ) -> PyResult<(
     Waker,
-    Option<WakerReader>,
+    Option<WakerSocket>,
     Option<mpsc::Receiver<WakerMessage>>,
 )> {
     if loop_kind.watches_sockets() {
-        #[cfg(unix)]
-        {
-            let (reader, writer) = std::os::unix::net::UnixStream::pair()
-                .and_then(|(reader, writer)| {
-                    reader.set_nonblocking(true)?;
-                    writer.set_nonblocking(true)?;
-                    Ok((reader, writer))
-                })
-                .map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to create event loop waker: {}", e))
-                })?;
-            return Ok((Waker::Socket(writer), Some(reader), None));
-        }
+        let (reader, writer) = socket_pair()
+            .and_then(|(reader, writer)| {
+                reader.set_nonblocking(true)?;
+                writer.set_nonblocking(true)?;
+                Ok((reader, writer))
+            })
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to create event loop waker: {}", e))
+            })?;
+        return Ok((Waker::Socket(writer), Some(reader), None));
     }
     let (tx, rx) = mpsc::channel();
     Ok((Waker::Thread(tx), None, Some(rx)))
@@ -492,7 +518,6 @@ fn spawn_waker_thread(
         py,
         LoopDrainer {
             handle: handle.clone(),
-            #[cfg(unix)]
             reader: None,
         },
     )?;
