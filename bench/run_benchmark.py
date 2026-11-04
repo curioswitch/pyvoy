@@ -135,6 +135,16 @@ GUNICORN = AppServer(
     [WSGI_APP],
     ("--keyfile", "--certfile"),
 )
+# h2corn runs two runtime threads by default. The bench uses one so it matches
+# the single thread that granian, pyvoy and uvicorn handle connections on.
+H2CORN = AppServer(
+    "h2corn",
+    ["h2corn", "--no-access-log", "--loop", "uvloop", "--runtime-threads", "1"],
+    [ASGI_APP],
+    ["--loop-threads", "8"],
+    None,
+    ("--keyfile", "--certfile"),
+)
 UVICORN = AppServer(
     "uvicorn",
     ["uvicorn", "--no-access-log", "--loop", "uvloop"],
@@ -263,12 +273,14 @@ def app_servers(server_arg: str | None) -> tuple[AppServer, ...]:
             return (GRANIAN,)
         case "gunicorn":
             return (GUNICORN,)
+        case "h2corn":
+            return (H2CORN,)
         case "hypercorn":
             return (HYPERCORN,)
         case "uvicorn":
             return (UVICORN,)
         case _:
-            return (PYVOY, GRANIAN, GUNICORN, HYPERCORN, UVICORN)
+            return (PYVOY, GRANIAN, GUNICORN, H2CORN, HYPERCORN, UVICORN)
 
 
 def protocols(protocol_arg: str | None) -> tuple[Protocol, ...]:
@@ -705,7 +717,7 @@ def main() -> None:
                         raise RuntimeError(msg)
 
                     pid = server.pid
-                    if app_server in (GRANIAN, HYPERCORN, PYVOY):
+                    if app_server in (GRANIAN, H2CORN, HYPERCORN, PYVOY):
                         # find the worker process
                         parent = psutil.Process(server.pid)
                         children = parent.children()
