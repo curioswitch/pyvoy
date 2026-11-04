@@ -12,6 +12,8 @@ pyvoy for even further customization.
 - `--root-path` - The root path the application is mounted on if behind a reverse proxy.
 - `--worker-threads` - The positive number of Python threads to serve requests with. When using ASGI, this should generally
   be kept at 1 unless using free-threaded Python. **Default**: 1 for ASGI, 200 for WSGI.
+- `--io-threads` - The positive number of threads handling connections and HTTP in Envoy, passed to Envoy as
+  `--concurrency`, or `auto` for one per available CPU core. **Default**: _auto_.
 - `--[no-]lifespan` - Whether to require or disable ASGI lifespan support. By default, we try to run the application
   with lifespan and ignore any exception that is raised. If enabled explicitly, an exception will cause the server to
   fail to start. If disabled, lifespan will not be run at all.

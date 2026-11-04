@@ -267,11 +267,38 @@ def test_otel_flag(
 
 
 @pytest.mark.parametrize(
+    ("args", "expected"),
+    [([], "auto"), (["--io-threads", "1"], 1), (["--io-threads", "auto"], "auto")],
+)
+def test_io_threads_flag(
+    args: list[str], expected: int | str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys, "argv", ["pyvoy", "primary.app", *args, "--print-envoy-config"]
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._io_threads == expected
+
+
+@pytest.mark.parametrize(
     ("flag", "value", "minimum"),
     [
         ("--worker-threads", "0", 1),
         ("--worker-threads", "-1", 1),
         ("--worker-threads", str(sys.maxsize + 1), 1),
+        ("--io-threads", "0", 1),
+        ("--io-threads", str(sys.maxsize + 1), 1),
         ("--websockets-max-message-size", "-1", 0),
         ("--websockets-max-message-size", str(sys.maxsize + 1), 0),
     ],
