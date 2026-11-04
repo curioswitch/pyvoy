@@ -1,10 +1,11 @@
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex, OnceLock, atomic::AtomicU64, mpsc},
     thread::{self, JoinHandle},
 };
 
 use pyo3::{
-    Bound, Py, PyAny, PyErr, PyResult, Python,
+    Bound, Py, PyAny, PyErr, PyRef, PyResult, Python,
     exceptions::PyRuntimeError,
     pyclass, pymethods,
     sync::PyOnceLock,
@@ -88,11 +89,16 @@ pub(crate) struct LoopHandle {
     eager_task_kwargs: PyOnceLock<Py<PyDict>>,
     queue: Mutex<LoopQueue>,
     waker: Waker,
+    /// Limits how many tasks one drain runs before the loop runs its other
+    /// callbacks.
+    batch_size: usize,
+    /// Schedules a callback on the loop from its own thread.
+    call_soon: Py<PyAny>,
 }
 
 #[derive(Default)]
 struct LoopQueue {
-    tasks: Vec<LoopTask>,
+    tasks: VecDeque<LoopTask>,
     /// Is set when the loop has been woken and has not drained its tasks yet,
     /// so tasks dispatched together wake it only once.
     wake_pending: bool,
@@ -140,7 +146,7 @@ impl LoopHandle {
     pub(crate) fn dispatch(&self, task: LoopTask) {
         let wake = {
             let mut queue = self.queue.lock().unwrap();
-            queue.tasks.push(task);
+            queue.tasks.push_back(task);
             !std::mem::replace(&mut queue.wake_pending, true)
         };
         if !wake {
@@ -170,10 +176,10 @@ struct LoopDrainer {
 
 #[pymethods]
 impl LoopDrainer {
-    fn __call__(&self, py: Python<'_>) {
+    fn __call__(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<()> {
         // Clear the wakeup before taking the tasks, so a task dispatched in
         // between wakes the loop again rather than being missed.
-        if let Some(reader) = &self.reader {
+        if let Some(reader) = &slf.reader {
             use std::io::Read as _;
             let mut buf = [0u8; 64];
             while let Ok(n) = (&*reader).read(&mut buf) {
@@ -182,17 +188,46 @@ impl LoopDrainer {
                 }
             }
         }
-        let tasks = {
-            let mut queue = self.handle.queue.lock().unwrap();
-            queue.wake_pending = false;
-            std::mem::take(&mut queue.tasks)
+        let handle = slf.handle.clone();
+        let (tasks, more) = {
+            let mut queue = handle.queue.lock().unwrap();
+            let count = queue.tasks.len().min(handle.batch_size);
+            let tasks: Vec<LoopTask> = queue.tasks.drain(..count).collect();
+            let more = !queue.tasks.is_empty();
+            // The loop stays marked as woken while tasks remain, so producers do
+            // not wake it again for tasks that the next drain runs.
+            if !more {
+                queue.wake_pending = false;
+            }
+            (tasks, more)
         };
+        if more {
+            // Running the remaining tasks on a later pass lets the loop run its
+            // other callbacks in between, such as resuming requests that
+            // already started.
+            handle.call_soon.call1(py, (Py::from(slf),))?;
+        }
         for task in tasks {
-            if let Err(e) = task(py, &self.handle) {
-                report_task_error(py, &self.handle, e);
+            if let Err(e) = task(py, &handle) {
+                report_task_error(py, &handle, e);
             }
         }
+        Ok(())
     }
+}
+
+/// Sets how many tasks one drain runs when `PYVOY_ASYNC_TASK_BATCH_SIZE` is not
+/// set.
+const DEFAULT_ASYNC_TASK_BATCH_SIZE: usize = 40;
+
+/// Returns how many tasks one drain runs. `PYVOY_ASYNC_TASK_BATCH_SIZE` overrides
+/// the default when it is set to a positive integer.
+fn async_task_batch_size() -> usize {
+    std::env::var("PYVOY_ASYNC_TASK_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_ASYNC_TASK_BATCH_SIZE)
 }
 
 /// Reports an exception from a task as the event loop reports one from a
@@ -357,17 +392,27 @@ impl EventLoop {
             .getattr("new_event_loop")?
             .unbind();
         let (waker, reader, waker_rx) = new_waker(loop_kind)?;
+        let batch_size = async_task_batch_size();
         let (tx, rx) = mpsc::channel();
         let rx = SyncReceiver::new(rx);
         let loop_thread = thread::spawn(move || {
             let res: PyResult<()> = Python::attach(|py| {
                 let loop_ = new_event_loop.bind(py).call0()?;
+                // The trio adapter has no call_soon, and call_soon_threadsafe
+                // also works from the loop thread.
+                let call_soon = if loop_kind == LoopKind::Trio {
+                    loop_.getattr("call_soon_threadsafe")?
+                } else {
+                    loop_.getattr("call_soon")?
+                };
                 let handle = Arc::new(LoopHandle {
                     loop_: loop_.clone().unbind(),
                     state: OnceLock::new(),
                     eager_task_kwargs: PyOnceLock::new(),
                     queue: Mutex::default(),
                     waker,
+                    batch_size,
+                    call_soon: call_soon.unbind(),
                 });
                 if loop_kind == LoopKind::Trio {
                     // trio finalizes async generators and its worker threads
