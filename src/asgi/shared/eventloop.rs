@@ -326,16 +326,21 @@ impl EventLoops {
     /// Gets the handle of a Python event loop in the pool, which owns futures
     /// created on it.
     pub(crate) fn find(&self, loop_: &Py<PyAny>) -> &LoopHandle {
-        match self.inner.as_ref() {
-            EventLoopsInner::Single(event_loop) => &event_loop.handle,
-            EventLoopsInner::Multiple { loops, .. } => {
-                let handle = loops
-                    .iter()
-                    .find(|event_loop| event_loop.handle.loop_.as_ptr() == loop_.as_ptr())
-                    .unwrap_or(&loops[0]);
-                &handle.handle
-            }
+        let owns = |event_loop: &&EventLoop| event_loop.handle.loop_.as_ptr() == loop_.as_ptr();
+        let (found, first) = match self.inner.as_ref() {
+            EventLoopsInner::Single(event_loop) => (Some(event_loop).filter(owns), event_loop),
+            EventLoopsInner::Multiple { loops, .. } => (loops.iter().find(owns), &loops[0]),
+        };
+        if let Some(event_loop) = found {
+            return &event_loop.handle;
         }
+        // pyvoy only completes futures it created on one of its own event loops.
+        // Completing a future from another loop's thread is unsafe, so a future
+        // from any other loop is reported as a bug before falling back to the
+        // first loop.
+        debug_assert!(false, "future does not belong to a pyvoy event loop");
+        eprintln!("Future does not belong to a pyvoy event loop. This is likely a bug in pyvoy.");
+        &first.handle
     }
 
     /// Stops the event loops, executing shutdown lifespan if needed before doing so.
