@@ -292,6 +292,53 @@ def test_io_threads_flag(
 
 
 @pytest.mark.parametrize(
+    ("args", "expected"), [([], None), (["--uds", "pyvoy.sock"], "pyvoy.sock")]
+)
+def test_uds_flag(
+    args: list[str], expected: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys, "argv", ["pyvoy", "primary.app", *args, "--print-envoy-config"]
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._uds == expected
+
+
+def test_uds_rejects_tls_port(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyvoy",
+            "tests.apps.asgi.kitchensink",
+            "--uds",
+            "pyvoy.sock",
+            "--tls-port",
+            "0",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 2
+    assert "--tls-port cannot be used with --uds" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
     ("flag", "value", "minimum"),
     [
         ("--worker-threads", "0", 1),

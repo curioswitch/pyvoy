@@ -589,7 +589,8 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
             .unwrap_or_default(),
         headers,
         client: address_to_scope(envoy_filter.get_remote_address()),
-        server: address_to_scope(envoy_filter.get_local_address()),
+        server: address_to_scope(envoy_filter.get_local_address())
+            .map(|(host, port)| (host, Some(port))),
         // Network filter doesn't expose tls_version but we can report the rest.
         tls_info: is_ssl.then(|| TlsInfo {
             tls_version: None,
@@ -602,6 +603,8 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
 
 /// Converts an Envoy `(address, port)` pair into an ASGI scope address, dropping
 /// any port suffix on the host and treating an empty host as "no address".
+/// Envoy only provides IP addresses to network filters, so a Unix socket is
+/// also "no address".
 fn address_to_scope((address, port): (String, u32)) -> Option<(Box<str>, i64)> {
     if address.is_empty() {
         return None;

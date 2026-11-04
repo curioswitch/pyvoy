@@ -608,7 +608,9 @@ pub(crate) struct Scope {
     pub raw_path: Box<[u8]>,
     pub headers: Vec<(HeaderName, HeaderValue)>,
     pub client: Option<(Box<str>, i64)>,
-    pub server: Option<(Box<str>, i64)>,
+    /// The listening address and port, or the path of a Unix socket without a
+    /// port.
+    pub server: Option<(Box<str>, Option<i64>)>,
     pub tls_info: Option<TlsInfo>,
 }
 
@@ -633,11 +635,13 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         scheme,
     } = read_request_headers(envoy_filter);
 
+    // ASGI only has IP addresses for clients, so a Unix socket peer is omitted.
     let client = get_address(
         envoy_filter,
         envoy_dynamic_module_type_attribute_id::SourceAddress,
         envoy_dynamic_module_type_attribute_id::SourcePort,
-    );
+    )
+    .and_then(|(host, port)| Some((host, port?)));
     let server = get_address(
         envoy_filter,
         envoy_dynamic_module_type_attribute_id::DestinationAddress,
@@ -684,21 +688,16 @@ fn get_address<EHF: EnvoyHttpFilter>(
     envoy_filter: &EHF,
     address_attr_id: envoy_dynamic_module_type_attribute_id,
     port_attr_id: envoy_dynamic_module_type_attribute_id,
-) -> Option<(Box<str>, i64)> {
-    match (
-        envoy_filter.get_attribute_string(address_attr_id),
-        envoy_filter.get_attribute_int(port_attr_id),
-    ) {
-        (Some(host), Some(port)) => {
-            // Unfortunately it means less coverage for cases Envoy should not be
-            // providing like empty host, but it's not worth risking a panic for
-            // an uncommonly used field.
-            let host = host.as_slice();
-            let host_str = str::from_utf8(host).unwrap_or("");
-            let address = strip_port(host_str);
-            Some((Box::from(address), port))
-        }
-        _ => None,
+) -> Option<(Box<str>, Option<i64>)> {
+    let host = envoy_filter.get_attribute_string(address_attr_id)?;
+    // Unfortunately it means less coverage for cases Envoy should not be
+    // providing like empty host, but it's not worth risking a panic for
+    // an uncommonly used field.
+    let host_str = str::from_utf8(host.as_slice()).unwrap_or("");
+    match envoy_filter.get_attribute_int(port_attr_id) {
+        Some(port) => Some((Box::from(strip_port(host_str)), Some(port))),
+        // Envoy only has ports for IP addresses, so this is a Unix socket path.
+        None => Some((Box::from(host_str), None)),
     }
 }
 
