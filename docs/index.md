@@ -128,6 +128,7 @@ interpreter to start the application server. This means certain features like li
 processes cannot be implemented no matter how hard we try as it is in the domain of Envoy, which ensures they
 are handled efficiently and stably. It doesn't mean we miss out on features like IDE debugging though, which
 we do support. We also make sure to support common platforms, Linux, macOS, and Windows, though we cannot
-support more than that due to lack of support in Envoy.
+support more than that due to lack of support in Envoy. We find that despite this architecture, in practice
+pyvoy works great in almost all realistic deployments and is worth a look.
 
 ASGI and WSGI make it easy to switch servers to try - hopefully you can give it a try and see if you like it.
