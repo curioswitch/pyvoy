@@ -120,8 +120,8 @@ or see the documentation for [settings](./settings.md).
 
 pyvoy was created out of a desire to bring HTTP/2 trailers to Python application servers to allow using the gRPC
 protocol with standard applications. While developing it, we have found it to be a very fast, stable server for
-any workload - notably, it is the only server known to pass all of the conformance tests for
-[connect-python](https://github.com/connectrpc/connect-python) without flakiness.
+any workload - notably, it includes a large number of production-readiness features such as load shedding,
+client-side load balancing, circuit breakers, and more, completely for free thanks to Envoy.
 
 What pyvoy isn't is a traditional Python application - we execute Envoy itself, which then loads the Python
 interpreter to start the application server. This means certain features like listening on sockets in forked
