@@ -63,7 +63,7 @@ dev = [
   "pytest==9.2.0",
   "pytest-asyncio==1.4.1.post1",
   "pytest-cov==7.1.0",
-  "ruff==0.17.3",
+  "ruff==0.17.4",
   "seaborn==0.13.2",
   "starlette==1.10.0",
   "trio==0.35.0",
@@ -75,7 +75,7 @@ dev = [
   "zuvloop==0.0.17; python_version >= '3.14'",
 ]
 
-docs = ["mkdocstrings-python==2.0.10", "zensical==0.0.74"]
+docs = ["mkdocstrings-python==2.0.10", "zensical==0.1.0"]
 
 [build-system]
 requires = ["maturin>=1.12,<2.0"]
