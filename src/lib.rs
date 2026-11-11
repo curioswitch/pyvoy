@@ -4,6 +4,8 @@ use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use std::sync::atomic::Ordering;
+use tungstenite::extensions::compression::deflate::DeflateConfig;
+use tungstenite::protocol::Role;
 use yaml_rust2::{Yaml, YamlLoader};
 
 mod asgi;
@@ -294,9 +296,24 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     let loop_kind = parse_loop_config(filter_config)?;
     let max_message_size =
         parse_usize_config(filter_config, "websockets_max_message_size", 64 << 20, 0)?; // Default to 64 MiB
-    let compression = filter_config["websockets_compression"]
+    let deflate = if filter_config["websockets_compression"]
         .as_bool()
-        .unwrap_or(true);
+        .unwrap_or(true)
+    {
+        let no_context_takeover = filter_config["websockets_compression_no_context_takeover"]
+            .as_bool()
+            .unwrap_or(false);
+        // The server includes both parameters in its negotiation response, so
+        // neither side reuses its sliding window across messages regardless of
+        // what the client offered.
+        Some(
+            DeflateConfig::default()
+                .set_no_context_takeover(Role::Server, no_context_takeover)
+                .set_no_context_takeover(Role::Client, no_context_takeover),
+        )
+    } else {
+        None
+    };
 
     let constants = Python::attach(types::Constants::get);
     asgi::websocket::Config::new(
@@ -307,7 +324,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
         enable_lifespan,
         loop_kind,
         max_message_size,
-        compression,
+        deflate,
     )
     .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
 }

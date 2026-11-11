@@ -14,6 +14,99 @@ if TYPE_CHECKING:
 ACCEPT = {"type": "websocket.accept", "headers": (), "subprotocol": None}
 
 
+async def _send_denial(send: ASGISendCallable, status: int, body: bytes) -> None:
+    await send(
+        {
+            "type": "websocket.http.response.start",
+            "status": status,
+            "headers": [(b"content-type", b"text/plain"), (b"x-denied", b"yes")],
+        }
+    )
+    await send({"type": "websocket.http.response.body", "body": body})
+
+
+async def _deny(path: str, send: ASGISendCallable) -> None:
+    if path == "/deny":
+        await _send_denial(send, 401, b"go away")
+        return
+    if path == "/deny-empty":
+        await send(
+            {"type": "websocket.http.response.start", "status": 404, "headers": ()}
+        )
+        await send({"type": "websocket.http.response.body"})
+        return
+    if path == "/deny-streaming":
+        await send(
+            {"type": "websocket.http.response.start", "status": 403, "headers": ()}
+        )
+        for chunk in (b"go ", b"away "):
+            await send(
+                {
+                    "type": "websocket.http.response.body",
+                    "body": chunk,
+                    "more_body": True,
+                }
+            )
+        await send({"type": "websocket.http.response.body", "body": b"now"})
+        return
+    if path == "/deny-content-length":
+        await send(
+            {
+                "type": "websocket.http.response.start",
+                "status": 403,
+                "headers": [(b"content-length", b"7")],
+            }
+        )
+        await send(
+            {"type": "websocket.http.response.body", "body": b"go ", "more_body": True}
+        )
+        await send({"type": "websocket.http.response.body", "body": b"away"})
+        return
+    if path == "/deny-invalid-status":
+        try:
+            await send(
+                {"type": "websocket.http.response.start", "status": 101, "headers": ()}
+            )
+        except ValueError as e:
+            await _send_denial(send, 400, str(e).encode())
+        return
+    if path == "/deny-body-before-start":
+        try:
+            await send({"type": "websocket.http.response.body", "body": b"oops"})
+        except RuntimeError as e:
+            await _send_denial(send, 400, str(e).encode())
+        return
+    if path == "/deny-then-close":
+        await send(
+            {"type": "websocket.http.response.start", "status": 403, "headers": ()}
+        )
+        try:
+            await send({"type": "websocket.close", "code": 1000})
+        except RuntimeError as e:
+            await send(
+                {"type": "websocket.http.response.body", "body": str(e).encode()}
+            )
+        return
+    if path == "/deny-then-send":
+        await _send_denial(send, 403, b"denied")
+        try:
+            await send({"type": "websocket.send", "text": "too late"})
+        except OSError:
+            print("deny-then-send: disconnected", file=sys.stderr, flush=True)  # noqa: T201
+        return
+    if path == "/deny-raise-mid-body":
+        await send(
+            {"type": "websocket.http.response.start", "status": 403, "headers": ()}
+        )
+        await send(
+            {"type": "websocket.http.response.body", "body": b"part", "more_body": True}
+        )
+        msg = "boom mid denial"
+        raise RuntimeError(msg)
+    msg = f"unknown denial path {path}"
+    raise AssertionError(msg)
+
+
 async def app(
     scope: WebSocketScope, receive: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -49,8 +142,29 @@ async def app(
         await send({"type": "websocket.send", "text": ",".join(offered)})
         return
 
+    if path.startswith("/deny"):
+        await _deny(path, send)
+        return
+
     await send(ACCEPT)
 
+    if path == "/extensions":
+        await send(
+            {
+                "type": "websocket.send",
+                "text": json.dumps(sorted(scope.get("extensions", {}).keys())),
+            }
+        )
+        return
+    if path == "/accept-then-deny":
+        try:
+            await send(
+                {"type": "websocket.http.response.start", "status": 403, "headers": ()}
+            )
+        except RuntimeError as e:
+            await send({"type": "websocket.send", "text": str(e)})
+            await send({"type": "websocket.close", "code": 1000})
+        return
     if path == "/raise-after":
         msg = "boom after accept"
         raise RuntimeError(msg)

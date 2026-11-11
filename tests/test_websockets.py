@@ -169,6 +169,32 @@ async def test_compression_disabled(loop: Loop | None) -> None:
 
 
 @pytest.mark.asyncio
+async def test_compression_no_context_takeover(loop: Loop | None) -> None:
+    async with (
+        PyvoyServer(
+            "tests.apps.websockets.kitchensink",
+            loop=loop,
+            websockets=True,
+            lifespan=False,
+            websockets_compression_no_context_takeover=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) as srv,
+        # The client's default offer allows context takeover in both directions.
+        websockets.connect(_url(srv, "/echo")) as ws,
+    ):
+        assert (
+            ws.response.headers["Sec-WebSocket-Extensions"]
+            == "permessage-deflate; server_no_context_takeover; client_no_context_takeover"
+        )
+        # Repeated messages would reference the previous message's window if the
+        # context were kept, so either side reusing it would fail to decompress.
+        for _ in range(3):
+            await ws.send("hello" * 100)
+            assert await ws.recv() == "hello" * 100
+
+
+@pytest.mark.asyncio
 async def test_max_message_size(loop: Loop | None) -> None:
     async with PyvoyServer(
         "tests.apps.websockets.kitchensink",
@@ -199,6 +225,121 @@ async def test_reject_before_accept(server: PyvoyServer) -> None:
     with pytest.raises(InvalidStatus) as ei:
         await websockets.connect(_url(server, "/reject"))
     assert ei.value.response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_denial_response_extension(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/extensions")) as ws:
+        assert "websocket.http.response" in json.loads(await ws.recv())
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "headers", "body"),
+    [
+        pytest.param(
+            "/deny",
+            401,
+            {"content-type": "text/plain", "x-denied": "yes", "content-length": "7"},
+            b"go away",
+            id="single",
+        ),
+        pytest.param("/deny-empty", 404, {"content-length": "0"}, b"", id="empty"),
+        pytest.param(
+            "/deny-streaming",
+            403,
+            {"content-length": None},
+            b"go away now",
+            id="streaming",
+        ),
+        pytest.param(
+            "/deny-content-length",
+            403,
+            {"content-length": "7"},
+            b"go away",
+            id="streaming-content-length",
+        ),
+        pytest.param(
+            "/deny-invalid-status",
+            400,
+            {},
+            b"Invalid HTTP status code '101'",
+            id="invalid-status",
+        ),
+        pytest.param(
+            "/deny-body-before-start",
+            400,
+            {},
+            b"Expected ASGI message 'websocket.http.response.start', but got 'websocket.http.response.body'.",
+            id="body-before-start",
+        ),
+        pytest.param(
+            "/deny-then-close",
+            403,
+            {},
+            b"Expected ASGI message 'websocket.http.response.body', but got 'websocket.close'.",
+            id="close-during-response",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_denial_response(
+    server: PyvoyServer,
+    path: str,
+    status: int,
+    headers: dict[str, str | None],
+    body: bytes,
+) -> None:
+    with pytest.raises(InvalidStatus) as ei:
+        await websockets.connect(_url(server, path))
+    response = ei.value.response
+    assert response.status_code == status
+    assert response.headers["connection"] == "close"
+    for name, value in headers.items():
+        # None means absent, such as a streamed body delimited by the close.
+        assert response.headers.get(name) == value
+    assert response.body == body
+
+
+@pytest.mark.asyncio
+async def test_denial_response_then_send(loop: Loop | None) -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        with pytest.raises(InvalidStatus) as ei:
+            await websockets.connect(_url(srv, "/deny-then-send"))
+        assert ei.value.response.status_code == 403
+        assert ei.value.response.body == b"denied"
+        assert srv.stdout is not None
+        await assert_logs_contains(srv.stdout, ["deny-then-send: disconnected"])
+
+
+@pytest.mark.asyncio
+async def test_denial_response_app_error_mid_body(loop: Loop | None) -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        # Envoy resets the connection to signal the truncated body on Linux, but
+        # degrades to a graceful close elsewhere, so either error is possible.
+        with pytest.raises(InvalidHandshake):
+            await websockets.connect(_url(srv, "/deny-raise-mid-body"))
+        assert srv.stdout is not None
+        await assert_logs_contains(srv.stdout, ["RuntimeError: boom mid denial"])
+
+
+@pytest.mark.asyncio
+async def test_denial_response_after_accept(server: PyvoyServer) -> None:
+    async with websockets.connect(_url(server, "/accept-then-deny")) as ws:
+        assert await ws.recv() == "WebSocket connection has already been accepted."
 
 
 @pytest.mark.asyncio

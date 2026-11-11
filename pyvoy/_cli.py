@@ -56,6 +56,7 @@ class CLIArgs:
     websockets: bool
     websockets_max_message_size: int
     websockets_compression: bool
+    websockets_compression_no_context_takeover: bool
     content_encodings: list[ContentEncoding]
     otel: bool
     reload: bool
@@ -269,6 +270,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--websockets-compression-no-context-takeover",
+        help="force WebSocket per-message deflate compression to reset its context after every message regardless of client settings",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--content-encodings",
         help="comma-separated content encodings to compress responses with, in order of preference, for example 'zstd,br,gzip'. Compression is disabled if unset.",
         type=_content_encodings,
@@ -422,6 +430,7 @@ async def amain() -> None:
         websockets=args.websockets,
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,
+        websockets_compression_no_context_takeover=args.websockets_compression_no_context_takeover,
         content_encodings=args.content_encodings,
         enable_otel=args.otel,
         additional_envoy_args=additional_envoy_args,

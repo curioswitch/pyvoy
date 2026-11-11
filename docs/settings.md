@@ -87,6 +87,7 @@ than serving in Python with e.g., Starlette.
   Not enabled by default.
 - `--websockets-max-message-size` - Sets the non-negative maximum WebSocket message size in bytes. **Default**: _64 MiB_.
 - `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
+- `--websockets-compression-no-context-takeover` - Forces WebSocket per-message deflate compression to reset its context after every message in both directions, regardless of client settings. This lowers the compression ratio for streams of similar messages. Not enabled by default.
 
 ## OpenTelemetry
 
