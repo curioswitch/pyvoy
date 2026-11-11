@@ -213,6 +213,7 @@ class PyvoyServer:
     _websockets: bool
     _websockets_max_message_size: int | None
     _websockets_compression: bool
+    _websockets_compression_no_context_takeover: bool
     _content_encodings: list[ContentEncoding]
     _enable_otel: bool
 
@@ -241,6 +242,7 @@ class PyvoyServer:
         websockets: bool = False,
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
+        websockets_compression_no_context_takeover: bool = False,
         content_encodings: Iterable[ContentEncoding] | None = None,
         enable_otel: bool = True,
         additional_envoy_args: list[str] | None = None,
@@ -287,6 +289,10 @@ class PyvoyServer:
                 size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
                 compression.
+            websockets_compression_no_context_takeover: Whether to force WebSocket
+                per-message deflate compression to reset its context after every
+                message in both directions, regardless of client settings. This
+                reduces compression ratio for streams of similar messages.
             content_encodings: The content encodings to compress responses with, in
                 order of preference. Unset or empty disables response compression.
                 When set, applications no longer receive the Accept-Encoding
@@ -365,6 +371,9 @@ class PyvoyServer:
         self._websockets = websockets
         self._websockets_max_message_size = websockets_max_message_size
         self._websockets_compression = websockets_compression
+        self._websockets_compression_no_context_takeover = (
+            websockets_compression_no_context_takeover
+        )
         self._content_encodings = content_encodings
         self._enable_otel = enable_otel
         self._root_path = root_path
@@ -591,6 +600,8 @@ class PyvoyServer:
             )
         if not self._websockets_compression:
             base_pyvoy_config["websockets_compression"] = False
+        if self._websockets_compression_no_context_takeover:
+            base_pyvoy_config["websockets_compression_no_context_takeover"] = True
         if self._upstreams:
             base_pyvoy_config["enable_http_client"] = True
         # Response compression runs before the terminal filter that generates the

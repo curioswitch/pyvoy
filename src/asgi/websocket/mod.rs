@@ -17,7 +17,7 @@ use crate::asgi::python::EVENT_ID_REQUEST;
 use crate::asgi::shared::ExecutorHandles;
 use crate::asgi::shared::eventloop::LoopKind;
 use crate::asgi::websocket::executor::{
-    Body, EVENT_ID_RESPONSE, RecvFuture, SendEvent, WebSocketExecutor,
+    Body, EVENT_ID_RESPONSE, RecvFuture, ResponseStartEvent, SendEvent, WebSocketExecutor,
 };
 use crate::asgi::websocket::stream::EnvoyStream;
 use crate::eventbridge::EventBridge;
@@ -30,7 +30,7 @@ pub struct Config {
     executor: WebSocketExecutor,
     handles: Option<ExecutorHandles>,
     max_message_size: usize,
-    compression: bool,
+    deflate: Option<DeflateConfig>,
 }
 
 impl Config {
@@ -43,7 +43,7 @@ impl Config {
         enable_lifespan: Option<bool>,
         loop_kind: LoopKind,
         max_message_size: usize,
-        compression: bool,
+        deflate: Option<DeflateConfig>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match WebSocketExecutor::new(
@@ -71,7 +71,7 @@ impl Config {
             executor,
             handles: Some(handles),
             max_message_size,
-            compression,
+            deflate,
         })
     }
 }
@@ -95,7 +95,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
             send_bridge: EventBridge::new(),
             downstream_watermark_level: 0,
             max_message_size: self.max_message_size,
-            compression: self.compression,
+            deflate: self.deflate,
         }))
     }
 }
@@ -104,6 +104,8 @@ enum WebSocketState {
     StartHandshake(HandshakeMachine<EnvoyStream>),
     FinishHandshake(EnvoyStream, http::Response<()>, Extensions),
     Accepted(WebSocket<EnvoyStream>),
+    /// Streaming the body of an HTTP response denying the connection.
+    Responding,
     NotWebSocket,
 
     Done, // Can be used as a temporary value during state transitions or to signal the response is done before handshake.
@@ -121,7 +123,7 @@ struct Filter {
     downstream_watermark_level: usize,
 
     max_message_size: usize,
-    compression: bool,
+    deflate: Option<DeflateConfig>,
 }
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
@@ -146,6 +148,13 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                     abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
                     "Unexpected body during handshake",
                 );
+                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
+            }
+            WebSocketState::Responding => {
+                // A client shouldn't send anything after a handshake request that
+                // was denied, and we close once the response completes.
+                let (_, total_size) = envoy_filter.get_read_buffer_chunks();
+                envoy_filter.drain_read_buffer(total_size);
                 return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
             }
             WebSocketState::Done => {
@@ -191,10 +200,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                             // writing the agreed extension header into the response. A
                             // malformed extensions header falls back to no compression.
                             let mut extensions_config = ExtensionsConfig::default();
-                            if self.compression {
-                                extensions_config.permessage_deflate =
-                                    Some(DeflateConfig::default());
-                            }
+                            extensions_config.permessage_deflate = self.deflate;
                             let extensions = extensions_config
                                 .negotiate_response(request.headers(), response.headers_mut())
                                 .unwrap_or_default();
@@ -284,6 +290,17 @@ impl Filter {
                         return;
                     }
                     SendEvent::Accept(e) => e,
+                    SendEvent::ResponseStart(start, body) => {
+                        let end_stream = body.future.is_none();
+                        let mut buffer = denial_response_head(start, &body.body, end_stream);
+                        buffer.extend_from_slice(&body.body);
+                        envoy_filter.write(&buffer, end_stream);
+                        if let Some(future) = body.future {
+                            self.state = WebSocketState::Responding;
+                            self.executor.handle_send_future(future);
+                        }
+                        return;
+                    }
                     SendEvent::Abort => {
                         envoy_filter.close(
                             abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
@@ -387,6 +404,25 @@ impl Filter {
                         }
                     }
                     _ => unreachable!(),
+                },
+                WebSocketState::Responding => match event {
+                    SendEvent::ResponseBody(body) => {
+                        envoy_filter.write(&body.body, body.future.is_none());
+                        match body.future {
+                            Some(future) => self.executor.handle_send_future(future),
+                            None => self.state = WebSocketState::Done,
+                        }
+                    }
+                    SendEvent::Exception | SendEvent::Abort => {
+                        // The response head is already written, so reset to signal
+                        // the body is incomplete.
+                        envoy_filter.close_with_details(
+                            abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
+                            "Incomplete WebSocket denial response",
+                        );
+                        self.state = WebSocketState::Done;
+                    }
+                    _ => unreachable!(), // SendCallable ensures
                 },
                 WebSocketState::Done => {}
                 _ => {
@@ -545,6 +581,29 @@ fn finish_close(
             _ => {}
         }
     }
+}
+
+/// Serializes the head of an HTTP response denying a WebSocket connection. The
+/// connection closes after the response, so a body without a known length is
+/// delimited by the close.
+fn denial_response_head(start: ResponseStartEvent, body: &[u8], end_stream: bool) -> Vec<u8> {
+    let mut response = http::Response::new(());
+    *response.status_mut() = start.status;
+    let headers = response.headers_mut();
+    for (name, value) in start.headers {
+        headers.append(name, value);
+    }
+    headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
+    if end_stream
+        && !headers.contains_key(header::CONTENT_LENGTH)
+        && start.status != http::StatusCode::NO_CONTENT
+        && start.status != http::StatusCode::NOT_MODIFIED
+    {
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len()));
+    }
+    let mut buffer = Vec::new();
+    write_response(&mut buffer, &response).unwrap();
+    buffer
 }
 
 /// Parses the comma-separated subprotocols offered by the client across any

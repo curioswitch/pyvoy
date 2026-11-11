@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilterScheduler;
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
-    Bound, IntoPyObjectExt as _, Py, PyAny, PyResult, Python,
+    Bound, IntoPyObjectExt as _, Py, PyAny, PyErr, PyResult, Python,
     exceptions::{PyRuntimeError, PyValueError},
     pyclass, pymethods,
     types::{
@@ -60,11 +60,10 @@ impl WebSocketExecutor {
             loop_kind,
         )?;
         let (extensions, root_path) = Python::attach(|py| {
-            (
-                PyDict::new(py).unbind(),
-                PyString::new(py, root_path).unbind(),
-            )
-        });
+            let extensions = PyDict::new(py);
+            extensions.set_item("websocket.http.response", PyDict::new(py))?;
+            Ok::<_, PyErr>((extensions.unbind(), PyString::new(py, root_path).unbind()))
+        })?;
         let executor = Self {
             inner: Arc::new(ExecutorInner {
                 app,
@@ -252,6 +251,7 @@ impl WebSocketExecutor {
             recv,
             SendCallable {
                 state: SendState::Started,
+                response_start: None,
                 send_bridge: send_bridge.clone(),
                 scheduler: scheduler.clone(),
                 loop_: loop_.clone().unbind(),
@@ -439,6 +439,8 @@ impl AppFutureHandler {
 enum SendState {
     Started,
     Accepted,
+    /// The application started a denial response with `websocket.http.response.start`.
+    Responding,
     Closed,
 }
 
@@ -446,6 +448,9 @@ enum SendState {
 #[pyclass(module = "_pyvoy.asgi.websocket")]
 struct SendCallable {
     state: SendState,
+    /// The start of a denial response, held until its first body message so the
+    /// filter can set the content length when the body is sent in one message.
+    response_start: Option<ResponseStartEvent>,
     send_bridge: EventBridge<SendEvent>,
     scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
     loop_: Py<PyAny>,
@@ -510,16 +515,21 @@ impl SendCallable {
                     py,
                     PyRuntimeError::new_err("WebSocket connection has already been accepted."),
                 ),
+                SendState::Responding => expected_response_body(py, event_type),
                 SendState::Closed => unreachable!(),
             },
             "websocket.send" => {
-                if matches!(self.state, SendState::Started) {
-                    return ErrorAwaitable::new_py(
-                        py,
-                        PyRuntimeError::new_err(
-                            "Expected ASGI message 'websocket.accept', but got 'websocket.send'.",
-                        ),
-                    );
+                match self.state {
+                    SendState::Started => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "Expected ASGI message 'websocket.accept', but got 'websocket.send'.",
+                            ),
+                        );
+                    }
+                    SendState::Responding => return expected_response_body(py, event_type),
+                    SendState::Accepted | SendState::Closed => {}
                 }
                 let bytes = event
                     .get_item(&self.constants.bytes)?
@@ -563,6 +573,9 @@ impl SendCallable {
                 Ok(ret)
             }
             "websocket.close" => {
+                if matches!(self.state, SendState::Responding) {
+                    return expected_response_body(py, event_type);
+                }
                 let code = if let Some(code) = event.get_item(&self.constants.code)? {
                     code.extract::<u16>()?
                 } else {
@@ -594,6 +607,103 @@ impl SendCallable {
                 }
                 EmptyAwaitable::new_py(py)
             }
+            "websocket.http.response.start" => {
+                match self.state {
+                    SendState::Started => {}
+                    SendState::Accepted => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "WebSocket connection has already been accepted.",
+                            ),
+                        );
+                    }
+                    SendState::Responding => return expected_response_body(py, event_type),
+                    SendState::Closed => unreachable!(),
+                }
+                let status_code = match event.get_item(&self.constants.status)? {
+                    Some(v) => v.extract::<u16>()?,
+                    None => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "Unexpected ASGI message, missing 'status' in 'websocket.http.response.start'.",
+                            ),
+                        );
+                    }
+                };
+                let status = match StatusCode::from_u16(status_code) {
+                    Ok(status) if !status.is_informational() => status,
+                    _ => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyValueError::new_err(format!(
+                                "Invalid HTTP status code '{status_code}'"
+                            )),
+                        );
+                    }
+                };
+                let headers = extract_headers_from_event(py, &self.constants, &event)?;
+                self.state = SendState::Responding;
+                self.response_start = Some(ResponseStartEvent { status, headers });
+                EmptyAwaitable::new_py(py)
+            }
+            "websocket.http.response.body" => {
+                match self.state {
+                    SendState::Responding => {}
+                    SendState::Started => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "Expected ASGI message 'websocket.http.response.start', but got 'websocket.http.response.body'.",
+                            ),
+                        );
+                    }
+                    SendState::Accepted => {
+                        return ErrorAwaitable::new_py(
+                            py,
+                            PyRuntimeError::new_err(
+                                "Expected ASGI message 'websocket.send' or 'websocket.close', but got 'websocket.http.response.body'.",
+                            ),
+                        );
+                    }
+                    SendState::Closed => unreachable!(),
+                }
+                let body = match event.get_item(&self.constants.body)? {
+                    Some(body) => body.extract::<Bytes>()?,
+                    None => Bytes::new(),
+                };
+                let more_body: bool = match event.get_item(&self.constants.more_body)? {
+                    Some(v) => v.extract()?,
+                    None => false,
+                };
+                let (ret, future) = if more_body {
+                    let ret = self
+                        .loop_
+                        .bind(py)
+                        .call_method0(&self.constants.create_future)?;
+                    let future = SendFuture {
+                        future: Some(LoopFuture {
+                            future: ret.clone().unbind(),
+                            loop_: self.loop_.clone_ref(py),
+                        }),
+                        executor: self.executor.clone(),
+                    };
+                    (ret, Some(future))
+                } else {
+                    self.state = SendState::Closed;
+                    (EmptyAwaitable::new_py(py)?, None)
+                };
+                let body = ResponseBodyEvent { body, future };
+                let event = match self.response_start.take() {
+                    Some(start) => SendEvent::ResponseStart(start, body),
+                    None => SendEvent::ResponseBody(body),
+                };
+                if self.send_bridge.send(event).is_ok() {
+                    self.scheduler.commit(EVENT_ID_RESPONSE);
+                }
+                Ok(ret)
+            }
             _ => ErrorAwaitable::new_py(
                 py,
                 PyRuntimeError::new_err(format!(
@@ -603,6 +713,15 @@ impl SendCallable {
             ),
         }
     }
+}
+
+fn expected_response_body<'py>(py: Python<'py>, event_type: &str) -> PyResult<Bound<'py, PyAny>> {
+    ErrorAwaitable::new_py(
+        py,
+        PyRuntimeError::new_err(format!(
+            "Expected ASGI message 'websocket.http.response.body', but got '{event_type}'."
+        )),
+    )
 }
 
 pub(super) struct AcceptEvent {
@@ -616,6 +735,18 @@ pub(super) struct SendMessageEvent {
     pub(super) future: SendFuture,
 }
 
+pub(super) struct ResponseStartEvent {
+    pub(super) status: StatusCode,
+    pub(super) headers: Vec<(HeaderName, HeaderValue)>,
+}
+
+pub(super) struct ResponseBodyEvent {
+    pub(super) body: Bytes,
+    /// Completed once the body is written. Set when more body follows and
+    /// unset for the final body.
+    pub(super) future: Option<SendFuture>,
+}
+
 /// An event to send a response, read by the filter when scheduling [`EVENT_ID_RESPONSE`].
 pub(super) enum SendEvent {
     /// Accept the WebSocket connection.
@@ -624,6 +755,10 @@ pub(super) enum SendEvent {
     SendMessage(SendMessageEvent),
     /// Closes the WebSocket connection.
     Close { code: u16, reason: Utf8Bytes },
+    /// Denies the WebSocket connection with an HTTP response, with its first body.
+    ResponseStart(ResponseStartEvent, ResponseBodyEvent),
+    /// Sends more body of an HTTP response denying the WebSocket connection.
+    ResponseBody(ResponseBodyEvent),
     /// Complete the response with failure due to an application exception.
     Exception,
     /// The application returned without closing; drop the connection.
