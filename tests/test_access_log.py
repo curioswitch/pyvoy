@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import subprocess
+import sys
 import urllib.request
 from typing import TYPE_CHECKING
 
@@ -11,10 +12,19 @@ import pytest
 import pytest_asyncio
 from pyqwest import Client, HTTPTransport, HTTPVersion
 
-from pyvoy import Interface, PyvoyServer
+from pyvoy import Interface, PyvoyServer, StartupError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+# Envoy 1.40 builds the CEL formatter on Windows without the CEL parser, and it
+# then fails parsing every format command, not just CEL ones.
+xfail_windows_cel = pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="Envoy's CEL formatter rejects all format commands on Windows",
+    raises=StartupError,
+    strict=True,
+)
 
 
 @pytest.fixture(scope="module", params=["asgi", "wsgi"])
@@ -50,6 +60,7 @@ async def _read_access_log(server: PyvoyServer, path: str) -> str:
     [(HTTPVersion.HTTP1, "HTTP/1.1"), (HTTPVersion.HTTP2, "HTTP/2")],
     ids=["h1", "h2"],
 )
+@xfail_windows_cel
 @pytest.mark.asyncio
 async def test_access_log(
     server: PyvoyServer, http_version: HTTPVersion, protocol: str
@@ -78,6 +89,7 @@ async def test_access_log(
     ), line
 
 
+@xfail_windows_cel
 @pytest.mark.asyncio
 async def test_access_log_missing_headers(server: PyvoyServer) -> None:
     path = "/response-body?missing-headers"
@@ -96,6 +108,7 @@ async def test_access_log_missing_headers(server: PyvoyServer) -> None:
     ("additional_envoy_args", "expected"),
     [(None, "0.100s"), (["--file-flush-interval-msec", "2000"], "2s")],
 )
+@xfail_windows_cel
 @pytest.mark.asyncio
 async def test_access_log_flush_interval(
     additional_envoy_args: list[str] | None, expected: str
