@@ -217,6 +217,7 @@ class PyvoyServer:
     _websockets_compression_no_context_takeover: bool
     _content_encodings: list[ContentEncoding]
     _forwarded_allow_ips: list[str] | None
+    _access_log: bool
     _enable_otel: bool
 
     _admin_address: str | None
@@ -247,6 +248,7 @@ class PyvoyServer:
         websockets_compression_no_context_takeover: bool = False,
         content_encodings: Iterable[ContentEncoding] | None = None,
         forwarded_allow_ips: Iterable[str] | None = None,
+        access_log: bool = False,
         enable_otel: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
@@ -304,6 +306,7 @@ class PyvoyServer:
                 trusted to set the client address with the X-Forwarded-For header
                 and the scheme with the X-Forwarded-Proto header, or '*' to trust
                 any peer. Unset trusts 127.0.0.1 and ::1, and empty trusts no peer.
+            access_log: Whether Envoy logs each request to its stdout.
             enable_otel: Whether to export Envoy's traces and metrics with OTLP as
                 configured by the standard OTEL_* environment variables, read from
                 the environment the server is started with. Each signal is exported
@@ -374,6 +377,7 @@ class PyvoyServer:
         )
         self._content_encodings = content_encodings
         self._forwarded_allow_ips = forwarded_allow_ips
+        self._access_log = access_log
         self._enable_otel = enable_otel
         self._root_path = root_path
         self._stdout = stdout
@@ -443,6 +447,12 @@ class PyvoyServer:
             # Without --concurrency, Envoy runs one thread per CPU core.
             if self._io_threads != "auto":
                 args.extend(["--concurrency", str(self._io_threads)])
+            if self._access_log and _FILE_FLUSH_INTERVAL_ARG not in (
+                self._additional_envoy_args or ()
+            ):
+                # Envoy buffers access logs for 10s by default, and rejects the flag
+                # being passed twice.
+                args.extend([_FILE_FLUSH_INTERVAL_ARG, _ACCESS_LOG_FLUSH_INTERVAL_MS])
             if self._additional_envoy_args:
                 args.extend(self._additional_envoy_args)
             self._process = await asyncio.create_subprocess_exec(
@@ -736,6 +746,7 @@ class PyvoyServer:
             "http_filters": http_filters,
             "generate_request_id": False,
             **forwarded_config,
+            **_hcm_access_log_config(access_log=self._access_log),
             **_hcm_tracing_config(otel),
         }
 
@@ -878,6 +889,9 @@ class PyvoyServer:
                                         },
                                         "http_filters": http_filters,
                                         **forwarded_config,
+                                        **_hcm_access_log_config(
+                                            access_log=self._access_log
+                                        ),
                                         **_hcm_tracing_config(otel),
                                     },
                                 }
@@ -1162,6 +1176,36 @@ def _hcm_forwarded_config(forwarded_allow_ips: list[str]) -> dict:
                 "typed_config": {
                     "@type": "type.googleapis.com/envoy.extensions.http.original_ip_detection.xff.v3.XffConfig",
                     "xff_trusted_cidrs": {"cidrs": cidrs},
+                },
+            }
+        ]
+    }
+
+
+_ACCESS_LOG_FORMAT = (
+    "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% - - "
+    "[%START_TIME(%d/%b/%Y:%H:%M:%S %z)%] "
+    '"%REQ(:METHOD)% %REQ(:PATH)% %PROTOCOL%" %RESPONSE_CODE% %BYTES_SENT% '
+    '"%REQ(REFERER)%" "%REQ(USER-AGENT)%"\n'
+)
+
+_FILE_FLUSH_INTERVAL_ARG = "--file-flush-interval-msec"
+_ACCESS_LOG_FLUSH_INTERVAL_MS = "100"
+
+
+def _hcm_access_log_config(*, access_log: bool) -> dict:
+    """Returns the HTTP connection manager config to log requests to stdout."""
+    if not access_log:
+        return {}
+    return {
+        "access_log": [
+            {
+                "name": "envoy.access_loggers.stdout",
+                "typed_config": {
+                    "@type": "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog",
+                    "log_format": {
+                        "text_format_source": {"inline_string": _ACCESS_LOG_FORMAT}
+                    },
                 },
             }
         ]

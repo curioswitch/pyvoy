@@ -75,6 +75,9 @@ than serving in Python with e.g., Starlette.
 - `--forwarded-allow-ips` - A comma-separated list of IP addresses and CIDR ranges of reverse proxies, such as a load
   balancer, to trust with proxy headers like `X-Forwarded-For` or `X-Forwarded-Proto`. The value `*` trusts any peer.
   while an empty value trusts no peer. **Default**: _127.0.0.1,::1_.
+- `--access-log` - Log each request, for example `127.0.0.1 - - [12/Nov/2026:08:42:34 +0000] "GET /hello HTTP/1.1" 200 13 "-" "curl/8.7.1"`.
+  Logs are flushed every 100ms, which can be changed by passing Envoy's flag after `--`, for example
+  `pyvoy --access-log myapp -- --file-flush-interval-msec 1000`.
 
 ## HTTP Client
 
