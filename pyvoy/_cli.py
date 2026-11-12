@@ -59,6 +59,7 @@ class CLIArgs:
     websockets_compression: bool
     websockets_compression_no_context_takeover: bool
     content_encodings: list[ContentEncoding]
+    access_log: bool
     otel: bool
     reload: bool
     reload_dirs: list[str]
@@ -300,6 +301,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--access-log",
+        help="log each request to stdout in the Combined Log Format",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
         "--otel",
         help="whether to export Envoy's traces and metrics with OTLP as configured by the standard OTEL_* environment variables",
         action=argparse.BooleanOptionalAction,
@@ -449,6 +457,7 @@ async def amain() -> None:
         websockets_compression_no_context_takeover=args.websockets_compression_no_context_takeover,
         content_encodings=args.content_encodings,
         forwarded_allow_ips=getattr(args, "forwarded_allow_ips", None),
+        access_log=args.access_log,
         enable_otel=args.otel,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,

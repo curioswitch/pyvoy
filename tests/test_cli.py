@@ -550,3 +550,27 @@ def test_invalid_forwarded_allow_ips_rejected(
 
     assert exc_info.value.code == 2
     assert "argument --forwarded-allow-ips:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flag", "expected"), [([], False), (["--access-log"], True)])
+def test_access_log_flag(
+    flag: list[str], *, expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyvoy", "tests.apps.asgi.kitchensink", *flag, "--print-envoy-config"],
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._access_log is expected
