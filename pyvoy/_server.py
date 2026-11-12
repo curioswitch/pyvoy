@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import importlib.util
+import ipaddress
 import json
 import os
 import subprocess
@@ -215,6 +216,7 @@ class PyvoyServer:
     _websockets_compression: bool
     _websockets_compression_no_context_takeover: bool
     _content_encodings: list[ContentEncoding]
+    _forwarded_allow_ips: list[str] | None
     _enable_otel: bool
 
     _admin_address: str | None
@@ -244,6 +246,7 @@ class PyvoyServer:
         websockets_compression: bool = True,
         websockets_compression_no_context_takeover: bool = False,
         content_encodings: Iterable[ContentEncoding] | None = None,
+        forwarded_allow_ips: Iterable[str] | None = None,
         enable_otel: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
@@ -297,6 +300,10 @@ class PyvoyServer:
                 order of preference. Unset or empty disables response compression.
                 When set, applications no longer receive the Accept-Encoding
                 request header so they do not compress responses themselves.
+            forwarded_allow_ips: The IP addresses or CIDR ranges of reverse proxies
+                trusted to set the client address with the X-Forwarded-For header
+                and the scheme with the X-Forwarded-Proto header, or '*' to trust
+                any peer. Unset trusts 127.0.0.1 and ::1, and empty trusts no peer.
             enable_otel: Whether to export Envoy's traces and metrics with OTLP as
                 configured by the standard OTEL_* environment variables, read from
                 the environment the server is started with. Each signal is exported
@@ -310,17 +317,6 @@ class PyvoyServer:
             static_mounts: Static file mounts to serve alongside the application(s).
             stdout: Where to redirect the server's stdout.
             stderr: Where to redirect the server's stderr.
-
-        Raises:
-            TypeError: If worker_threads or websockets_max_message_size is not an
-                integer, or io_threads is not an integer or 'auto'.
-            ValueError: If worker_threads or io_threads is not between 1 and
-                sys.maxsize,
-                websockets_max_message_size is not between 0 and sys.maxsize,
-                content_encodings contains an unknown or duplicate encoding, or
-                uds is used with tls_port.
-                When the Envoy config is generated, if enable_otel is set and an
-                OTEL_* environment variable has an invalid value.
         """
         if worker_threads is not None:
             if not isinstance(worker_threads, int) or isinstance(worker_threads, bool):
@@ -356,6 +352,8 @@ class PyvoyServer:
         if len(set(content_encodings)) != len(content_encodings):
             msg = "content_encodings must not contain duplicates"
             raise ValueError(msg)
+        if forwarded_allow_ips is not None:
+            forwarded_allow_ips = _parse_forwarded_allow_ips(forwarded_allow_ips)
 
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
@@ -375,6 +373,7 @@ class PyvoyServer:
             websockets_compression_no_context_takeover
         )
         self._content_encodings = content_encodings
+        self._forwarded_allow_ips = forwarded_allow_ips
         self._enable_otel = enable_otel
         self._root_path = root_path
         self._stdout = stdout
@@ -604,6 +603,13 @@ class PyvoyServer:
             base_pyvoy_config["websockets_compression_no_context_takeover"] = True
         if self._upstreams:
             base_pyvoy_config["enable_http_client"] = True
+        if self._forwarded_allow_ips is not None:
+            base_pyvoy_config["forwarded_allow_ips"] = self._forwarded_allow_ips
+        forwarded_config = _hcm_forwarded_config(
+            self._forwarded_allow_ips
+            if self._forwarded_allow_ips is not None
+            else _DEFAULT_FORWARDED_ALLOW_IPS
+        )
         # Response compression runs before the terminal filter that generates the
         # response, so it sees the body on the way back out to the client.
         compressor_filters = [
@@ -729,6 +735,7 @@ class PyvoyServer:
             "route_config": {"virtual_hosts": [virtual_host_config]},
             "http_filters": http_filters,
             "generate_request_id": False,
+            **forwarded_config,
             **_hcm_tracing_config(otel),
         }
 
@@ -870,6 +877,7 @@ class PyvoyServer:
                                             ]
                                         },
                                         "http_filters": http_filters,
+                                        **forwarded_config,
                                         **_hcm_tracing_config(otel),
                                     },
                                 }
@@ -1110,6 +1118,54 @@ def _dynamic_module_action(
     else:
         action_config["typed_config"] = module_filter
     return {"action": {"name": "composite_action", "typed_config": action_config}}
+
+
+_DEFAULT_FORWARDED_ALLOW_IPS = ["127.0.0.1/32", "::1/128"]
+
+
+def _parse_forwarded_allow_ips(forwarded_allow_ips: Iterable[str]) -> list[str]:
+    """Normalizes trusted proxy addresses to CIDR ranges, or '*'."""
+    if isinstance(forwarded_allow_ips, str):
+        msg = "forwarded_allow_ips must be an iterable of strings, not a string"
+        raise TypeError(msg)
+    parsed: list[str] = []
+    for value in forwarded_allow_ips:
+        if value == "*":
+            parsed.append(value)
+            continue
+        try:
+            parsed.append(str(ipaddress.ip_network(value, strict=False)))
+        except ValueError:
+            msg = f"forwarded_allow_ips must each be an IP address, CIDR range, or '*', got '{value}'"
+            raise ValueError(msg) from None
+    return parsed
+
+
+def _hcm_forwarded_config(forwarded_allow_ips: list[str]) -> dict:
+    """Returns the HTTP connection manager config to resolve the client address
+    from the X-Forwarded-For header of trusted proxies.
+    """
+    if "*" in forwarded_allow_ips:
+        # By default, Envoy uses the last X-Forwarded-For address from any peer.
+        return {}
+    if not forwarded_allow_ips:
+        # Use the peer's address, leaving X-Forwarded-For as sent.
+        return {"use_remote_address": True, "skip_xff_append": True}
+    cidrs = []
+    for cidr in forwarded_allow_ips:
+        address, prefix_len = cidr.split("/")
+        cidrs.append({"address_prefix": address, "prefix_len": int(prefix_len)})
+    return {
+        "original_ip_detection_extensions": [
+            {
+                "name": "envoy.http.original_ip_detection.xff",
+                "typed_config": {
+                    "@type": "type.googleapis.com/envoy.extensions.http.original_ip_detection.xff.v3.XffConfig",
+                    "xff_trusted_cidrs": {"cidrs": cidrs},
+                },
+            }
+        ]
+    }
 
 
 def _hcm_tracing_config(otel: OTelConfig | None) -> dict:

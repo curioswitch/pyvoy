@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 
 use crate::envoy::*;
+use crate::forwarded::{self, TrustedProxies};
 use crate::headernames::{ASGIHeaderNameConstants, WSGIHeaderNameConstants};
 use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilter;
 use envoy_proxy_dynamic_modules_rust_sdk::abi::envoy_dynamic_module_type_attribute_id;
@@ -196,6 +197,10 @@ pub(crate) struct Constants {
     pub server_name: Py<PyString>,
     /// The string "SERVER_PORT".
     pub server_port: Py<PyString>,
+    /// The string "REMOTE_ADDR".
+    pub remote_addr: Py<PyString>,
+    /// The string "REMOTE_PORT".
+    pub remote_port: Py<PyString>,
     /// The string "SERVER_PROTOCOL".
     pub server_protocol: Py<PyString>,
     /// The string "wsgi.version".
@@ -421,6 +426,8 @@ impl Constants {
             wsgi_query_string: PyString::new(py, "QUERY_STRING").unbind(),
             server_name: PyString::new(py, "SERVER_NAME").unbind(),
             server_port: PyString::new(py, "SERVER_PORT").unbind(),
+            remote_addr: PyString::new(py, "REMOTE_ADDR").unbind(),
+            remote_port: PyString::new(py, "REMOTE_PORT").unbind(),
             server_protocol: PyString::new(py, "SERVER_PROTOCOL").unbind(),
             wsgi_version: PyString::new(py, "wsgi.version").unbind(),
             wsgi_url_scheme: PyString::new(py, "wsgi.url_scheme").unbind(),
@@ -614,7 +621,10 @@ pub(crate) struct Scope {
     pub tls_info: Option<TlsInfo>,
 }
 
-pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
+pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(
+    envoy_filter: &EHF,
+    trusted_proxies: &TrustedProxies,
+) -> Scope {
     let http_version = match envoy_filter
         .get_attribute_string(envoy_dynamic_module_type_attribute_id::RequestProtocol)
     {
@@ -633,6 +643,7 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         method,
         raw_path,
         scheme,
+        forwarded_proto_is_secure,
     } = read_request_headers(envoy_filter);
 
     // ASGI only has IP addresses for clients, so a Unix socket peer is omitted.
@@ -672,6 +683,14 @@ pub(crate) fn new_scope<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Scope {
         None => None,
     };
 
+    // Only a trusted proxy can set the scheme, with x-forwarded-proto or, for
+    // HTTP/2 and HTTP/3, :scheme. Otherwise it is from the connection.
+    let scheme = if trusted_proxies.is_trusted(|| direct_remote_ip(envoy_filter)) {
+        forwarded_proto_is_secure.map_or(scheme, forwarded::http_scheme)
+    } else {
+        forwarded::http_scheme(tls_info.is_some())
+    };
+
     Scope {
         http_version,
         method,
@@ -699,6 +718,15 @@ fn get_address<EHF: EnvoyHttpFilter>(
         // Envoy only has ports for IP addresses, so this is a Unix socket path.
         None => Some((Box::from(host_str), None)),
     }
+}
+
+/// The IP address of the peer connected to Envoy, ignoring x-forwarded-for.
+/// None for a Unix socket peer.
+fn direct_remote_ip<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> Option<std::net::IpAddr> {
+    let address = envoy_filter.get_downstream_direct_remote_address()?;
+    strip_port(str::from_utf8(address.as_slice()).ok()?)
+        .parse()
+        .ok()
 }
 
 pub(crate) fn strip_port(s: &str) -> &str {

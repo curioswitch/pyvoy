@@ -72,6 +72,9 @@ than serving in Python with e.g., Starlette.
 
   When this is set, applications no longer receive the `Accept-Encoding` request header so compression is handled
   entirely in Envoy.
+- `--forwarded-allow-ips` - A comma-separated list of IP addresses and CIDR ranges of reverse proxies, such as a load
+  balancer, to trust with proxy headers like `X-Forwarded-For` or `X-Forwarded-Proto`. The value `*` trusts any peer.
+  while an empty value trusts no peer. **Default**: _127.0.0.1,::1_.
 
 ## HTTP Client
 

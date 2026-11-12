@@ -21,6 +21,7 @@ use crate::asgi::websocket::executor::{
 };
 use crate::asgi::websocket::stream::EnvoyStream;
 use crate::eventbridge::EventBridge;
+use crate::forwarded::{self, TrustedProxies};
 use crate::types::*;
 
 mod executor;
@@ -31,6 +32,7 @@ pub struct Config {
     handles: Option<ExecutorHandles>,
     max_message_size: usize,
     deflate: Option<DeflateConfig>,
+    trusted_proxies: Arc<TrustedProxies>,
 }
 
 impl Config {
@@ -44,6 +46,7 @@ impl Config {
         loop_kind: LoopKind,
         max_message_size: usize,
         deflate: Option<DeflateConfig>,
+        trusted_proxies: TrustedProxies,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match WebSocketExecutor::new(
@@ -72,6 +75,7 @@ impl Config {
             handles: Some(handles),
             max_message_size,
             deflate,
+            trusted_proxies: Arc::new(trusted_proxies),
         })
     }
 }
@@ -96,6 +100,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
             downstream_watermark_level: 0,
             max_message_size: self.max_message_size,
             deflate: self.deflate,
+            trusted_proxies: self.trusted_proxies.clone(),
         }))
     }
 }
@@ -124,6 +129,7 @@ struct Filter {
 
     max_message_size: usize,
     deflate: Option<DeflateConfig>,
+    trusted_proxies: Arc<TrustedProxies>,
 }
 
 impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
@@ -209,7 +215,7 @@ impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
                             let (_, total_size) = envoy_filter.get_read_buffer_chunks();
                             envoy_filter.drain_read_buffer(total_size);
                             let subprotocols = parse_subprotocols(request.headers());
-                            let scope = new_scope(request, envoy_filter);
+                            let scope = new_scope(request, envoy_filter, &self.trusted_proxies);
                             self.executor.execute_app(
                                 scope,
                                 subprotocols,
@@ -620,8 +626,38 @@ fn parse_subprotocols(headers: &http::HeaderMap) -> Vec<String> {
         .collect()
 }
 
-fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFilter) -> Scope {
+fn new_scope(
+    request: http::Request<()>,
+    envoy_filter: &mut impl EnvoyNetworkFilter,
+    trusted_proxies: &TrustedProxies,
+) -> Scope {
     let (head, _) = request.into_parts();
+
+    // WebSocket connections don't go through the HTTP connection manager, so
+    // we resolve forwarded headers of trusted proxies the same way it does.
+    let peer = envoy_filter.get_remote_address();
+    let mut client = None;
+    let mut forwarded_proto_is_secure = None;
+    if trusted_proxies.is_trusted(|| strip_port(&peer.0).parse().ok()) {
+        let forwarded_for = head
+            .headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .map(|value| value.to_str())
+            .collect::<Result<Vec<_>, _>>();
+        if let Ok(forwarded_for) = forwarded_for
+            && !forwarded_for.is_empty()
+        {
+            client = trusted_proxies
+                .client_from_forwarded_for(&forwarded_for.join(","))
+                .map(|address| (Box::from(address.to_string()), 0));
+        }
+        forwarded_proto_is_secure = head
+            .headers
+            .get("x-forwarded-proto")
+            .and_then(|value| forwarded::forwarded_proto_is_secure(value.as_bytes()));
+    }
+    let client = client.or_else(|| address_to_scope(peer));
     let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(head.headers.len());
     let mut current_name: Option<HeaderName> = None;
     for (name, value) in head.headers.into_iter() {
@@ -636,7 +672,7 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
     Scope {
         http_version: head.version,
         method: head.method,
-        scheme: if is_ssl {
+        scheme: if forwarded_proto_is_secure.unwrap_or(is_ssl) {
             uri::Scheme::try_from("wss").unwrap()
         } else {
             uri::Scheme::try_from("ws").unwrap()
@@ -647,7 +683,7 @@ fn new_scope(request: http::Request<()>, envoy_filter: &mut impl EnvoyNetworkFil
             .map(|pq| Box::from(pq.as_str().as_bytes()))
             .unwrap_or_default(),
         headers,
-        client: address_to_scope(envoy_filter.get_remote_address()),
+        client,
         server: address_to_scope(envoy_filter.get_local_address())
             .map(|(host, port)| (host, Some(port))),
         // Network filter doesn't expose tls_version but we can report the rest.

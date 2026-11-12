@@ -1,11 +1,16 @@
 use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyMutBuffer};
 use http::{HeaderName, HeaderValue, uri};
 
+use crate::forwarded;
+
 pub(crate) struct HeadersInfo {
     pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) method: http::Method,
     pub(crate) raw_path: Box<[u8]>,
     pub(crate) scheme: uri::Scheme,
+    /// Whether the x-forwarded-proto header is a secure scheme, if it is a
+    /// valid scheme.
+    pub(crate) forwarded_proto_is_secure: Option<bool>,
 }
 
 /// Reads request headers from Envoy, skipping pseudo-headers.
@@ -17,6 +22,7 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
     let mut method = http::Method::GET;
     let mut raw_path: Box<[u8]> = Box::default();
     let mut scheme = uri::Scheme::HTTP;
+    let mut forwarded_proto_is_secure = None;
 
     // ASGI says host must be the start of the vector so handle it first.
     if let Some(authority) = envoy_filter.get_request_header_value(":authority") {
@@ -57,6 +63,12 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
                 // There seems to be no way of disabling Envoy's addition of this. We don't need it
                 // since we're not propagating to an upstream - we keep the scheme in the scope
                 // instead.
+                forwarded_proto_is_secure = forwarded::forwarded_proto_is_secure(value_slice);
+                continue;
+            }
+            b"x-envoy-external-address" => {
+                // Envoy adds this when no proxy is trusted. The client address is in the scope
+                // already.
                 continue;
             }
             _ => {}
@@ -75,6 +87,7 @@ pub(crate) fn read_request_headers<EHF: EnvoyHttpFilter>(envoy_filter: &EHF) -> 
         method,
         raw_path,
         scheme,
+        forwarded_proto_is_secure,
     }
 }
 

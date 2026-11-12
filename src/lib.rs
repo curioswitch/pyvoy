@@ -13,6 +13,8 @@ mod asgi;
 mod envoy;
 /// An optimized event bridge between Envoy and Python.
 mod eventbridge;
+/// Resolution of the client and scheme from headers set by trusted proxies.
+mod forwarded;
 /// Python constants for header names.
 mod headernames;
 mod ondrop;
@@ -154,6 +156,43 @@ fn parse_loop_config(filter_config: &Yaml) -> Option<asgi::LoopKind> {
     loop_kind
 }
 
+/// Parses the proxies trusted to set forwarded headers, defaulting to
+/// loopback addresses. Returns None on invalid config.
+fn parse_forwarded_allow_ips_config(filter_config: &Yaml) -> Option<forwarded::TrustedProxies> {
+    let value = &filter_config["forwarded_allow_ips"];
+    if value.is_badvalue() {
+        return Some(forwarded::TrustedProxies::Cidrs(Box::from([
+            forwarded::Cidr::parse("127.0.0.1").unwrap(),
+            forwarded::Cidr::parse("::1").unwrap(),
+        ])));
+    }
+    let entries = value.as_vec().and_then(|entries| {
+        entries
+            .iter()
+            .map(|entry| entry.as_str())
+            .collect::<Option<Vec<_>>>()
+    });
+    let Some(entries) = entries else {
+        envoy_log_error!("Filter config field 'forwarded_allow_ips' must be a list of strings");
+        return None;
+    };
+    if entries.contains(&"*") {
+        return Some(forwarded::TrustedProxies::All);
+    }
+    let mut cidrs = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(cidr) = forwarded::Cidr::parse(entry) else {
+            envoy_log_error!(
+                "Filter config field 'forwarded_allow_ips' must contain IP addresses, CIDR ranges, or '*', got '{}'",
+                entry
+            );
+            return None;
+        };
+        cidrs.push(cidr);
+    }
+    Some(forwarded::TrustedProxies::Cidrs(cidrs.into_boxed_slice()))
+}
+
 /// Parses the sampler of Envoy's tracer, which is unset when tracing is
 /// disabled. Returns None on invalid config.
 fn parse_trace_sampler_config(filter_config: &Yaml) -> Option<Option<tracecontext::TraceSampler>> {
@@ -232,6 +271,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
         types::HTTP_CLIENT_ENABLED.store(true, Ordering::Relaxed);
     }
     let trace_sampler = parse_trace_sampler_config(filter_config)?;
+    let trusted_proxies = parse_forwarded_allow_ips_config(filter_config)?;
 
     let constants = Python::attach(types::Constants::get);
 
@@ -245,6 +285,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             loop_kind,
             enable_http_client,
             trace_sampler,
+            trusted_proxies,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(
@@ -254,6 +295,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             worker_threads,
             enable_http_client,
             trace_sampler,
+            trusted_proxies,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         _ => {
@@ -294,6 +336,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     let worker_threads = parse_usize_config(filter_config, "worker_threads", 1, 1)?;
     let enable_lifespan = filter_config["lifespan"].as_bool();
     let loop_kind = parse_loop_config(filter_config)?;
+    let trusted_proxies = parse_forwarded_allow_ips_config(filter_config)?;
     let max_message_size =
         parse_usize_config(filter_config, "websockets_max_message_size", 64 << 20, 0)?; // Default to 64 MiB
     let deflate = if filter_config["websockets_compression"]
@@ -325,6 +368,7 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
         loop_kind,
         max_message_size,
         deflate,
+        trusted_proxies,
     )
     .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
 }

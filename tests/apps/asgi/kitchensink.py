@@ -1177,6 +1177,9 @@ async def _echo_scope(
     server, server_port = "", 0
     if s := scope.get("server"):
         server, server_port = s
+    client, client_port = "", 0
+    if c := scope.get("client"):
+        client, client_port = c
 
     await send(
         {
@@ -1193,6 +1196,8 @@ async def _echo_scope(
                 (b"x-scope-root-path", scope["root_path"].encode()),
                 (b"x-scope-server-address", server.encode()),
                 (b"x-scope-server-port", str(server_port).encode()),
+                (b"x-scope-client-address", client.encode()),
+                (b"x-scope-client-port", str(client_port).encode()),
                 (
                     b"x-scope-tls-version",
                     str(extensions.get("tls", {}).get("tls_version", "")).encode(),

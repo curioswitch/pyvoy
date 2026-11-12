@@ -25,6 +25,7 @@ from ._server import (
     StaticMount,
     TLSConfig,
     Upstream,
+    _parse_forwarded_allow_ips,
     get_envoy_environ,
 )
 from ._watcher import watch
@@ -97,6 +98,14 @@ def _content_encodings(value: str) -> list[ContentEncoding]:
         msg = "content encodings must not be repeated"
         raise argparse.ArgumentTypeError(msg)
     return cast("list[ContentEncoding]", encodings)
+
+
+def _forwarded_allow_ips(value: str) -> list[str]:
+    entries = [entry.strip() for entry in value.split(",") if entry.strip()]
+    try:
+        return _parse_forwarded_allow_ips(entries)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 async def amain() -> None:
@@ -284,6 +293,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--forwarded-allow-ips",
+        help="comma-separated IP addresses or CIDR ranges of reverse proxies trusted to set the client address and scheme with X-Forwarded-For and X-Forwarded-Proto, or '*' to trust any peer. Empty trusts no peer. (default: 127.0.0.1,::1)",
+        type=_forwarded_allow_ips,
+        default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
         "--otel",
         help="whether to export Envoy's traces and metrics with OTLP as configured by the standard OTEL_* environment variables",
         action=argparse.BooleanOptionalAction,
@@ -432,6 +448,7 @@ async def amain() -> None:
         websockets_compression=args.websockets_compression,
         websockets_compression_no_context_takeover=args.websockets_compression_no_context_takeover,
         content_encodings=args.content_encodings,
+        forwarded_allow_ips=getattr(args, "forwarded_allow_ips", None),
         enable_otel=args.otel,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,
