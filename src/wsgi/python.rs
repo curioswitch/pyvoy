@@ -277,6 +277,11 @@ impl ExecutorInner {
             environ.set_item(&self.constants.server_port, "0")?;
         }
 
+        if let Some((client, port)) = scope.client {
+            environ.set_item(&self.constants.remote_addr, &client[..])?;
+            environ.set_item(&self.constants.remote_port, port.to_string())?;
+        }
+
         environ.set_http_version_wsgi(&self.constants, &scope.http_version)?;
 
         environ.set_item(&self.constants.wsgi_version, (1, 0))?;

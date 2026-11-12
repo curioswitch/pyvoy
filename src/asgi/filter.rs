@@ -19,6 +19,7 @@ use crate::asgi::transport::{
 };
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
+use crate::forwarded::TrustedProxies;
 use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::types::*;
 
@@ -27,6 +28,7 @@ pub struct Config {
     handles: Option<ExecutorHandles>,
     enable_http_client: bool,
     trace_sampler: Option<TraceSampler>,
+    trusted_proxies: Arc<TrustedProxies>,
 }
 
 impl Config {
@@ -40,6 +42,7 @@ impl Config {
         loop_kind: LoopKind,
         enable_http_client: bool,
         trace_sampler: Option<TraceSampler>,
+        trusted_proxies: TrustedProxies,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match python::Executor::new(
@@ -68,6 +71,7 @@ impl Config {
             handles: Some(handles),
             enable_http_client,
             trace_sampler,
+            trusted_proxies: Arc::new(trusted_proxies),
         })
     }
 }
@@ -84,6 +88,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
             trace_sampler: self.trace_sampler,
+            trusted_proxies: self.trusted_proxies.clone(),
             request_closed: Cell::new(false),
             response_closed: Arc::new(AtomicBool::new(false)),
             response_trailers: RefCell::new(None),
@@ -99,6 +104,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 struct Filter {
     executor: python::Executor,
     trace_sampler: Option<TraceSampler>,
+    trusted_proxies: Arc<TrustedProxies>,
 
     request_closed: Cell<bool>,
     response_closed: Arc<AtomicBool>,
@@ -132,7 +138,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if let Some(trace_sampler) = &self.trace_sampler {
             propagate_active_span(envoy_filter, trace_sampler);
         }
-        let scope = new_scope(envoy_filter);
+        let scope = new_scope(envoy_filter, &self.trusted_proxies);
 
         self.executor.execute_app(
             scope,

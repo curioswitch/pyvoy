@@ -627,6 +627,8 @@ def _echo_scope(
             ("x-scope-tls-version", environ.get("wsgi.ext.tls.tls_version", "")),
             ("x-scope-server-address", environ.get("SERVER_NAME", "")),
             ("x-scope-server-port", str(environ.get("SERVER_PORT", 0))),
+            ("x-scope-client-address", environ.get("REMOTE_ADDR", "")),
+            ("x-scope-client-port", environ.get("REMOTE_PORT", "0")),
             (
                 "x-scope-tls-client-cert-name",
                 environ.get("wsgi.ext.tls.client_cert_name", ""),

@@ -477,3 +477,76 @@ def test_invalid_content_encodings_rejected(
 
     assert exc_info.value.code == 2
     assert f"argument --content-encodings: {expected_error}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("10.1.2.3/8, ::1", ["10.0.0.0/8", "::1/128"]), ("*", ["*"]), ("", [])],
+)
+def test_forwarded_allow_ips_flag(
+    value: str, expected: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyvoy",
+            "tests.apps.asgi.kitchensink",
+            "--forwarded-allow-ips",
+            value,
+            "--print-envoy-config",
+        ],
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._forwarded_allow_ips == expected
+
+
+def test_forwarded_allow_ips_flag_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys, "argv", ["pyvoy", "tests.apps.asgi.kitchensink", "--print-envoy-config"]
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._forwarded_allow_ips is None
+
+
+def test_invalid_forwarded_allow_ips_rejected(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyvoy",
+            "tests.apps.asgi.kitchensink",
+            "--forwarded-allow-ips",
+            "10.0.0.1,nope",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 2
+    assert "argument --forwarded-allow-ips:" in capsys.readouterr().err

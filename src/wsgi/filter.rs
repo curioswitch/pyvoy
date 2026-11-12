@@ -1,5 +1,6 @@
 use crate::envoy::{buffers_len, extend_from_buffers, has_request_body};
 use crate::eventbridge::EventBridge;
+use crate::forwarded::TrustedProxies;
 use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::wsgi::python::Executor;
 use crate::wsgi::transport::{
@@ -18,6 +19,7 @@ pub struct Config {
     executor: Executor,
     enable_http_client: bool,
     trace_sampler: Option<TraceSampler>,
+    trusted_proxies: Arc<TrustedProxies>,
 }
 
 impl Config {
@@ -28,6 +30,7 @@ impl Config {
         worker_threads: usize,
         enable_http_client: bool,
         trace_sampler: Option<TraceSampler>,
+        trusted_proxies: TrustedProxies,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let executor = match Executor::new(module, attr, root_path, worker_threads, constants) {
@@ -41,6 +44,7 @@ impl Config {
             executor,
             enable_http_client,
             trace_sampler,
+            trusted_proxies: Arc::new(trusted_proxies),
         })
     }
 }
@@ -58,6 +62,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
         Box::new(CatchUnwind::new(Filter {
             executor: self.executor.clone(),
             trace_sampler: self.trace_sampler,
+            trusted_proxies: self.trusted_proxies.clone(),
             request_closed: Cell::new(false),
             response_closed: Cell::new(false),
             request_read_bridge: EventBridge::new(),
@@ -78,6 +83,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
 struct Filter {
     executor: Executor,
     trace_sampler: Option<TraceSampler>,
+    trusted_proxies: Arc<TrustedProxies>,
 
     request_closed: Cell<bool>,
     response_closed: Cell<bool>,
@@ -111,7 +117,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         if let Some(trace_sampler) = &self.trace_sampler {
             propagate_active_span(envoy_filter, trace_sampler);
         }
-        let scope = new_scope(envoy_filter);
+        let scope = new_scope(envoy_filter, &self.trusted_proxies);
 
         self.executor.execute_app(
             scope,
