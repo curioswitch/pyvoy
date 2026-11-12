@@ -30,6 +30,7 @@ async def server(interface: Interface) -> AsyncIterator[PyvoyServer]:
         access_log=True,
         lifespan=False,
         stdout=subprocess.PIPE,
+        stderr=None,
     ) as server:
         yield server
 
@@ -104,6 +105,7 @@ async def test_access_log_flush_interval(
         access_log=True,
         lifespan=False,
         additional_envoy_args=additional_envoy_args,
+        stderr=None,
     ) as server:
         response = await asyncio.to_thread(
             urllib.request.urlopen, f"http://{server._admin_address}/server_info"
