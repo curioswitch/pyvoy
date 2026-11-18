@@ -385,8 +385,9 @@ struct ExecuteAppEvent {
 /// The receive callable we pass to the application.
 #[pyclass(module = "_pyvoy.asgi")]
 struct RecvCallable {
-    /// Whether the request was closed with headers, usually a GET request, and
-    /// its empty body has not been received yet.
+    /// Whether the request was closed without a body, e.g. a GET request.
+    /// `receive` itself will return an empty body once directly without
+    /// reading from the filter.
     empty_body_pending: AtomicBool,
     recv_bridge: EventBridge<RecvFuture>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,

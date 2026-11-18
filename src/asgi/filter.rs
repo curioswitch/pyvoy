@@ -106,7 +106,7 @@ struct Filter {
     trusted_proxies: Arc<TrustedProxies>,
 
     request_closed: Cell<bool>,
-    /// Whether the application has received the end of the request body.
+    /// Whether the application has called `receive` and received the end of the request body.
     request_body_received: Cell<bool>,
 
     response_trailers: RefCell<Option<Vec<(HeaderName, HeaderValue)>>>,
@@ -180,7 +180,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_stream_complete(&self, _envoy_filter: &mut EHF) {
-        // Dropping the receives still waiting resolves them to http.disconnect.
+        // Dropping any pending receives will resolve them to http.disconnect.
         self.recv_bridge.close();
         self.send_bridge.close();
 
