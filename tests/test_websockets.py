@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import socket
 import ssl
+import struct
 import subprocess
-from time import perf_counter_ns
+from time import perf_counter_ns, sleep
 from typing import TYPE_CHECKING
 
 import pytest
@@ -510,6 +513,44 @@ async def test_abrupt_drop(server: PyvoyServer) -> None:
     await ws.send("x")
     assert await ws.recv() == "x"
     ws.transport.close()
+
+
+def _client_frame(opcode: int, payload: bytes) -> bytes:
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked
+
+
+def _frames_after_close(port: int) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall(
+            (
+                "GET /echo HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n\r\n"
+            ).encode()
+        )
+        received = b""
+        while b"\r\n\r\n" not in received:
+            received += sock.recv(4096)
+        received = received.split(b"\r\n\r\n", 1)[1]
+        sock.sendall(_client_frame(0x8, struct.pack("!H", 1000)))
+        while chunk := sock.recv(4096):
+            received += chunk
+        # The server has finished the close handshake. A frame sent now
+        # must not make the server reset the connection, or clients that
+        # haven't read the server's Close yet may lose it.
+        sock.sendall(_client_frame(0x9, b""))
+        sleep(0.2)
+        sock.sendall(_client_frame(0x9, b""))
+        return received
+
+
+@pytest.mark.asyncio
+async def test_frames_after_close_drained(server: PyvoyServer) -> None:
+    received = await asyncio.to_thread(_frames_after_close, server.listener_port)
+    assert received == b"\x88\x02" + struct.pack("!H", 1000)
 
 
 @pytest.fixture(scope="module")
