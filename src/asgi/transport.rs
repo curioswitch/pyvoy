@@ -26,7 +26,10 @@ use url::Url;
 use crate::{
     asgi::{
         python::EVENT_ID_OUTGOING_REQUEST,
-        shared::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+        shared::{
+            awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
+            future,
+        },
     },
     eventbridge::EventBridge,
     types::{Constants, HTTP_CLIENT_ENABLED},
@@ -352,8 +355,7 @@ impl ReceivedResponseHeadersExecutor {
             }
         }
 
-        response_future.call_method1(&self.constants.set_result, (response,))?;
-        Ok(())
+        future::set_result(response_future, &self.constants, response)
     }
 }
 
@@ -473,12 +475,11 @@ impl ResponseContent {
         let Some(pending_future) = state.pending_future.take() else {
             return Ok(());
         };
+        let pending_future = pending_future.bind(py);
+        let constants = &inner.constants;
         // The application cancelled the read, so the data stays buffered for
         // the next one.
-        if pending_future
-            .call_method0(py, &inner.constants.done)?
-            .is_truthy(py)?
-        {
+        if future::is_done(pending_future, constants)? {
             return Ok(());
         }
 
@@ -488,28 +489,17 @@ impl ResponseContent {
         if !state.body.is_empty() {
             let chunk = PyBytes::new(py, &state.body).into_any();
             state.body.clear();
-            pending_future.call_method1(py, &inner.constants.set_result, (chunk,))?;
+            future::set_result(pending_future, constants, chunk)
         } else if let Some(exception) = &state.exception {
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (PyErr::from_value(exception.bind(py).clone()),),
-            )?;
+            let err = PyErr::from_value(exception.bind(py).clone());
+            future::set_exception(pending_future, constants, err)
         } else if let Some(reason) = state.reset_reason {
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (map_reset_reason(py, reason, &inner.constants)?,),
-            )?;
+            let err = map_reset_reason(py, reason, constants)?;
+            future::set_exception(pending_future, constants, err)
         } else {
             // state.end_stream
-            pending_future.call_method1(
-                py,
-                &inner.constants.set_exception,
-                (PyStopAsyncIteration::new_err(()),),
-            )?;
+            future::set_exception(pending_future, constants, PyStopAsyncIteration::new_err(()))
         }
-        Ok(())
     }
 
     pub(crate) fn take_exception(&self) -> Option<Py<PyAny>> {
@@ -775,20 +765,12 @@ pub(crate) struct SetResponseFutureException {
 impl SetResponseFutureException {
     /// Fails the response future, on the event loop thread.
     pub(crate) fn run(&self, py: Python<'_>) -> PyResult<()> {
-        // The application may have cancelled its wait for the response already.
-        if !self
-            .future
-            .call_method0(py, &self.constants.done)?
-            .is_truthy(py)?
-        {
-            let err = if let Some(exception) = &self.exception {
-                PyErr::from_value(exception.bind(py).clone())
-            } else {
-                map_reset_reason(py, self.reason, &self.constants)?
-            };
-            self.future
-                .call_method1(py, &self.constants.set_exception, (err,))?;
-        }
+        let err = if let Some(exception) = &self.exception {
+            PyErr::from_value(exception.bind(py).clone())
+        } else {
+            map_reset_reason(py, self.reason, &self.constants)?
+        };
+        future::set_exception(self.future.bind(py), &self.constants, err)?;
         if let Some(request_content) = &self.request_content {
             let task = request_content.inner.task.lock_py_attached(py).unwrap();
             if let Some(task) = task.as_ref() {

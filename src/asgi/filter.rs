@@ -8,7 +8,6 @@ use pyo3::types::PyTracebackMethods as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::asgi::python;
 use crate::asgi::python::*;
@@ -90,7 +89,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             trace_sampler: self.trace_sampler,
             trusted_proxies: self.trusted_proxies.clone(),
             request_closed: Cell::new(false),
-            response_closed: Arc::new(AtomicBool::new(false)),
+            request_body_received: Cell::new(false),
             response_trailers: RefCell::new(None),
             recv_bridge: EventBridge::new(),
             send_bridge: EventBridge::new(),
@@ -107,7 +106,8 @@ struct Filter {
     trusted_proxies: Arc<TrustedProxies>,
 
     request_closed: Cell<bool>,
-    response_closed: Arc<AtomicBool>,
+    /// Whether the application has called `receive` and received the end of the request body.
+    request_body_received: Cell<bool>,
 
     response_trailers: RefCell<Option<Vec<(HeaderName, HeaderValue)>>>,
 
@@ -129,6 +129,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_headers_status {
         if end_of_stream {
             self.request_closed.set(true);
+            // The receive callable returns the empty body itself.
+            self.request_body_received.set(true);
         }
 
         let trailers_accepted = envoy_filter
@@ -144,7 +146,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             scope,
             end_of_stream,
             trailers_accepted,
-            self.response_closed.clone(),
             self.recv_bridge.clone(),
             self.send_bridge.clone(),
             self.transport_bridge.clone(),
@@ -179,7 +180,7 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_stream_complete(&self, _envoy_filter: &mut EHF) {
-        self.response_closed.store(true, Ordering::Relaxed);
+        // Dropping any pending receives will resolve them to http.disconnect.
         self.recv_bridge.close();
         self.send_bridge.close();
 
@@ -392,14 +393,18 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
 
 impl Filter {
     fn handle_read(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
-        if self.request_closed.get() || has_request_body(envoy_filter) {
-            self.recv_bridge.process(|future| {
-                self.executor.handle_recv_future(
-                    read_request_body(envoy_filter),
-                    !self.request_closed.get(),
-                    future,
-                );
-            });
+        // Once the application has the whole body, receives wait in the bridge
+        // until the stream completes.
+        while !self.request_body_received.get()
+            && (self.request_closed.get() || has_request_body(envoy_filter))
+        {
+            let Some(future) = self.recv_bridge.get() else {
+                return;
+            };
+            let more_body = !self.request_closed.get();
+            self.executor
+                .handle_recv_future(read_request_body(envoy_filter), more_body, future);
+            self.request_body_received.set(!more_body);
         }
     }
 

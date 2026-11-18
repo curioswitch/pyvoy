@@ -1,6 +1,7 @@
 pub(super) mod app;
 pub(super) mod awaitable;
 pub(super) mod eventloop;
+pub(super) mod future;
 pub(super) mod headers;
 mod lifespan;
 pub(super) mod scope;

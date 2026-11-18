@@ -121,6 +121,33 @@ async def test_receive_as_task(url_asgi: str, client: Client) -> None:
 
 
 @pytest.mark.asyncio
+# Filter logic has a fast path for empty content so we need to test both.
+@pytest.mark.parametrize(
+    ("method", "content"), [("GET", None), ("POST", b""), ("POST", b"hello")]
+)
+async def test_receive_after_body(
+    url_asgi: str,
+    client: Client,
+    logs_asgi: StreamReader,
+    method: str,
+    content: bytes | None,
+) -> None:
+    async with asyncio.timeout(5):
+        response = await client.execute(
+            method, f"{url_asgi}/receive-after-body", content=content
+        )
+    assert response.status == 200, response.text()
+    # The receive waits for the disconnect until the app cancels it.
+    assert response.content == b""
+    # Hard to assert this precisely but wait for a bit of time for more logs
+    # to see if setting the cancelled receive logs an error.
+    _, read_lines = await asyncio.wait_for(
+        find_logs_lines(logs_asgi, ["not happening"]), timeout=0.5
+    )
+    assert "InvalidStateError" not in "".join(read_lines)
+
+
+@pytest.mark.asyncio
 async def test_response_body(url: str, client: Client) -> None:
     response = await client.get(f"{url}/response-body")
     assert response.status == 200, response.text()

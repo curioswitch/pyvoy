@@ -5,6 +5,7 @@ use std::sync::{
 
 use super::awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable};
 use super::eventloop::LoopKind;
+use super::future::SetResultCallback;
 use crate::types::{Constants, SyncReceiver};
 use envoy_proxy_dynamic_modules_rust_sdk::{envoy_log_error, envoy_log_info};
 use pyo3::{
@@ -59,12 +60,14 @@ impl Lifespan {
     }
 
     fn set_shutdown_future<'py>(&self, py: Python<'py>, loop_: &Bound<'py, PyAny>) -> PyResult<()> {
-        let set_result = self
-            .shutdown_future
-            .getattr(py, &self.constants.set_result)?;
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.lifespan_shutdown)?;
-        loop_.call_method1(&self.constants.call_soon_threadsafe, (set_result, event))?;
+        let set_result = SetResultCallback::new(
+            self.shutdown_future.clone_ref(py),
+            event.into_any().unbind(),
+            self.constants.clone(),
+        );
+        loop_.call_method1(&self.constants.call_soon_threadsafe, (set_result,))?;
         Ok(())
     }
 }

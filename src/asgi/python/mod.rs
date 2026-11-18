@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::{
     asgi::{
@@ -7,6 +10,7 @@ use crate::{
             app::load_app,
             awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
             eventloop::{EventLoops, LoopHandle, LoopKind},
+            future,
             headers::extract_headers_from_event,
             scope::new_scope_dict,
         },
@@ -105,7 +109,6 @@ impl Executor {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
-        response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
         transport_bridge: Option<EventBridge<TransportEvent>>,
@@ -115,7 +118,6 @@ impl Executor {
             scope,
             request_closed,
             trailers_accepted,
-            response_closed,
             recv_bridge,
             send_bridge,
             transport_bridge,
@@ -148,10 +150,7 @@ impl Executor {
                 event.set_item(&constants.typ, &constants.http_request)?;
                 event.set_item(&constants.body, PyBytes::new(py, &body))?;
                 event.set_item(&constants.more_body, more_body)?;
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (event,))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, event)
             }));
     }
 
@@ -162,10 +161,7 @@ impl Executor {
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
                 let event = constants.asgi_empty_recv_disconnect.bind(py).copy()?;
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (event,))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, event)
             }));
     }
 
@@ -178,10 +174,7 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (PyNone::get(py),))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, PyNone::get(py))
             }));
     }
 
@@ -191,12 +184,11 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future.future.call_method1(
-                    py,
-                    &constants.set_exception,
-                    (&constants.client_disconnected_err,),
-                )?;
-                Ok(())
+                future::set_exception(
+                    future.future.bind(py),
+                    &constants,
+                    &constants.client_disconnected_err,
+                )
             }));
     }
 
@@ -277,7 +269,6 @@ impl Executor {
             scope,
             request_closed,
             trailers_accepted,
-            response_closed,
             recv_bridge,
             send_bridge,
             transport_bridge,
@@ -301,22 +292,15 @@ impl Executor {
 
         let scheduler = Arc::new(scheduler);
 
-        let recv = if request_closed {
-            EmptyRecvCallable {
-                response_closed,
-                constants: constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        } else {
-            RecvCallable {
-                recv_bridge,
-                scheduler: scheduler.clone(),
-                loop_: loop_.clone().unbind(),
-                executor: self.clone(),
-                constants: constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        };
+        let recv = RecvCallable {
+            empty_body_pending: AtomicBool::new(request_closed),
+            recv_bridge,
+            scheduler: scheduler.clone(),
+            loop_: loop_.clone().unbind(),
+            executor: self.clone(),
+            constants: constants.clone(),
+        }
+        .into_bound_py_any(py)?;
 
         let coro = inner.app.bind(py).call1((
             scope_dict,
@@ -392,7 +376,6 @@ struct ExecuteAppEvent {
     scope: Scope,
     request_closed: bool,
     trailers_accepted: bool,
-    response_closed: Arc<AtomicBool>,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
     transport_bridge: Option<EventBridge<TransportEvent>>,
@@ -402,6 +385,10 @@ struct ExecuteAppEvent {
 /// The receive callable we pass to the application.
 #[pyclass(module = "_pyvoy.asgi")]
 struct RecvCallable {
+    /// Whether the request was closed without a body, e.g. a GET request.
+    /// `receive` itself will return an empty body once directly without
+    /// reading from the filter.
+    empty_body_pending: AtomicBool,
     recv_bridge: EventBridge<RecvFuture>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
@@ -414,6 +401,12 @@ unsafe impl Sync for RecvCallable {}
 #[pymethods]
 impl RecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.empty_body_pending.swap(false, Ordering::Relaxed) {
+            let event = self.constants.asgi_empty_recv.bind(py).copy()?;
+            return ValueAwaitable::new_py(py, &event.into_any());
+        }
+        // After the body, the filter holds the future until the stream completes
+        // and it resolves to http.disconnect.
         let future = self
             .loop_
             .bind(py)
@@ -429,29 +422,6 @@ impl RecvCallable {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future)
-    }
-}
-
-/// The receive callable we pass to the application when the request was closed
-/// with headers, usually a GET request.
-#[pyclass(module = "_pyvoy.asgi")]
-struct EmptyRecvCallable {
-    response_closed: Arc<AtomicBool>,
-    constants: Arc<Constants>,
-}
-
-#[pymethods]
-impl EmptyRecvCallable {
-    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let event = if self
-            .response_closed
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            self.constants.asgi_empty_recv_disconnect.bind(py).copy()?
-        } else {
-            self.constants.asgi_empty_recv.bind(py).copy()?
-        };
-        ValueAwaitable::new_py(py, &event.into_any())
     }
 }
 
