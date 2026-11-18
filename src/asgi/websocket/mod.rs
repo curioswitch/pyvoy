@@ -573,9 +573,14 @@ fn finish_close(
                 break;
             }
             Err(tungstenite::Error::ConnectionClosed) => {
-                envoy_filter.close(
-                    abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
-                );
+                // The close handshake is done, but the peer may still send
+                // frames after its Close. Closing the socket now would answer
+                // them with a RST, and Windows clients discard unread data on
+                // RST, losing our Close frame. Instead, send FIN and keep
+                // draining reads until the peer's FIN, when Envoy closes the
+                // connection.
+                envoy_filter.enable_half_close(true);
+                envoy_filter.write(&[], true);
                 break;
             }
             Err(_) => {
