@@ -10,6 +10,7 @@ use crate::{
             app::load_app,
             awaitable::{EmptyAwaitable, ErrorAwaitable, ValueAwaitable},
             eventloop::{EventLoops, LoopHandle, LoopKind},
+            future,
             headers::extract_headers_from_event,
             scope::new_scope_dict,
         },
@@ -145,18 +146,11 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                // The application may have cancelled its receive already.
-                if future.is_done(py, &constants)? {
-                    return Ok(());
-                }
                 let event = PyDict::new(py);
                 event.set_item(&constants.typ, &constants.http_request)?;
                 event.set_item(&constants.body, PyBytes::new(py, &body))?;
                 event.set_item(&constants.more_body, more_body)?;
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (event,))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, event)
             }));
     }
 
@@ -166,14 +160,8 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                if future.is_done(py, &constants)? {
-                    return Ok(());
-                }
                 let event = constants.asgi_empty_recv_disconnect.bind(py).copy()?;
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (event,))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, event)
             }));
     }
 
@@ -186,10 +174,7 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (PyNone::get(py),))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, PyNone::get(py))
             }));
     }
 
@@ -199,12 +184,11 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future.future.call_method1(
-                    py,
-                    &constants.set_exception,
-                    (&constants.client_disconnected_err,),
-                )?;
-                Ok(())
+                future::set_exception(
+                    future.future.bind(py),
+                    &constants,
+                    &constants.client_disconnected_err,
+                )
             }));
     }
 
@@ -712,13 +696,6 @@ impl Drop for RecvFuture {
 pub(crate) struct LoopFuture {
     pub(crate) future: Py<PyAny>,
     pub(crate) loop_: Py<PyAny>,
-}
-
-impl LoopFuture {
-    /// Whether the future is already done, e.g. cancelled by the application.
-    fn is_done(&self, py: Python<'_>, constants: &Constants) -> PyResult<bool> {
-        self.future.call_method0(py, &constants.done)?.is_truthy(py)
-    }
 }
 
 /// A Python future to notify when a send completes.

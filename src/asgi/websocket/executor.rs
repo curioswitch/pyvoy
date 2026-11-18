@@ -20,6 +20,7 @@ use crate::{
         app::load_app,
         awaitable::{EmptyAwaitable, ErrorAwaitable},
         eventloop::{EventLoops, LoopHandle, LoopKind},
+        future,
         headers::extract_headers_from_event,
         scope::new_scope_dict,
     },
@@ -173,10 +174,7 @@ impl WebSocketExecutor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future
-                    .future
-                    .call_method1(py, &constants.set_result, (py.None(),))?;
-                Ok(())
+                future::set_result(future.future.bind(py), &constants, py.None())
             }));
     }
 
@@ -186,12 +184,11 @@ impl WebSocketExecutor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
-                future.future.call_method1(
-                    py,
-                    &constants.set_exception,
-                    (&constants.client_disconnected_err,),
-                )?;
-                Ok(())
+                future::set_exception(
+                    future.future.bind(py),
+                    &constants,
+                    &constants.client_disconnected_err,
+                )
             }));
     }
 
@@ -282,9 +279,7 @@ impl ConnectFutureExecutor {
     fn run(&self, py: Python<'_>) -> PyResult<()> {
         let event = PyDict::new(py);
         event.set_item(&self.constants.typ, &self.constants.websocket_connect)?;
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
-        Ok(())
+        future::set_result(self.future.bind(py), &self.constants, event)
     }
 }
 
@@ -307,9 +302,7 @@ impl RecvFutureMessageExecutor {
                 event.set_item(&self.constants.text, PyString::new(py, s))?;
             }
         }
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
-        Ok(())
+        future::set_result(self.future.bind(py), &self.constants, event)
     }
 }
 
@@ -327,9 +320,7 @@ impl RecvFutureDisconnectExecutor {
         event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
         event.set_item(&self.constants.code, self.code)?;
         event.set_item(&self.constants.reason, PyString::new(py, &self.reason))?;
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
-        Ok(())
+        future::set_result(self.future.bind(py), &self.constants, event)
     }
 }
 
@@ -345,9 +336,7 @@ impl DroppedRecvFutureExecutor {
         event.set_item(&self.constants.typ, &self.constants.websocket_disconnect)?;
         event.set_item(&self.constants.code, 1005u16)?;
         event.set_item(&self.constants.reason, &self.constants.empty_string)?;
-        self.future
-            .call_method1(py, &self.constants.set_result, (event,))?;
-        Ok(())
+        future::set_result(self.future.bind(py), &self.constants, event)
     }
 }
 
