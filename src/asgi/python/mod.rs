@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::{
     asgi::{
@@ -105,7 +108,6 @@ impl Executor {
         scope: Scope,
         request_closed: bool,
         trailers_accepted: bool,
-        response_closed: Arc<AtomicBool>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
         transport_bridge: Option<EventBridge<TransportEvent>>,
@@ -115,7 +117,6 @@ impl Executor {
             scope,
             request_closed,
             trailers_accepted,
-            response_closed,
             recv_bridge,
             send_bridge,
             transport_bridge,
@@ -144,6 +145,10 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
+                // The application may have cancelled its receive already.
+                if future.is_done(py, &constants)? {
+                    return Ok(());
+                }
                 let event = PyDict::new(py);
                 event.set_item(&constants.typ, &constants.http_request)?;
                 event.set_item(&constants.body, PyBytes::new(py, &body))?;
@@ -161,6 +166,9 @@ impl Executor {
             .loops
             .find(&future.loop_)
             .dispatch(Box::new(move |py, _| {
+                if future.is_done(py, &constants)? {
+                    return Ok(());
+                }
                 let event = constants.asgi_empty_recv_disconnect.bind(py).copy()?;
                 future
                     .future
@@ -277,7 +285,6 @@ impl Executor {
             scope,
             request_closed,
             trailers_accepted,
-            response_closed,
             recv_bridge,
             send_bridge,
             transport_bridge,
@@ -301,22 +308,15 @@ impl Executor {
 
         let scheduler = Arc::new(scheduler);
 
-        let recv = if request_closed {
-            EmptyRecvCallable {
-                response_closed,
-                constants: constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        } else {
-            RecvCallable {
-                recv_bridge,
-                scheduler: scheduler.clone(),
-                loop_: loop_.clone().unbind(),
-                executor: self.clone(),
-                constants: constants.clone(),
-            }
-            .into_bound_py_any(py)?
-        };
+        let recv = RecvCallable {
+            empty_body_pending: AtomicBool::new(request_closed),
+            recv_bridge,
+            scheduler: scheduler.clone(),
+            loop_: loop_.clone().unbind(),
+            executor: self.clone(),
+            constants: constants.clone(),
+        }
+        .into_bound_py_any(py)?;
 
         let coro = inner.app.bind(py).call1((
             scope_dict,
@@ -392,7 +392,6 @@ struct ExecuteAppEvent {
     scope: Scope,
     request_closed: bool,
     trailers_accepted: bool,
-    response_closed: Arc<AtomicBool>,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
     transport_bridge: Option<EventBridge<TransportEvent>>,
@@ -402,6 +401,9 @@ struct ExecuteAppEvent {
 /// The receive callable we pass to the application.
 #[pyclass(module = "_pyvoy.asgi")]
 struct RecvCallable {
+    /// Whether the request was closed with headers, usually a GET request, and
+    /// its empty body has not been received yet.
+    empty_body_pending: AtomicBool,
     recv_bridge: EventBridge<RecvFuture>,
     scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
@@ -414,6 +416,12 @@ unsafe impl Sync for RecvCallable {}
 #[pymethods]
 impl RecvCallable {
     fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.empty_body_pending.swap(false, Ordering::Relaxed) {
+            let event = self.constants.asgi_empty_recv.bind(py).copy()?;
+            return ValueAwaitable::new_py(py, &event.into_any());
+        }
+        // After the body, the filter holds the future until the stream completes
+        // and it resolves to http.disconnect.
         let future = self
             .loop_
             .bind(py)
@@ -429,29 +437,6 @@ impl RecvCallable {
             self.scheduler.commit(EVENT_ID_REQUEST);
         }
         Ok(future)
-    }
-}
-
-/// The receive callable we pass to the application when the request was closed
-/// with headers, usually a GET request.
-#[pyclass(module = "_pyvoy.asgi")]
-struct EmptyRecvCallable {
-    response_closed: Arc<AtomicBool>,
-    constants: Arc<Constants>,
-}
-
-#[pymethods]
-impl EmptyRecvCallable {
-    fn __call__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let event = if self
-            .response_closed
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            self.constants.asgi_empty_recv_disconnect.bind(py).copy()?
-        } else {
-            self.constants.asgi_empty_recv.bind(py).copy()?
-        };
-        ValueAwaitable::new_py(py, &event.into_any())
     }
 }
 
@@ -727,6 +712,13 @@ impl Drop for RecvFuture {
 pub(crate) struct LoopFuture {
     pub(crate) future: Py<PyAny>,
     pub(crate) loop_: Py<PyAny>,
+}
+
+impl LoopFuture {
+    /// Whether the future is already done, e.g. cancelled by the application.
+    fn is_done(&self, py: Python<'_>, constants: &Constants) -> PyResult<bool> {
+        self.future.call_method0(py, &constants.done)?.is_truthy(py)
+    }
 }
 
 /// A Python future to notify when a send completes.

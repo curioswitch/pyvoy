@@ -165,6 +165,46 @@ async def _receive_as_task(
     await send({"type": "http.response.body", "body": b"ok", "more_body": False})
 
 
+async def _receive_after_body(
+    _scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
+) -> None:
+    """Keeps receiving after the request body like a disconnect watcher, which
+    must wait instead of returning more empty bodies, then cancels the pending
+    receive when the response is ready."""
+    while (await recv()).get("more_body", False):
+        pass
+
+    received: list[str] = []
+
+    async def watch() -> None:
+        while True:
+            msg = await recv()
+            received.append(msg["type"])
+            if msg["type"] == "http.disconnect":
+                return
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(watch)
+        await anyio.sleep(0.1)
+        tg.cancel_scope.cancel()
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+            "trailers": False,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": ",".join(received).encode(),
+            "more_body": False,
+        }
+    )
+
+
 async def _request_body(
     scope: HTTPScope, recv: ASGIReceiveCallable, send: ASGISendCallable
 ) -> None:
@@ -1244,6 +1284,8 @@ async def http_app(
             await _request_body(scope, recv, send)
         case "/receive-as-task":
             await _receive_as_task(scope, recv, send)
+        case "/receive-after-body":
+            await _receive_after_body(scope, recv, send)
         case "/response-body":
             await _response_body(scope, send)
         case "/request-and-response-body":
