@@ -23,7 +23,6 @@ use crate::forwarded::TrustedProxies;
 use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::types::*;
 
-/// The WebSocket settings of a filter that serves WebSockets.
 pub struct WebSocketSettings {
     pub max_message_size: usize,
     pub deflate: Option<tungstenite::extensions::compression::deflate::DeflateConfig>,

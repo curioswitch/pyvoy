@@ -104,8 +104,7 @@ impl Executor {
         Ok((executor, ExecutorHandles { loops }))
     }
 
-    /// Returns the loaded application and its event loops, for serving other
-    /// kinds of connections with the same application.
+    /// Returns the loaded application and its event loops.
     pub(crate) fn loaded_app(&self, py: Python<'_>) -> (Py<PyAny>, Py<PyDict>, EventLoops) {
         let inner = self.inner.as_ref();
         (

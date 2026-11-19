@@ -1,11 +1,3 @@
-//! ASGI WebSockets served by the HTTP filter.
-//!
-//! Envoy presents HTTP/2 and HTTP/3 extended CONNECT requests (RFC 8441 and
-//! RFC 9220) to filters as HTTP/1 upgrade requests, and after the handshake
-//! carries the WebSocket bytes in the request and response bodies for every
-//! protocol. So one implementation serves all of them, running the WebSocket
-//! protocol over the bodies.
-
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::Duration;

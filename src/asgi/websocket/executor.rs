@@ -41,8 +41,6 @@ pub(crate) struct WebSocketExecutor {
 }
 
 impl WebSocketExecutor {
-    /// Creates an executor for WebSocket connections that runs the app already
-    /// loaded for HTTP requests, on the same event loops.
     pub(crate) fn new(
         app: Py<PyAny>,
         asgi: Py<PyDict>,

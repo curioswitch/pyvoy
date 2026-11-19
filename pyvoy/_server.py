@@ -622,7 +622,6 @@ class PyvoyServer:
             base_pyvoy_config["lifespan"] = self._lifespan
         if self._loop is not None:
             base_pyvoy_config["loop"] = self._loop
-        # Only ASGI applications serve WebSockets.
         websocket_config: dict[str, int | bool] = {}
         if self._websockets:
             websocket_config["websockets"] = True
@@ -761,8 +760,7 @@ class PyvoyServer:
             "route_config": {"virtual_hosts": [virtual_host_config]},
             "http_filters": http_filters,
             "generate_request_id": False,
-            # Applies to each request, including WebSocket connections. Zero
-            # disables it.
+            # Zero disables it.
             "stream_idle_timeout": f"{self._request_idle_timeout or 0:.9f}s",
             **forwarded_config,
             **_hcm_access_log_config(access_log=self._access_log),
@@ -1103,12 +1101,8 @@ def _strip_accept_encoding_filter() -> dict:
 
 
 def _enable_websockets(http_config: dict) -> None:
-    """Configures the HTTP connection manager to pass WebSocket handshakes over
-    any HTTP version to the application filters.
-    """
+    """Accepts WebSocket handshakes over any HTTP version."""
     http_config["upgrade_configs"] = [{"upgrade_type": "websocket"}]
-    # Accept RFC 8441 extended CONNECT handshakes, which Envoy presents to
-    # filters as HTTP/1 upgrades.
     http_config["http2_protocol_options"] = {"allow_connect": True}
     if "http3_protocol_options" in http_config:
         http_config["http3_protocol_options"]["allow_extended_connect"] = True
