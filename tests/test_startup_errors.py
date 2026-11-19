@@ -49,15 +49,14 @@ def _set_dynamic_filter_config_value(
     [
         ("pyvoy", "worker_threads", 0, 1),
         ("pyvoy", "worker_threads", sys.maxsize + 1, 1),
-        ("pyvoy-ws", "worker_threads", 0, 1),
-        ("pyvoy-ws", "websockets_max_message_size", -1, 0),
+        ("pyvoy", "websockets_max_message_size", -1, 0),
     ],
 )
 def test_config_invalid_numeric_setting(
     filter_name: str, setting: str, value: int, minimum: int
 ) -> None:
     config = PyvoyServer(
-        "tests.apps.asgi.kitchensink", websockets=filter_name == "pyvoy-ws"
+        "tests.apps.asgi.kitchensink", websockets=setting.startswith("websockets")
     ).get_envoy_config()
     assert _set_dynamic_filter_config_value(config, filter_name, setting, value)
 
@@ -76,13 +75,10 @@ def test_config_invalid_numeric_setting(
     ) in result.stderr
 
 
-@pytest.mark.parametrize("filter_name", ["pyvoy", "pyvoy-ws"])
 @pytest.mark.parametrize("value", ["curio", 1])
-def test_config_invalid_loop(filter_name: str, value: object) -> None:
-    config = PyvoyServer(
-        "tests.apps.asgi.kitchensink", websockets=filter_name == "pyvoy-ws"
-    ).get_envoy_config()
-    assert _set_dynamic_filter_config_value(config, filter_name, "loop", value)
+def test_config_invalid_loop(value: object) -> None:
+    config = PyvoyServer("tests.apps.asgi.kitchensink").get_envoy_config()
+    assert _set_dynamic_filter_config_value(config, "pyvoy", "loop", value)
 
     result = subprocess.run(
         [envoy_path, "--config-yaml", json.dumps(config)],

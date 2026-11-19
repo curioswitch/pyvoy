@@ -25,7 +25,7 @@ to bring you all features of HTTP/2 and 3, with great performance and stability.
 - Any Envoy configuration features can be integrated as normal
 - Auto-restart on file change and IDE debugging for development
 - Request and response backpressure integrated with Envoy's flow control
-- WebSockets, including compression and HTTP denial responses
+- WebSockets over HTTP/1.1, HTTP/2, and HTTP/3, including compression and HTTP denial responses
 - An HTTP client using Envoy's stack, including client-side load balancing
 - Static file serving mounted alongside your application
 - Response compression with gzip, Brotli, or Zstandard

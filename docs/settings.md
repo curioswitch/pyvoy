@@ -78,6 +78,9 @@ than serving in Python with e.g., Starlette.
 - `--access-log` - Log each request, for example `127.0.0.1 - - [12/Nov/2026:08:42:34 +0000] "GET /hello HTTP/1.1" 200 13 "-" "curl/8.7.1"`.
   Logs are flushed every 100ms, which can be changed by passing Envoy's flag after `--`, for example
   `pyvoy --access-log myapp -- --file-flush-interval-msec 1000`.
+- `--request-idle-timeout` - The positive number of seconds a request, including a WebSocket connection, may go without
+  sending or receiving any data before it is closed. If the response has not started, the client receives a 504, or a
+  408 if the request has not been fully received. **Default**: _never closes idle requests_.
 
 ## HTTP Client
 
@@ -88,9 +91,9 @@ than serving in Python with e.g., Starlette.
 
 ## WebSockets
 
-- `--websockets` - Enables support for ASGI WebSockets. The primary application (the only application or first
-  mount) must use ASGI and handles all WebSocket connections; path-based application mount routing does not apply.
-  Not enabled by default.
+- `--websockets` - Enables support for ASGI WebSockets over HTTP/1.1, HTTP/2, and HTTP/3. WebSocket connections are
+  routed to application mounts by path like HTTP requests, and only applications using ASGI accept them, so at least
+  one application must use ASGI. Not enabled by default.
 - `--websockets-max-message-size` - Sets the non-negative maximum WebSocket message size in bytes. **Default**: _64 MiB_.
 - `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
 - `--websockets-compression-no-context-takeover` - Forces WebSocket per-message deflate compression to reset its context after every message in both directions, regardless of client settings. This lowers the compression ratio for streams of similar messages. Not enabled by default.

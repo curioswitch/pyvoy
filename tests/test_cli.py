@@ -425,6 +425,51 @@ def test_websockets_max_message_size_allows_zero(
     assert captured_server._websockets_max_message_size == 0
 
 
+@pytest.mark.parametrize(("args", "expected"), [([], None), (["1.5"], 1.5)])
+def test_request_idle_timeout_flag(
+    args: list[str], expected: float | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    flag = ["--request-idle-timeout", *args] if args else []
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyvoy", "tests.apps.asgi.kitchensink", *flag, "--print-envoy-config"],
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._request_idle_timeout == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "inf", "nan"])
+def test_request_idle_timeout_must_be_positive(
+    value: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyvoy", "tests.apps.asgi.kitchensink", "--request-idle-timeout", value],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 2
+    assert (
+        "argument --request-idle-timeout: must be a positive finite number of seconds"
+        in capsys.readouterr().err
+    )
+
+
 def test_content_encodings_parsed_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
     captured_server: PyvoyServer | None = None
 

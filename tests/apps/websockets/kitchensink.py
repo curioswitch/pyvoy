@@ -184,6 +184,9 @@ async def app(
     if path == "/root-path":
         await send({"type": "websocket.send", "text": scope["root_path"]})
         return
+    if path == "/http-version":
+        await send({"type": "websocket.send", "text": scope["http_version"]})
+        return
     if path == "/tls":
         await send(
             {
