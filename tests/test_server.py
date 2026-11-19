@@ -198,6 +198,63 @@ def test_websockets_max_message_size_must_be_an_integer(
         )
 
 
+def _hcm_config(server: PyvoyServer) -> dict:
+    config = server.get_envoy_config()
+    return config["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0][
+        "typed_config"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("request_idle_timeout", "expected"),
+    [(None, "0.000000000s"), (1.5, "1.500000000s"), (30, "30.000000000s")],
+)
+def test_request_idle_timeout_config(
+    request_idle_timeout: float | None, expected: str
+) -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink", request_idle_timeout=request_idle_timeout
+    )
+    assert _hcm_config(server)["stream_idle_timeout"] == expected
+
+
+@pytest.mark.parametrize("request_idle_timeout", [True, "1"])
+def test_request_idle_timeout_must_be_a_number(request_idle_timeout: object) -> None:
+    with pytest.raises(TypeError, match="request_idle_timeout must be a number"):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink",
+            request_idle_timeout=request_idle_timeout,  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.parametrize("request_idle_timeout", [0, -1, float("inf"), float("nan")])
+def test_request_idle_timeout_must_be_positive(request_idle_timeout: float) -> None:
+    with pytest.raises(
+        ValueError, match="request_idle_timeout must be a positive finite number"
+    ):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink", request_idle_timeout=request_idle_timeout
+        )
+
+
+@pytest.mark.asyncio
+async def test_request_idle_timeout_closes_idle_request(client: Client) -> None:
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        request_idle_timeout=0.3,
+        lifespan=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ) as server:
+        url = f"http://127.0.0.1:{server.listener_port}/controlled"
+        response = await client.get(url, headers={"x-sleep-ms": "50"})
+        assert response.status == 200
+        # The application waits longer than the timeout before responding to
+        # the complete request.
+        response = await client.get(url, headers={"x-sleep-ms": "3000"})
+        assert response.status == 504
+
+
 @pytest.mark.asyncio
 async def test_start_twice_rejected(client: Client) -> None:
     server = PyvoyServer(

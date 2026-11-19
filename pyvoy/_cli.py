@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import math
 import signal
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
@@ -60,6 +61,7 @@ class CLIArgs:
     websockets_compression_no_context_takeover: bool
     content_encodings: list[ContentEncoding]
     access_log: bool
+    request_idle_timeout: float
     otel: bool
     reload: bool
     reload_dirs: list[str]
@@ -81,6 +83,14 @@ def _positive_int(value: str) -> int:
 
 def _non_negative_int(value: str) -> int:
     return _bounded_int(value, minimum=0)
+
+
+def _positive_seconds(value: str) -> float:
+    parsed = float(value)
+    if not 0 < parsed < math.inf:
+        msg = "must be a positive finite number of seconds"
+        raise argparse.ArgumentTypeError(msg)
+    return parsed
 
 
 def _io_threads(value: str) -> int | Literal["auto"]:
@@ -308,6 +318,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--request-idle-timeout",
+        help="positive seconds a request, including a WebSocket connection, may go without sending or receiving any data before it is closed (default: never)",
+        type=_positive_seconds,
+        default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
         "--otel",
         help="whether to export Envoy's traces and metrics with OTLP as configured by the standard OTEL_* environment variables",
         action=argparse.BooleanOptionalAction,
@@ -458,6 +475,7 @@ async def amain() -> None:
         content_encodings=args.content_encodings,
         forwarded_allow_ips=getattr(args, "forwarded_allow_ips", None),
         access_log=args.access_log,
+        request_idle_timeout=getattr(args, "request_idle_timeout", None),
         enable_otel=args.otel,
         additional_envoy_args=additional_envoy_args,
         upstreams=upstreams,

@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import ipaddress
 import json
+import math
 import os
 import subprocess
 import sys
@@ -218,6 +219,7 @@ class PyvoyServer:
     _content_encodings: list[ContentEncoding]
     _forwarded_allow_ips: list[str] | None
     _access_log: bool
+    _request_idle_timeout: float | None
     _enable_otel: bool
 
     _admin_address: str | None
@@ -249,6 +251,7 @@ class PyvoyServer:
         content_encodings: Iterable[ContentEncoding] | None = None,
         forwarded_allow_ips: Iterable[str] | None = None,
         access_log: bool = False,
+        request_idle_timeout: float | None = None,
         enable_otel: bool = True,
         additional_envoy_args: list[str] | None = None,
         env: dict[str, str] | None = None,
@@ -288,9 +291,9 @@ class PyvoyServer:
             loop: The event loop ASGI applications run on. 'asyncio' is the
                 standard library event loop. Unset uses uvloop, or winloop on
                 Windows. Other event loops must be installed separately.
-            websockets: Whether to enable ASGI WebSocket support over HTTP/1.1,
-                HTTP/2 and HTTP/3. WebSockets are routed to application mounts
-                like HTTP requests, and only applications using ASGI accept them.
+            websockets: Whether to enable ASGI WebSocket support. WebSockets are
+                routed to application mounts like HTTP requests, and only applications
+                using ASGI accept them.
             websockets_max_message_size: The non-negative maximum WebSocket message
                 size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
@@ -308,6 +311,11 @@ class PyvoyServer:
                 and the scheme with the X-Forwarded-Proto header, or '*' to trust
                 any peer. Unset trusts 127.0.0.1 and ::1, and empty trusts no peer.
             access_log: Whether Envoy logs each request to its stdout.
+            request_idle_timeout: The positive number of seconds a request,
+                including a WebSocket connection, may go without sending or
+                receiving any data before it is closed. If the response has not
+                started, the client receives a 504, or a 408 if the request has
+                not been fully received. Unset never closes idle requests.
             enable_otel: Whether to export Envoy's traces and metrics with OTLP as
                 configured by the standard OTEL_* environment variables, read from
                 the environment the server is started with. Each signal is exported
@@ -358,6 +366,15 @@ class PyvoyServer:
             raise ValueError(msg)
         if forwarded_allow_ips is not None:
             forwarded_allow_ips = _parse_forwarded_allow_ips(forwarded_allow_ips)
+        if request_idle_timeout is not None:
+            if not isinstance(request_idle_timeout, int | float) or isinstance(
+                request_idle_timeout, bool
+            ):
+                msg = "request_idle_timeout must be a number"
+                raise TypeError(msg)
+            if not 0 < request_idle_timeout < math.inf:
+                msg = "request_idle_timeout must be a positive finite number"
+                raise ValueError(msg)
 
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
@@ -379,6 +396,7 @@ class PyvoyServer:
         self._content_encodings = content_encodings
         self._forwarded_allow_ips = forwarded_allow_ips
         self._access_log = access_log
+        self._request_idle_timeout = request_idle_timeout
         self._enable_otel = enable_otel
         self._root_path = root_path
         self._stdout = stdout
@@ -631,11 +649,7 @@ class PyvoyServer:
             _compressor_filter(encoding, choose_first=i == 0)
             for i, encoding in enumerate(self._content_encodings)
         ]
-        virtual_host_config: dict[str, Any] = {
-            "name": "local_service",
-            "domains": ["*"],
-            "routes": [],
-        }
+        virtual_host_config = {"name": "local_service", "domains": ["*"]}
         interfaces: list[Interface] = []
 
         def app_config(
@@ -732,7 +746,7 @@ class PyvoyServer:
                     },
                 },
             ]
-            virtual_host_config["routes"].append(
+            virtual_host_config["routes"] = [
                 {
                     "match": {"prefix": "/"},
                     "direct_response": {
@@ -740,13 +754,16 @@ class PyvoyServer:
                         "body": {"inline_string": "Not Found"},
                     },
                 }
-            )
+            ]
         http_config = {
             "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
             "stat_prefix": "ingress_http",
             "route_config": {"virtual_hosts": [virtual_host_config]},
             "http_filters": http_filters,
             "generate_request_id": False,
+            # Applies to each request, including WebSocket connections. Zero
+            # disables it.
+            "stream_idle_timeout": f"{self._request_idle_timeout or 0:.9f}s",
             **forwarded_config,
             **_hcm_access_log_config(access_log=self._access_log),
             **_hcm_tracing_config(otel),
@@ -767,8 +784,6 @@ class PyvoyServer:
                 msg = "websockets require an application using the ASGI interface"
                 raise ValueError(msg)
             _enable_websockets(http_config)
-        if not virtual_host_config["routes"]:
-            del virtual_host_config["routes"]
         filter_chain: dict = {
             "filters": [
                 {
@@ -1097,30 +1112,6 @@ def _enable_websockets(http_config: dict) -> None:
     http_config["http2_protocol_options"] = {"allow_connect": True}
     if "http3_protocol_options" in http_config:
         http_config["http3_protocol_options"]["allow_extended_connect"] = True
-    # WebSockets are long-lived and may be idle, so their stream must not time
-    # out. Only a route can set this per stream, and filters serve the stream
-    # before the router, so it is never used to forward. Without a filter to
-    # serve the path, the router responds 404 like the catch-all route.
-    http_config["route_config"]["virtual_hosts"][0]["routes"].insert(
-        0,
-        {
-            "match": {
-                "prefix": "/",
-                "headers": [
-                    {
-                        "name": "upgrade",
-                        "string_match": {"exact": "websocket", "ignore_case": True},
-                    }
-                ],
-            },
-            "route": {
-                "cluster_header": "x-pyvoy-unused",
-                "cluster_not_found_response_code": "NOT_FOUND",
-                "timeout": "0s",
-                "idle_timeout": "0s",
-            },
-        },
-    )
 
 
 def _dynamic_module_action(

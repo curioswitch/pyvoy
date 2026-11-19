@@ -78,6 +78,9 @@ than serving in Python with e.g., Starlette.
 - `--access-log` - Log each request, for example `127.0.0.1 - - [12/Nov/2026:08:42:34 +0000] "GET /hello HTTP/1.1" 200 13 "-" "curl/8.7.1"`.
   Logs are flushed every 100ms, which can be changed by passing Envoy's flag after `--`, for example
   `pyvoy --access-log myapp -- --file-flush-interval-msec 1000`.
+- `--request-idle-timeout` - The positive number of seconds a request, including a WebSocket connection, may go without
+  sending or receiving any data before it is closed. If the response has not started, the client receives a 504, or a
+  408 if the request has not been fully received. **Default**: _never closes idle requests_.
 
 ## HTTP Client
 

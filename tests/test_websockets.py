@@ -470,6 +470,31 @@ async def test_recv_after_disconnect(loop: Loop | None) -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_idle_timeout(loop: Loop | None) -> None:
+    async with (
+        PyvoyServer(
+            "tests.apps.websockets.kitchensink",
+            loop=loop,
+            websockets=True,
+            lifespan=False,
+            request_idle_timeout=0.5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) as srv,
+        websockets.connect(_url(srv, "/echo"), open_timeout=5) as ws,
+    ):
+        # Messages keep the connection open past the timeout.
+        for _ in range(3):
+            await asyncio.sleep(0.3)
+            await ws.send("x")
+            assert await asyncio.wait_for(ws.recv(), timeout=5) == "x"
+        start = perf_counter_ns()
+        with pytest.raises(ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=5)
+        assert perf_counter_ns() - start < 3_000_000_000
+
+
+@pytest.mark.asyncio
 async def test_response_backpressure(server: PyvoyServer) -> None:
     async with websockets.connect(
         _url(server, "/backpressure"), max_size=None, max_queue=1, compression=None
