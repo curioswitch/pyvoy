@@ -2,10 +2,6 @@ use std::net::IpAddr;
 
 use http::uri::Scheme;
 
-/// Envoy refuses to parse more x-forwarded-for entries than this when walking
-/// it for trusted CIDRs, so we match it.
-const MAX_XFF_ENTRIES: usize = 20;
-
 /// A CIDR range of addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cidr {
@@ -52,9 +48,7 @@ impl Cidr {
 
 /// The reverse proxies trusted to set the x-forwarded-for and x-forwarded-proto
 /// headers. The HTTP connection manager is configured to match so Envoy itself
-/// resolves the client address of HTTP requests, but the scheme and WebSocket
-/// connections, which do not go through the connection manager, are resolved
-/// here.
+/// resolves the client address, but the scheme is resolved here.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum TrustedProxies {
     /// Any peer is trusted, including a Unix socket peer.
@@ -73,32 +67,6 @@ impl TrustedProxies {
             TrustedProxies::Cidrs(cidrs) if cidrs.is_empty() => false,
             TrustedProxies::Cidrs(cidrs) => {
                 peer().is_some_and(|peer| cidrs.iter().any(|cidr| cidr.contains(peer)))
-            }
-        }
-    }
-
-    /// Resolves the client address from the x-forwarded-for header sent by a
-    /// trusted peer, matching Envoy's resolution for HTTP requests. If all
-    /// trusted, this is the last address. Otherwise, it is the last address not
-    /// in a trusted range, or the first address if all are. None if the header
-    /// cannot be parsed.
-    pub(crate) fn client_from_forwarded_for(&self, forwarded_for: &str) -> Option<IpAddr> {
-        match self {
-            TrustedProxies::All => forwarded_for.rsplit(',').next()?.trim().parse().ok(),
-            TrustedProxies::Cidrs(cidrs) => {
-                let entries = forwarded_for.split(',');
-                if entries.clone().count() > MAX_XFF_ENTRIES {
-                    return None;
-                }
-                let mut client = None;
-                for entry in entries.rev() {
-                    let address: IpAddr = entry.trim().parse().ok()?;
-                    client = Some(address);
-                    if !cidrs.iter().any(|cidr| cidr.contains(address)) {
-                        break;
-                    }
-                }
-                client
             }
         }
     }
@@ -185,41 +153,6 @@ mod tests {
 
         assert!(TrustedProxies::All.is_trusted(|| None));
         assert!(!cidrs(&[]).is_trusted(|| unreachable!()));
-    }
-
-    #[test]
-    fn client_from_forwarded_for_all() {
-        let all = TrustedProxies::All;
-        assert_eq!(
-            all.client_from_forwarded_for("1.1.1.1, 2.2.2.2"),
-            Some(ip("2.2.2.2"))
-        );
-        assert_eq!(all.client_from_forwarded_for("::1"), Some(ip("::1")));
-        assert_eq!(all.client_from_forwarded_for("1.1.1.1, bad"), None);
-        assert_eq!(all.client_from_forwarded_for(""), None);
-    }
-
-    #[test]
-    fn client_from_forwarded_for_cidrs() {
-        let trusted = cidrs(&["10.0.0.0/8"]);
-        assert_eq!(
-            trusted.client_from_forwarded_for("1.1.1.1, 2.2.2.2, 10.0.0.2, 10.0.0.1"),
-            Some(ip("2.2.2.2"))
-        );
-        assert_eq!(
-            trusted.client_from_forwarded_for("10.0.0.3,10.0.0.2"),
-            Some(ip("10.0.0.3"))
-        );
-        assert_eq!(trusted.client_from_forwarded_for("bad, 10.0.0.1"), None);
-        assert_eq!(trusted.client_from_forwarded_for("1.1.1.1:80"), None);
-
-        let max_entries = vec!["1.1.1.1"; MAX_XFF_ENTRIES].join(",");
-        assert_eq!(
-            trusted.client_from_forwarded_for(&max_entries),
-            Some(ip("1.1.1.1"))
-        );
-        let too_many_entries = vec!["1.1.1.1"; MAX_XFF_ENTRIES + 1].join(",");
-        assert_eq!(trusted.client_from_forwarded_for(&too_many_entries), None);
     }
 
     #[test]

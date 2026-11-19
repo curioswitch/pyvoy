@@ -4,146 +4,99 @@ use std::{
 };
 
 use bytes::{BufMut as _, BytesMut};
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilter;
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyMutBuffer};
 
+#[derive(Default)]
 struct Inner {
     read_buffer: BytesMut,
-    total_read: usize,
     write_buffer: BytesMut,
-    closed: bool,
 }
 
-#[derive(Clone)]
+/// The byte stream of a WebSocket connection, carried by the request body from
+/// the client and the response body to it.
+///
+/// The [`tungstenite::WebSocket`] owns one handle and reads from and writes to
+/// the buffers, while the filter keeps another to move bytes between the buffers
+/// and Envoy without borrowing the WebSocket.
+#[derive(Clone, Default)]
 pub(super) struct EnvoyStream {
     inner: Arc<Mutex<Inner>>,
 }
 
 impl EnvoyStream {
-    /// Reads data from the Envoy buffer during handshake. We do not drain the buffer
-    /// to be able to send it to the filter chain if the handshake fails.
-    pub(super) fn read_from_buffered(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
-        let mut inner = self.inner.lock().unwrap();
-        let (buffers, total_size) = envoy_filter.get_read_buffer_chunks();
-        let to_read = total_size - inner.total_read;
-        inner.read_buffer.reserve(to_read);
-        let mut to_skip = inner.total_read;
-        for buf in buffers {
-            if to_skip == 0 {
-                inner.read_buffer.put(buf.as_slice());
-                continue;
-            }
-            let buf_slice = buf.as_slice();
-            if to_skip >= buf_slice.len() {
-                to_skip -= buf_slice.len();
-                continue;
-            }
-            let start = to_skip;
-            let end = buf_slice.len();
-            inner.read_buffer.put(&buf_slice[start..end]);
-            to_skip = 0;
-        }
-        inner.total_read += to_read;
-    }
-
-    /// Reads data from the Envoy buffer after handshake. We don't keep any bytes buffered anymore
-    /// so always drain each read.
-    pub(super) fn read_from(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
-        let mut inner = self.inner.lock().unwrap();
-        let (buffers, total_size) = envoy_filter.get_read_buffer_chunks();
-        if total_size == 0 {
-            return;
-        }
-        inner.read_buffer.reserve(total_size);
-        for buf in buffers {
-            inner.read_buffer.put(buf.as_slice());
-        }
-        inner.total_read += total_size;
-        envoy_filter.drain_read_buffer(total_size);
-    }
-
-    /// Reads up to one block from the Envoy buffer into our read buffer,
-    /// draining only what we take so any remainder stays buffered in Envoy.
-    /// Leaving data in Envoy's buffer is what lets it apply request backpressure
-    /// once the application stops consuming.
-    pub(super) fn read_block(&self, envoy_filter: &mut impl EnvoyNetworkFilter) -> usize {
+    /// Reads up to one block of the request body into our read buffer, draining
+    /// only what we take so any remainder stays buffered in Envoy. Leaving data
+    /// in Envoy's buffer is what lets it apply request backpressure once the
+    /// application stops consuming.
+    pub(super) fn read_block(&self, envoy_filter: &mut impl EnvoyHttpFilter) -> usize {
         const READ_BLOCK_SIZE: usize = 256 * 1024;
         let mut inner = self.inner.lock().unwrap();
-        let (buffers, total_size) = envoy_filter.get_read_buffer_chunks();
-        if total_size == 0 {
-            return 0;
+        let buffered = take_block(
+            &envoy_filter.get_buffered_request_body(),
+            READ_BLOCK_SIZE,
+            &mut inner.read_buffer,
+        );
+        if buffered > 0 {
+            envoy_filter.drain_buffered_request_body(buffered);
         }
-        let to_read = total_size.min(READ_BLOCK_SIZE);
-        inner.read_buffer.reserve(to_read);
-        let mut remaining = to_read;
-        for buf in buffers {
-            if remaining == 0 {
-                break;
-            }
-            let slice = buf.as_slice();
-            let take = slice.len().min(remaining);
-            inner.read_buffer.put(&slice[..take]);
-            remaining -= take;
+        let received = take_block(
+            &envoy_filter.get_received_request_body(),
+            READ_BLOCK_SIZE - buffered,
+            &mut inner.read_buffer,
+        );
+        if received > 0 {
+            envoy_filter.drain_received_request_body(received);
         }
-        inner.total_read += to_read;
-        envoy_filter.drain_read_buffer(to_read);
-        to_read
+        buffered + received
     }
 
-    pub(super) fn write_to(&self, envoy_filter: &mut impl EnvoyNetworkFilter) {
+    /// Takes the bytes the WebSocket has written so far, to send as response data.
+    pub(super) fn take_written(&self) -> Option<BytesMut> {
         let mut inner = self.inner.lock().unwrap();
         if inner.write_buffer.is_empty() {
-            return;
+            return None;
         }
-        envoy_filter.write(&inner.write_buffer, false);
-        inner.write_buffer.clear();
+        Some(inner.write_buffer.split())
     }
 }
 
-impl Default for EnvoyStream {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Inner {
-                read_buffer: BytesMut::new(),
-                total_read: 0,
-                write_buffer: BytesMut::new(),
-                closed: false,
-            })),
+/// Copies up to `limit` bytes from the buffers into `out`, returning how many.
+fn take_block(
+    buffers: &Option<Vec<EnvoyMutBuffer<'_>>>,
+    limit: usize,
+    out: &mut BytesMut,
+) -> usize {
+    let Some(buffers) = buffers else {
+        return 0;
+    };
+    let mut remaining = limit;
+    for buf in buffers {
+        if remaining == 0 {
+            break;
         }
+        let slice = buf.as_slice();
+        let take = slice.len().min(remaining);
+        out.put(&slice[..take]);
+        remaining -= take;
     }
+    limit - remaining
 }
 
 impl std::io::Read for EnvoyStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut inner = self.inner.lock().unwrap();
         if inner.read_buffer.is_empty() {
-            return if inner.closed {
-                Ok(0)
-            } else {
-                Err(ErrorKind::WouldBlock.into())
-            };
+            return Err(ErrorKind::WouldBlock.into());
         }
-        let n = if inner.read_buffer.len() <= buf.len() {
-            let n = inner.read_buffer.len();
-            buf[..n].copy_from_slice(&inner.read_buffer);
-            inner.read_buffer.clear();
-            n
-        } else {
-            let n = buf.len();
-            let split = inner.read_buffer.split_to(n);
-            buf[..n].copy_from_slice(&split);
-            n
-        };
+        let n = inner.read_buffer.len().min(buf.len());
+        buf[..n].copy_from_slice(&inner.read_buffer.split_to(n));
         Ok(n)
     }
 }
 
 impl std::io::Write for EnvoyStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.closed {
-            return Err(ErrorKind::BrokenPipe.into());
-        }
-        inner.write_buffer.put(buf);
+        self.inner.lock().unwrap().write_buffer.put(buf);
         Ok(buf.len())
     }
 

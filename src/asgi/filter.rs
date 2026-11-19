@@ -5,7 +5,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::{
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::Python;
 use pyo3::types::PyTracebackMethods as _;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,11 +16,18 @@ use crate::asgi::shared::eventloop::LoopKind;
 use crate::asgi::transport::{
     RequestBody, ResetReason, SendStreamDataEvent, TransportEvent, TransportState,
 };
+use crate::asgi::websocket::{self, EVENT_ID_CLOSE_TIMEOUT, WebSocketExecutor, WebSocketStream};
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::forwarded::TrustedProxies;
 use crate::tracecontext::{TraceSampler, propagate_active_span};
 use crate::types::*;
+
+/// The WebSocket settings of a filter that serves WebSockets.
+pub struct WebSocketSettings {
+    pub max_message_size: usize,
+    pub deflate: Option<tungstenite::extensions::compression::deflate::DeflateConfig>,
+}
 
 pub struct Config {
     executor: python::Executor,
@@ -28,6 +35,7 @@ pub struct Config {
     enable_http_client: bool,
     trace_sampler: Option<TraceSampler>,
     trusted_proxies: Arc<TrustedProxies>,
+    websocket: Option<Arc<websocket::Config>>,
 }
 
 impl Config {
@@ -42,13 +50,14 @@ impl Config {
         enable_http_client: bool,
         trace_sampler: Option<TraceSampler>,
         trusted_proxies: TrustedProxies,
+        websocket: Option<WebSocketSettings>,
     ) -> Option<Self> {
         let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
         let (executor, handles) = match python::Executor::new(
             module,
             attr,
             root_path,
-            constants,
+            constants.clone(),
             worker_threads,
             enable_lifespan,
             loop_kind,
@@ -65,14 +74,44 @@ impl Config {
                 return None;
             }
         };
+        let websocket = match websocket {
+            Some(settings) => {
+                match new_websocket_config(&executor, root_path, constants, settings) {
+                    Ok(config) => Some(Arc::new(config)),
+                    Err(e) => {
+                        envoy_log_error!("Failed to initialize WebSockets: {}", e);
+                        executor.shutdown();
+                        handles.join();
+                        return None;
+                    }
+                }
+            }
+            None => None,
+        };
         Some(Self {
             executor,
             handles: Some(handles),
             enable_http_client,
             trace_sampler,
             trusted_proxies: Arc::new(trusted_proxies),
+            websocket,
         })
     }
+}
+
+fn new_websocket_config(
+    executor: &python::Executor,
+    root_path: &str,
+    constants: Arc<Constants>,
+    settings: WebSocketSettings,
+) -> Result<websocket::Config, Box<dyn std::error::Error>> {
+    let (app, asgi, loops) = Python::attach(|py| executor.loaded_app(py));
+    let executor = WebSocketExecutor::new(app, asgi, loops, root_path, constants)?;
+    Ok(websocket::Config::new(
+        executor,
+        settings.max_message_size,
+        settings.deflate,
+    )?)
 }
 
 impl Drop for Config {
@@ -96,6 +135,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for Config {
             transport_bridge: self.enable_http_client.then(EventBridge::new),
             transport_responses: RefCell::new(HashMap::new()),
             downstream_watermark_level: Cell::new(0),
+            websocket_config: self.websocket.clone(),
+            websocket: OnceCell::new(),
         }))
     }
 }
@@ -119,6 +160,11 @@ struct Filter {
     transport_responses: RefCell<HashMap<u64, TransportState>>,
 
     downstream_watermark_level: Cell<usize>,
+
+    /// Only present when WebSockets are enabled.
+    websocket_config: Option<Arc<websocket::Config>>,
+    /// Set when the request is a WebSocket handshake.
+    websocket: OnceCell<WebSocketStream>,
 }
 
 impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
@@ -142,6 +188,14 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         }
         let scope = new_scope(envoy_filter, &self.trusted_proxies);
 
+        if let Some(config) = &self.websocket_config
+            && websocket::is_handshake(&scope)
+        {
+            let stream = WebSocketStream::start(config.clone(), envoy_filter, scope, end_of_stream);
+            let _ = self.websocket.set(stream);
+            return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
+        }
+
         self.executor.execute_app(
             scope,
             end_of_stream,
@@ -159,6 +213,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         envoy_filter: &mut EHF,
         end_of_stream: bool,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_body_status {
+        if let Some(websocket) = self.websocket.get() {
+            websocket.on_request_body(envoy_filter, end_of_stream);
+            return abi::envoy_dynamic_module_type_on_http_filter_request_body_status::StopIterationAndWatermark;
+        }
         if end_of_stream {
             self.request_closed.set(true);
         }
@@ -172,6 +230,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         &self,
         envoy_filter: &mut EHF,
     ) -> abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status {
+        if let Some(websocket) = self.websocket.get() {
+            websocket.on_request_trailers(envoy_filter);
+            return abi::envoy_dynamic_module_type_on_http_filter_request_trailers_status::StopIteration;
+        }
         self.request_closed.set(true);
 
         self.handle_read(envoy_filter);
@@ -180,6 +242,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_stream_complete(&self, _envoy_filter: &mut EHF) {
+        if let Some(websocket) = self.websocket.get() {
+            websocket.on_stream_complete();
+        }
         // Dropping any pending receives will resolve them to http.disconnect.
         self.recv_bridge.close();
         self.send_bridge.close();
@@ -205,6 +270,19 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     }
 
     fn on_scheduled(&self, envoy_filter: &mut EHF, event_id: u64) {
+        if let Some(websocket) = self.websocket.get() {
+            match event_id {
+                EVENT_ID_REQUEST => websocket.on_request_event(envoy_filter),
+                EVENT_ID_RESPONSE => {
+                    if self.downstream_watermark_level.get() == 0 {
+                        websocket.process_send_events(envoy_filter);
+                    }
+                }
+                EVENT_ID_CLOSE_TIMEOUT => websocket.on_close_timeout(envoy_filter),
+                _ => {}
+            }
+            return;
+        }
         match event_id {
             EVENT_ID_REQUEST => {
                 self.handle_read(envoy_filter);

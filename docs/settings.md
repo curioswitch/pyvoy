@@ -88,9 +88,9 @@ than serving in Python with e.g., Starlette.
 
 ## WebSockets
 
-- `--websockets` - Enables support for ASGI WebSockets. The primary application (the only application or first
-  mount) must use ASGI and handles all WebSocket connections; path-based application mount routing does not apply.
-  Not enabled by default.
+- `--websockets` - Enables support for ASGI WebSockets over HTTP/1.1, HTTP/2, and HTTP/3. WebSocket connections are
+  routed to application mounts by path like HTTP requests, and only applications using ASGI accept them, so at least
+  one application must use ASGI. Not enabled by default.
 - `--websockets-max-message-size` - Sets the non-negative maximum WebSocket message size in bytes. **Default**: _64 MiB_.
 - `--websockets-compression` - Sets whether to enable WebSocket per-message deflate compression. **Default**: _enabled_.
 - `--websockets-compression-no-context-takeover` - Forces WebSocket per-message deflate compression to reset its context after every message in both directions, regardless of client settings. This lowers the compression ratio for streams of similar messages. Not enabled by default.

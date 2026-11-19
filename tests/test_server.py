@@ -115,7 +115,9 @@ def test_websockets_max_message_size_must_be_in_range(
 
 
 def test_websockets_max_message_size_allows_zero() -> None:
-    server = PyvoyServer("tests.apps.asgi.kitchensink", websockets_max_message_size=0)
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink", websockets=True, websockets_max_message_size=0
+    )
 
     config = server.get_envoy_config()
     http_filter = config["static_resources"]["listeners"][0]["filter_chains"][0][
@@ -151,9 +153,7 @@ def _pyvoy_filter_configs(config: dict) -> dict[str, dict]:
     def visit(value: object) -> None:
         if isinstance(value, dict):
             typed_config = value.get("typed_config")
-            if value.get("name") in ("pyvoy", "pyvoy-ws") and isinstance(
-                typed_config, dict
-            ):
+            if value.get("name") == "pyvoy" and isinstance(typed_config, dict):
                 filters[value["name"]] = json.loads(
                     typed_config["filter_config"]["value"]
                 )
@@ -171,7 +171,7 @@ def test_loop_unset_by_default() -> None:
     server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True)
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
-    assert set(filters) == {"pyvoy", "pyvoy-ws"}
+    assert set(filters) == {"pyvoy"}
     for pyvoy_config in filters.values():
         assert "loop" not in pyvoy_config
 
@@ -180,7 +180,7 @@ def test_loop_configures_all_filters() -> None:
     server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True, loop="trio")
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
-    assert set(filters) == {"pyvoy", "pyvoy-ws"}
+    assert set(filters) == {"pyvoy"}
     for pyvoy_config in filters.values():
         assert pyvoy_config["loop"] == "trio"
 

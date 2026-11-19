@@ -1,503 +1,493 @@
-use envoy_proxy_dynamic_modules_rust_sdk::{
-    CatchUnwind, EnvoyNetworkFilter, EnvoyNetworkFilterScheduler as _, NetworkFilter,
-    NetworkFilterConfig, abi, envoy_log_error,
-};
-use http::{HeaderName, HeaderValue, header, uri};
-use pyo3::Python;
-use pyo3::types::PyTracebackMethods as _;
+//! ASGI WebSockets served by the HTTP filter.
+//!
+//! Envoy presents HTTP/2 and HTTP/3 extended CONNECT requests (RFC 8441 and
+//! RFC 9220) to filters as HTTP/1 upgrade requests, and after the handshake
+//! carries the WebSocket bytes in the request and response bodies for every
+//! protocol. So one implementation serves all of them, running the WebSocket
+//! protocol over the bodies.
+
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::time::Duration;
+
+use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler as _, abi};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header, uri};
 use tungstenite::extensions::{Extensions, ExtensionsConfig, compression::deflate::DeflateConfig};
-use tungstenite::handshake::machine::{HandshakeMachine, RoundResult, StageResult};
-use tungstenite::handshake::server::{create_response, write_response};
+use tungstenite::handshake::derive_accept_key;
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
 use tungstenite::{Message, Utf8Bytes, WebSocket};
 
-use crate::asgi::python::EVENT_ID_REQUEST;
-use crate::asgi::shared::ExecutorHandles;
-use crate::asgi::shared::eventloop::LoopKind;
-use crate::asgi::websocket::executor::{
-    Body, EVENT_ID_RESPONSE, RecvFuture, ResponseStartEvent, SendEvent, WebSocketExecutor,
-};
-use crate::asgi::websocket::stream::EnvoyStream;
 use crate::eventbridge::EventBridge;
-use crate::forwarded::{self, TrustedProxies};
-use crate::types::*;
+use crate::types::Scope;
+
+use executor::{
+    Body, EVENT_ID_REQUEST, RecvFuture, ResponseBodyEvent, ResponseStartEvent, SendEvent,
+};
+pub(crate) use executor::{EVENT_ID_CLOSE_TIMEOUT, WebSocketExecutor};
+use stream::EnvoyStream;
+use timer::Timer;
 
 mod executor;
 mod stream;
+mod timer;
 
-pub struct Config {
+/// How long to wait for an HTTP/2 or HTTP/3 client to end its stream after
+/// the close handshake before ending ours anyways.
+const HALF_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The WebSocket settings shared by all streams of a filter.
+pub(crate) struct Config {
     executor: WebSocketExecutor,
-    handles: Option<ExecutorHandles>,
     max_message_size: usize,
     deflate: Option<DeflateConfig>,
-    trusted_proxies: Arc<TrustedProxies>,
+    timer: Timer,
 }
 
 impl Config {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        app: &str,
-        root_path: &str,
-        constants: Arc<Constants>,
-        worker_threads: usize,
-        enable_lifespan: Option<bool>,
-        loop_kind: LoopKind,
+    pub(crate) fn new(
+        executor: WebSocketExecutor,
         max_message_size: usize,
         deflate: Option<DeflateConfig>,
-        trusted_proxies: TrustedProxies,
-    ) -> Option<Self> {
-        let (module, attr) = app.split_once(":").unwrap_or((app, "app"));
-        let (executor, handles) = match WebSocketExecutor::new(
-            module,
-            attr,
-            root_path,
-            constants,
-            worker_threads,
-            enable_lifespan,
-            loop_kind,
-        ) {
-            Ok(executor) => executor,
-            Err(e) => {
-                Python::attach(|py| {
-                    let tb = e
-                        .traceback(py)
-                        .and_then(|tb| tb.format().ok())
-                        .unwrap_or_default();
-                    envoy_log_error!("Failed to initialize ASGI app\n{}{}", tb, e);
-                });
-                return None;
-            }
-        };
-        Some(Self {
+    ) -> std::io::Result<Self> {
+        Ok(Self {
             executor,
-            handles: Some(handles),
             max_message_size,
             deflate,
-            trusted_proxies: Arc::new(trusted_proxies),
+            timer: Timer::new()?,
         })
     }
 }
 
-impl Drop for Config {
-    fn drop(&mut self) {
-        self.executor.shutdown();
-        self.handles.take().unwrap().join();
-    }
+/// Whether the request is a WebSocket opening handshake. An HTTP/1 handshake
+/// must have a key while HTTP/2 and HTTP/3 ones never do. Other requests,
+/// including invalid handshakes, are served as HTTP.
+pub(crate) fn is_handshake(scope: &Scope) -> bool {
+    let header = |name: &HeaderName| {
+        scope
+            .headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v)
+    };
+    header(&header::UPGRADE).is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"))
+        && header(&header::SEC_WEBSOCKET_VERSION).is_some_and(|v| v.as_bytes() == b"13")
+        && (scope.http_version >= http::Version::HTTP_2
+            || header(&header::SEC_WEBSOCKET_KEY).is_some())
 }
 
-impl<ENF: EnvoyNetworkFilter> NetworkFilterConfig<ENF> for Config {
-    fn new_network_filter(&self, _envoy: &mut ENF) -> Box<dyn NetworkFilter<ENF>> {
-        Box::new(CatchUnwind::new(Filter {
-            executor: self.executor.clone(),
-            state: WebSocketState::StartHandshake(HandshakeMachine::start_read(
-                EnvoyStream::default(),
-            )),
-            close_frame: None,
-            recv_bridge: EventBridge::new(),
-            send_bridge: EventBridge::new(),
-            downstream_watermark_level: 0,
-            max_message_size: self.max_message_size,
-            deflate: self.deflate,
-            trusted_proxies: self.trusted_proxies.clone(),
-        }))
-    }
-}
-
-enum WebSocketState {
-    StartHandshake(HandshakeMachine<EnvoyStream>),
-    FinishHandshake(EnvoyStream, http::Response<()>, Extensions),
-    Accepted(WebSocket<EnvoyStream>),
+enum State {
+    /// Waiting for the application to accept or deny the connection.
+    Handshake {
+        /// The `Sec-WebSocket-Accept` value for an HTTP/1 handshake.
+        accept: Option<HeaderValue>,
+        /// The client's `Sec-WebSocket-Extensions` offers.
+        extension_offers: HeaderMap,
+    },
+    Accepted(Box<WebSocket<EnvoyStream>>),
     /// Streaming the body of an HTTP response denying the connection.
     Responding,
-    NotWebSocket,
-
-    Done, // Can be used as a temporary value during state transitions or to signal the response is done before handshake.
+    Done,
 }
 
-struct Filter {
-    executor: WebSocketExecutor,
-
-    state: WebSocketState,
-    close_frame: Option<CloseFrame>,
+/// A WebSocket connection on one HTTP stream.
+///
+/// Calls into Envoy can re-enter the filter, so no `RefCell` borrow is held
+/// across them.
+pub(crate) struct WebSocketStream {
+    config: Arc<Config>,
+    state: RefCell<State>,
+    /// Our handle on the bytes the WebSocket reads and writes.
+    io: EnvoyStream,
+    close_frame: RefCell<Option<CloseFrame>>,
+    connect_sent: Cell<bool>,
 
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
 
-    downstream_watermark_level: usize,
-
-    max_message_size: usize,
-    deflate: Option<DeflateConfig>,
-    trusted_proxies: Arc<TrustedProxies>,
+    /// Whether the client ended its request stream.
+    request_ended: Cell<bool>,
+    /// Whether to wait for the client to end its stream after the close
+    /// handshake before ending ours, true for HTTP/2 and HTTP/3. Envoy resets a
+    /// stream whose response ends before its request, discarding response data
+    /// still waiting on flow control such as our Close frame. HTTP/1 clients
+    /// instead wait for the server to close the connection first (RFC 6455
+    /// 7.1.1), which Envoy does when the response ends.
+    wait_for_half_close: bool,
+    /// Whether the close handshake is done and the response is waiting to end.
+    closing: Cell<bool>,
+    response_ended: Cell<bool>,
 }
 
-impl<ENF: EnvoyNetworkFilter> NetworkFilter<ENF> for Filter {
-    fn on_read(
-        &mut self,
-        envoy_filter: &mut ENF,
-        _data_length: usize,
-        _end_stream: bool,
-    ) -> abi::envoy_dynamic_module_type_on_network_filter_data_status {
-        match &self.state {
-            WebSocketState::NotWebSocket => {
-                return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
-            }
-            WebSocketState::Accepted(_) => {
-                self.read_web_socket(envoy_filter);
-                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-            }
-            WebSocketState::FinishHandshake(_, _, _) => {
-                // This is similar to junk after handshake request, which we handle above in tail.empty.
-                // As we've already executed the app, there isn't much to do but fail the request
-                envoy_filter.close_with_details(
-                    abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
-                    "Unexpected body during handshake",
-                );
-                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-            }
-            WebSocketState::Responding => {
-                // A client shouldn't send anything after a handshake request that
-                // was denied, and we close once the response completes.
-                let (_, total_size) = envoy_filter.get_read_buffer_chunks();
-                envoy_filter.drain_read_buffer(total_size);
-                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-            }
-            WebSocketState::Done => {
-                // In practice, this shouldn't happen since it means we already closed the connection.
-                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-            }
-            // The handshake machine is moved while processing the handshake, so we handle it separately
-            // from where we don't want to move.
-            _ => {}
-        };
-
-        if let WebSocketState::StartHandshake(mut mach) =
-            std::mem::replace(&mut self.state, WebSocketState::NotWebSocket)
-        {
-            mach.get_mut().read_from_buffered(envoy_filter);
-            loop {
-                mach = match mach.single_round::<http::Request<()>>() {
-                    Ok(RoundResult::WouldBlock(m)) => {
-                        self.state = WebSocketState::StartHandshake(m);
-                        return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-                    }
-                    Ok(RoundResult::Incomplete(m)) => m,
-                    Ok(RoundResult::StageFinished(finish)) => {
-                        if let StageResult::DoneReading {
-                            stream,
-                            result: request,
-                            tail,
-                        } = finish
-                        {
-                            let Ok(mut response) = create_response(&request) else {
-                                // We get here if there's no upgrade header, etc.
-                                self.state = WebSocketState::NotWebSocket;
-                                return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
-                            };
-                            if !tail.is_empty() {
-                                envoy_filter.close_with_details(
-                                    abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
-                                    "Unexpected body during handshake",
-                                );
-                                return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-                            }
-                            // Negotiate permessage-deflate against the client's offers,
-                            // writing the agreed extension header into the response. A
-                            // malformed extensions header falls back to no compression.
-                            let mut extensions_config = ExtensionsConfig::default();
-                            extensions_config.permessage_deflate = self.deflate;
-                            let extensions = extensions_config
-                                .negotiate_response(request.headers(), response.headers_mut())
-                                .unwrap_or_default();
-                            self.state =
-                                WebSocketState::FinishHandshake(stream, response, extensions);
-                            let (_, total_size) = envoy_filter.get_read_buffer_chunks();
-                            envoy_filter.drain_read_buffer(total_size);
-                            let subprotocols = parse_subprotocols(request.headers());
-                            let scope = new_scope(request, envoy_filter, &self.trusted_proxies);
-                            self.executor.execute_app(
-                                scope,
-                                subprotocols,
-                                self.recv_bridge.clone(),
-                                self.send_bridge.clone(),
-                                Box::from(envoy_filter.new_scheduler()),
-                            );
-
-                            return abi::envoy_dynamic_module_type_on_network_filter_data_status::StopIteration;
-                        } else {
-                            // Only reading, not writing handshake.
-                            unreachable!()
-                        }
-                    }
-                    Err(_) => {
-                        // We get here if the request method wasn't GET.
-                        self.state = WebSocketState::NotWebSocket;
-                        return abi::envoy_dynamic_module_type_on_network_filter_data_status::Continue;
-                    }
-                }
+impl WebSocketStream {
+    /// Starts the application for a WebSocket handshake request.
+    pub(crate) fn start(
+        config: Arc<Config>,
+        envoy_filter: &mut impl EnvoyHttpFilter,
+        mut scope: Scope,
+        end_of_stream: bool,
+    ) -> Self {
+        let mut accept = None;
+        let mut extension_offers = HeaderMap::new();
+        for (name, value) in &scope.headers {
+            if name == header::SEC_WEBSOCKET_KEY {
+                accept = HeaderValue::from_str(&derive_accept_key(value.as_bytes())).ok();
+            } else if name == header::SEC_WEBSOCKET_EXTENSIONS {
+                extension_offers.append(header::SEC_WEBSOCKET_EXTENSIONS, value.clone());
             }
         }
+        let subprotocols = parse_subprotocols(&scope.headers);
+        let wait_for_half_close = scope.http_version >= http::Version::HTTP_2;
+        scope.scheme = if scope.scheme == uri::Scheme::HTTPS {
+            uri::Scheme::try_from("wss").unwrap()
+        } else {
+            uri::Scheme::try_from("ws").unwrap()
+        };
 
-        unreachable!()
+        let stream = Self {
+            config,
+            state: RefCell::new(State::Handshake {
+                accept,
+                extension_offers,
+            }),
+            io: EnvoyStream::default(),
+            close_frame: RefCell::new(None),
+            connect_sent: Cell::new(false),
+            recv_bridge: EventBridge::new(),
+            send_bridge: EventBridge::new(),
+            request_ended: Cell::new(end_of_stream),
+            wait_for_half_close,
+            closing: Cell::new(false),
+            response_ended: Cell::new(false),
+        };
+        stream.config.executor.execute_app(
+            scope,
+            subprotocols,
+            stream.recv_bridge.clone(),
+            stream.send_bridge.clone(),
+            Box::new(envoy_filter.new_scheduler()),
+        );
+        stream
     }
 
-    fn on_scheduled(&mut self, envoy_filter: &mut ENF, event_id: u64) {
-        if event_id == EVENT_ID_REQUEST {
-            match &self.state {
-                WebSocketState::FinishHandshake(_, _, _) => {
-                    let future = self.recv_bridge.get().unwrap();
-                    self.executor.handle_recv_future_connect(future);
-                }
-                WebSocketState::Accepted(_) => {
-                    self.read_web_socket(envoy_filter);
-                }
-                _ => {}
+    pub(crate) fn on_request_body(
+        &self,
+        envoy_filter: &mut impl EnvoyHttpFilter,
+        end_of_stream: bool,
+    ) {
+        if end_of_stream {
+            self.request_ended.set(true);
+        }
+        self.handle_read(envoy_filter);
+    }
+
+    pub(crate) fn on_request_trailers(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        self.request_ended.set(true);
+        self.handle_read(envoy_filter);
+    }
+
+    pub(crate) fn on_request_event(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if matches!(*self.state.borrow(), State::Handshake { .. }) {
+            if !self.connect_sent.get()
+                && let Some(future) = self.recv_bridge.get()
+            {
+                self.connect_sent.set(true);
+                self.config.executor.handle_recv_future_connect(future);
             }
             return;
         }
-        if self.downstream_watermark_level == 0 {
-            self.process_send_events(envoy_filter);
+        self.handle_read(envoy_filter);
+    }
+
+    pub(crate) fn on_close_timeout(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.closing.get() {
+            self.end_response(envoy_filter);
         }
     }
 
-    fn on_above_write_buffer_high_watermark(&mut self, _envoy_filter: &mut ENF) {
-        self.downstream_watermark_level += 1;
-    }
-
-    fn on_below_write_buffer_low_watermark(&mut self, envoy_filter: &mut ENF) {
-        self.downstream_watermark_level -= 1;
-        if self.downstream_watermark_level == 0 {
-            envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
-        }
-    }
-
-    fn on_destroy(&mut self, _envoy_filter: &mut ENF) {
+    pub(crate) fn on_stream_complete(&self) {
+        // Dropping any pending receives resolves them to a disconnect.
         self.cleanup();
+        self.response_ended.set(true);
+        *self.state.borrow_mut() = State::Done;
     }
-}
 
-impl Filter {
-    fn process_send_events(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
-        match std::mem::replace(&mut self.state, WebSocketState::Done) {
-            WebSocketState::FinishHandshake(stream, mut response, extensions) => {
-                let event = self.send_bridge.get().unwrap();
-                let event = match event {
-                    SendEvent::Close { code, reason } => {
-                        let mut response = http::Response::new(());
-                        *response.status_mut() = http::StatusCode::FORBIDDEN;
-                        let mut buffer = Vec::new();
-                        write_response(&mut buffer, &response).unwrap();
-                        envoy_filter.write(&buffer, true);
-                        self.close_frame = Some(CloseFrame {
-                            code: CloseCode::from(code),
-                            reason: reason.clone(),
-                        });
-                        return;
-                    }
-                    SendEvent::Accept(e) => e,
-                    SendEvent::ResponseStart(start, body) => {
-                        let end_stream = body.future.is_none();
-                        let mut buffer = denial_response_head(start, &body.body, end_stream);
-                        buffer.extend_from_slice(&body.body);
-                        envoy_filter.write(&buffer, end_stream);
-                        if let Some(future) = body.future {
-                            self.state = WebSocketState::Responding;
-                            self.executor.handle_send_future(future);
-                        }
-                        return;
-                    }
-                    SendEvent::Abort => {
-                        envoy_filter.close(
-                            abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
-                        );
-                        return;
-                    }
-                    SendEvent::Exception => {
-                        // Follow uvicorn's behavior which returns 500 for exceptions before handshake.
-                        let body = b"Internal Server Error";
-                        let mut response = http::Response::new(body);
-                        *response.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
-                        response
-                            .headers_mut()
-                            .insert(header::CONTENT_LENGTH, HeaderValue::from_static("21"));
-                        let mut buffer = Vec::new();
-                        write_response(&mut buffer, &response).unwrap();
-                        buffer.extend_from_slice(*response.body());
-                        envoy_filter.write(&buffer, true);
-                        // Mainly to handle if the application created a task that calls recv, after the app
-                        // finished with exception. It's not a meaningful app in the real-world.
-                        self.close_frame = Some(CloseFrame {
-                            code: CloseCode::Error,
-                            reason: Utf8Bytes::default(),
-                        });
-                        return;
-                    }
-                    _ => unreachable!(), // SendCallable ensures
-                };
-                if let Some(subprotocol) = &event.subprotocol
-                    && let Ok(value) = HeaderValue::from_bytes(subprotocol.as_bytes())
-                {
-                    response
-                        .headers_mut()
-                        .append(header::SEC_WEBSOCKET_PROTOCOL, value);
-                }
-                for (name, value) in event.headers.iter() {
-                    response.headers_mut().append(name, value.clone());
-                }
-                let mut buffer = Vec::new();
-                write_response(&mut buffer, &response).unwrap();
-                envoy_filter.write(&buffer, false);
-                let ws_config =
-                    WebSocketConfig::default().max_message_size(Some(self.max_message_size));
-                let websocket = WebSocket::from_raw_socket_with_extensions(
-                    stream,
-                    Role::Server,
-                    Some(ws_config),
-                    extensions,
-                );
-                self.state = WebSocketState::Accepted(websocket);
-                // In case there were any recv tasks started before sending the acceptance.
-                envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
-                self.executor.handle_send_future(event.future);
+    fn handle_read(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.closing.get() {
+            // The close handshake is done, so anything else from the client is
+            // discarded while we wait for it to end its stream.
+            drain_request_body(envoy_filter);
+            if self.request_ended.get() {
+                self.end_response(envoy_filter);
+            }
+            return;
+        }
+        if matches!(*self.state.borrow(), State::Accepted(_)) {
+            self.read_web_socket(envoy_filter);
+        }
+    }
+
+    pub(crate) fn process_send_events(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if matches!(*self.state.borrow(), State::Handshake { .. }) {
+            let Some(event) = self.send_bridge.get() else {
                 return;
-            }
-            other => {
-                self.state = other;
-            }
+            };
+            self.process_handshake_event(envoy_filter, event);
+            return;
         }
 
         self.send_bridge.process(|event| {
-            match &mut self.state {
-                WebSocketState::Accepted(websocket) => match event {
-                    SendEvent::SendMessage(event) => {
-                        if self.close_frame.is_some() {
-                            return;
-                        }
-                        websocket
-                            .send(match event.body {
-                                Body::Text(text) => Message::Text(text),
-                                Body::Bytes(bytes) => Message::Binary(bytes),
-                            })
-                            .unwrap();
-                        websocket.get_mut().write_to(envoy_filter);
-                        self.executor.handle_send_future(event.future);
+            if self.response_ended.get() {
+                return;
+            }
+            let responding = matches!(*self.state.borrow(), State::Responding);
+            if responding {
+                self.process_denial_event(envoy_filter, event);
+                return;
+            }
+            match event {
+                SendEvent::SendMessage(event) => {
+                    if self.close_frame.borrow().is_some() {
+                        // Dropping the future fails the send as disconnected.
+                        return;
                     }
-                    SendEvent::Close { code, reason } => {
-                        let close_frame = CloseFrame {
+                    let message = match event.body {
+                        Body::Text(text) => Message::Text(text),
+                        Body::Bytes(bytes) => Message::Binary(bytes),
+                    };
+                    self.with_websocket(|websocket| {
+                        let _ = websocket.send(message);
+                    });
+                    self.flush(envoy_filter);
+                    self.config.executor.handle_send_future(event.future);
+                }
+                SendEvent::Close { code, reason } => {
+                    self.start_close(
+                        envoy_filter,
+                        CloseFrame {
                             code: CloseCode::from(code),
-                            reason: reason.clone(),
-                        };
-                        let _ = websocket.close(Some(close_frame.clone()));
-                        websocket.get_mut().write_to(envoy_filter);
-                        self.close_frame = Some(close_frame);
-                    }
-                    SendEvent::Exception => {
-                        let close_frame = CloseFrame {
+                            reason,
+                        },
+                    );
+                }
+                SendEvent::Exception => {
+                    self.start_close(
+                        envoy_filter,
+                        CloseFrame {
                             code: CloseCode::Error,
                             reason: Utf8Bytes::default(),
-                        };
-                        let _ = websocket.close(Some(close_frame.clone()));
-                        websocket.get_mut().write_to(envoy_filter);
-                        self.close_frame = Some(close_frame);
-                    }
-                    SendEvent::Abort => {
-                        // Don't abort if we're already closing gracefully.
-                        if self.close_frame.is_none() {
-                            envoy_filter.close(
-                                abi::envoy_dynamic_module_type_network_connection_close_type::FlushWrite,
-                            );
-                        }
-                    }
-                    _ => unreachable!(),
-                },
-                WebSocketState::Responding => match event {
-                    SendEvent::ResponseBody(body) => {
-                        envoy_filter.write(&body.body, body.future.is_none());
-                        match body.future {
-                            Some(future) => self.executor.handle_send_future(future),
-                            None => self.state = WebSocketState::Done,
-                        }
-                    }
-                    SendEvent::Exception | SendEvent::Abort => {
-                        // The response head is already written, so reset to signal
-                        // the body is incomplete.
-                        envoy_filter.close_with_details(
-                            abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
-                            "Incomplete WebSocket denial response",
-                        );
-                        self.state = WebSocketState::Done;
-                    }
-                    _ => unreachable!(), // SendCallable ensures
-                },
-                WebSocketState::Done => {}
-                _ => {
-                    // Allow to drop to signal closed.
+                        },
+                    );
                 }
+                SendEvent::Abort => {
+                    // Don't abort if we're already closing gracefully.
+                    if self.close_frame.borrow().is_none() {
+                        self.reset(
+                            envoy_filter,
+                            "WebSocket application returned without closing",
+                        );
+                    }
+                }
+                // SendCallable only sends denial events before accepting.
+                SendEvent::Accept(_)
+                | SendEvent::ResponseStart(..)
+                | SendEvent::ResponseBody(_) => {}
             }
         });
     }
 
-    fn read_web_socket(&mut self, envoy_filter: &mut impl EnvoyNetworkFilter) {
-        let WebSocketState::Accepted(websocket) = &mut self.state else {
-            unreachable!()
-        };
-
-        if let Some(close_frame) = &self.close_frame {
-            self.recv_bridge.process(|future| {
-                self.executor.handle_recv_future_disconnect(
-                    close_frame.code.into(),
-                    close_frame.reason.clone(),
-                    future,
+    fn process_handshake_event(&self, envoy_filter: &mut impl EnvoyHttpFilter, event: SendEvent) {
+        match event {
+            SendEvent::Accept(event) => {
+                let State::Handshake {
+                    accept,
+                    extension_offers,
+                } = std::mem::replace(&mut *self.state.borrow_mut(), State::Done)
+                else {
+                    return;
+                };
+                let mut headers = HeaderMap::new();
+                headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+                headers.insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+                if let Some(accept) = accept {
+                    headers.insert(header::SEC_WEBSOCKET_ACCEPT, accept);
+                }
+                // Negotiate permessage-deflate against the client's offers,
+                // writing the agreed extension header into the response. A
+                // malformed extensions header falls back to no compression.
+                let mut extensions_config = ExtensionsConfig::default();
+                extensions_config.permessage_deflate = self.config.deflate;
+                let extensions = extensions_config
+                    .negotiate_response(&extension_offers, &mut headers)
+                    .unwrap_or_else(|_| Extensions::default());
+                if let Some(subprotocol) = &event.subprotocol
+                    && let Ok(value) = HeaderValue::from_str(subprotocol)
+                {
+                    headers.append(header::SEC_WEBSOCKET_PROTOCOL, value);
+                }
+                for (name, value) in event.headers {
+                    headers.append(name, value);
+                }
+                let ws_config =
+                    WebSocketConfig::default().max_message_size(Some(self.config.max_message_size));
+                *self.state.borrow_mut() =
+                    State::Accepted(Box::new(WebSocket::from_raw_socket_with_extensions(
+                        self.io.clone(),
+                        Role::Server,
+                        Some(ws_config),
+                        extensions,
+                    )));
+                // Envoy converts the 101 to a 200 for HTTP/2 and HTTP/3.
+                send_headers(
+                    envoy_filter,
+                    StatusCode::SWITCHING_PROTOCOLS,
+                    &headers,
+                    false,
                 );
-            });
-            finish_close(websocket, envoy_filter);
-            self.send_bridge.close();
-            self.recv_bridge.close();
+                // In case there were any recv tasks started before accepting.
+                envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
+                self.config.executor.handle_send_future(event.future);
+            }
+            SendEvent::Close { code, reason } => {
+                *self.close_frame.borrow_mut() = Some(CloseFrame {
+                    code: CloseCode::from(code),
+                    reason,
+                });
+                *self.state.borrow_mut() = State::Done;
+                self.response_ended.set(true);
+                let mut headers = HeaderMap::new();
+                headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("0"));
+                send_headers(envoy_filter, StatusCode::FORBIDDEN, &headers, true);
+            }
+            SendEvent::ResponseStart(start, body) => {
+                *self.state.borrow_mut() = State::Responding;
+                self.send_denial_start(envoy_filter, start, body);
+            }
+            SendEvent::Abort => {
+                *self.state.borrow_mut() = State::Done;
+                self.reset(
+                    envoy_filter,
+                    "WebSocket application returned before accepting",
+                );
+            }
+            SendEvent::Exception => {
+                // Mainly to handle if the application created a task that calls recv, after the app
+                // finished with exception. It's not a meaningful app in the real-world.
+                *self.close_frame.borrow_mut() = Some(CloseFrame {
+                    code: CloseCode::Error,
+                    reason: Utf8Bytes::default(),
+                });
+                *self.state.borrow_mut() = State::Done;
+                self.response_ended.set(true);
+                // Follow uvicorn's behavior which returns 500 for exceptions before handshake.
+                envoy_filter.send_response(
+                    500,
+                    &[("content-type", b"text/plain; charset=utf-8")],
+                    Some(b"Internal Server Error"),
+                    None,
+                );
+            }
+            // SendCallable only allows these after accepting or denying.
+            SendEvent::SendMessage(_) | SendEvent::ResponseBody(_) => {}
         }
+    }
 
-        if self.recv_bridge.is_empty() {
+    fn send_denial_start(
+        &self,
+        envoy_filter: &mut impl EnvoyHttpFilter,
+        start: ResponseStartEvent,
+        body: ResponseBodyEvent,
+    ) {
+        let end_stream = body.future.is_none();
+        let mut headers = HeaderMap::new();
+        for (name, value) in start.headers {
+            headers.append(name, value);
+        }
+        if end_stream
+            && !headers.contains_key(header::CONTENT_LENGTH)
+            && start.status != StatusCode::NO_CONTENT
+            && start.status != StatusCode::NOT_MODIFIED
+        {
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.body.len()));
+        }
+        match body.future {
+            Some(future) => self.config.executor.handle_send_future(future),
+            None => {
+                *self.state.borrow_mut() = State::Done;
+                self.response_ended.set(true);
+            }
+        }
+        if end_stream && body.body.is_empty() {
+            send_headers(envoy_filter, start.status, &headers, true);
+        } else {
+            send_headers(envoy_filter, start.status, &headers, false);
+            envoy_filter.send_response_data(&body.body, end_stream);
+        }
+    }
+
+    fn process_denial_event(&self, envoy_filter: &mut impl EnvoyHttpFilter, event: SendEvent) {
+        match event {
+            SendEvent::ResponseBody(body) => {
+                let end_stream = body.future.is_none();
+                match body.future {
+                    Some(future) => self.config.executor.handle_send_future(future),
+                    None => {
+                        *self.state.borrow_mut() = State::Done;
+                        self.response_ended.set(true);
+                    }
+                }
+                envoy_filter.send_response_data(&body.body, end_stream);
+            }
+            SendEvent::Exception | SendEvent::Abort => {
+                // The response head is already sent, so reset to signal the
+                // body is incomplete.
+                *self.state.borrow_mut() = State::Done;
+                self.reset(envoy_filter, "Incomplete WebSocket denial response");
+            }
+            // SendCallable only allows response body events while responding.
+            _ => {}
+        }
+    }
+
+    fn read_web_socket(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        let close_frame = self.close_frame.borrow().clone();
+        if let Some(close_frame) = close_frame {
+            self.disconnect_receivers(&close_frame);
+            self.finish_close(envoy_filter);
             return;
         }
 
-        loop {
-            let message = websocket.read();
-            websocket.get_mut().write_to(envoy_filter);
+        while !self.recv_bridge.is_empty() {
+            let Some(message) = self.with_websocket(|websocket| websocket.read()) else {
+                return;
+            };
+            // Reading may queue writes such as pongs.
+            self.flush(envoy_filter);
             match message {
-                Ok(msg) => {
-                    let body = match msg {
-                        Message::Binary(bytes) => Body::Bytes(bytes),
-                        Message::Text(text) => Body::Text(text),
-                        Message::Close(frame) => {
-                            let close_frame = frame.unwrap_or(CloseFrame {
-                                code: CloseCode::Status,
-                                reason: Utf8Bytes::default(),
-                            });
-                            self.close_frame = Some(close_frame.clone());
-                            finish_close(websocket, envoy_filter);
-                            self.recv_bridge.process(|future| {
-                                self.executor.handle_recv_future_disconnect(
-                                    close_frame.code.into(),
-                                    close_frame.reason.clone(),
-                                    future,
-                                );
-                            });
-                            self.cleanup();
-                            return;
-                        }
-                        _ => continue,
-                    };
-                    if let Some(future) = self.recv_bridge.get() {
-                        self.executor.handle_recv_future_message(body, future);
-                    }
+                Ok(Message::Binary(bytes)) => self.deliver(Body::Bytes(bytes)),
+                Ok(Message::Text(text)) => self.deliver(Body::Text(text)),
+                Ok(Message::Close(frame)) => {
+                    let close_frame = frame.unwrap_or(CloseFrame {
+                        code: CloseCode::Status,
+                        reason: Utf8Bytes::default(),
+                    });
+                    *self.close_frame.borrow_mut() = Some(close_frame.clone());
+                    self.disconnect_receivers(&close_frame);
+                    self.cleanup();
+                    self.finish_close(envoy_filter);
+                    return;
                 }
+                Ok(_) => {}
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
                 {
                     // Need more bytes to parse a frame. Pull the next block from
                     // Envoy if available, or wait otherwise.
-                    if websocket.get_mut().read_block(envoy_filter) == 0 {
-                        break;
+                    if self.io.read_block(envoy_filter) == 0 {
+                        if self.request_ended.get() {
+                            self.abnormal_close(envoy_filter);
+                        }
+                        return;
                     }
                 }
                 Err(e) => {
@@ -511,21 +501,142 @@ impl Filter {
                         code,
                         reason: Utf8Bytes::default(),
                     };
-                    self.close_frame = Some(close_frame.clone());
-                    close(
-                        close_frame,
-                        &self.executor,
-                        &mut self.recv_bridge,
-                        websocket,
-                        envoy_filter,
-                    );
+                    self.disconnect_receivers(&close_frame);
                     self.cleanup();
+                    self.start_close(envoy_filter, close_frame);
                     return;
                 }
             }
-            if self.recv_bridge.is_empty() {
-                break;
+        }
+    }
+
+    fn deliver(&self, body: Body) {
+        if let Some(future) = self.recv_bridge.get() {
+            self.config
+                .executor
+                .handle_recv_future_message(body, future);
+        }
+    }
+
+    /// Sends our Close frame and finishes the close handshake as far as the
+    /// client's data allows.
+    fn start_close(&self, envoy_filter: &mut impl EnvoyHttpFilter, close_frame: CloseFrame) {
+        self.with_websocket(|websocket| {
+            let _ = websocket.close(Some(close_frame.clone()));
+        });
+        *self.close_frame.borrow_mut() = Some(close_frame);
+        self.flush(envoy_filter);
+        self.finish_close(envoy_filter);
+    }
+
+    fn finish_close(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        // Closing a WebSocket exchanges Close frames, which may cross request
+        // body events, so we read and write as much as we can each time.
+        loop {
+            let Some(message) = self.with_websocket(|websocket| websocket.read()) else {
+                return;
+            };
+            self.flush(envoy_filter);
+            // We shouldn't see any more real messages but it's fine to ignore them.
+            match message {
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(ref e))
+                    if e.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    if self.io.read_block(envoy_filter) == 0 {
+                        if self.request_ended.get() {
+                            // The client ended without completing the close
+                            // handshake, so there is nothing to wait for.
+                            self.end_response(envoy_filter);
+                        }
+                        return;
+                    }
+                }
+                Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                    self.close_complete(envoy_filter);
+                    return;
+                }
+                Err(_) => {
+                    self.reset(envoy_filter, "WebSocket protocol error while closing");
+                    return;
+                }
             }
+        }
+    }
+
+    fn close_complete(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        self.closing.set(true);
+        self.cleanup();
+        drain_request_body(envoy_filter);
+        if !self.wait_for_half_close || self.request_ended.get() {
+            self.end_response(envoy_filter);
+        } else {
+            self.config.timer.schedule(
+                HALF_CLOSE_TIMEOUT,
+                Box::new(envoy_filter.new_scheduler()),
+                EVENT_ID_CLOSE_TIMEOUT,
+            );
+        }
+    }
+
+    /// Handles the client ending its stream without a close handshake.
+    fn abnormal_close(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        let close_frame = CloseFrame {
+            code: CloseCode::Abnormal,
+            reason: Utf8Bytes::default(),
+        };
+        self.disconnect_receivers(&close_frame);
+        *self.close_frame.borrow_mut() = Some(close_frame);
+        self.cleanup();
+        self.end_response(envoy_filter);
+    }
+
+    fn end_response(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.response_ended.replace(true) {
+            return;
+        }
+        self.closing.set(false);
+        *self.state.borrow_mut() = State::Done;
+        envoy_filter.send_response_data(&[], true);
+    }
+
+    fn reset(&self, envoy_filter: &mut impl EnvoyHttpFilter, details: &str) {
+        if self.response_ended.replace(true) {
+            return;
+        }
+        self.cleanup();
+        *self.state.borrow_mut() = State::Done;
+        envoy_filter.reset_stream(
+            abi::envoy_dynamic_module_type_http_filter_stream_reset_reason::LocalReset,
+            details,
+        );
+    }
+
+    fn disconnect_receivers(&self, close_frame: &CloseFrame) {
+        self.recv_bridge.process(|future| {
+            self.config.executor.handle_recv_future_disconnect(
+                close_frame.code.into(),
+                close_frame.reason.clone(),
+                future,
+            );
+        });
+    }
+
+    /// Runs `f` with the accepted WebSocket, returning `None` if there is none.
+    fn with_websocket<R>(&self, f: impl FnOnce(&mut WebSocket<EnvoyStream>) -> R) -> Option<R> {
+        match &mut *self.state.borrow_mut() {
+            State::Accepted(websocket) => Some(f(websocket)),
+            _ => None,
+        }
+    }
+
+    /// Sends what the WebSocket has written to the client.
+    fn flush(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.response_ended.get() {
+            return;
+        }
+        if let Some(bytes) = self.io.take_written() {
+            envoy_filter.send_response_data(&bytes, false);
         }
     }
 
@@ -535,179 +646,42 @@ impl Filter {
     }
 }
 
-fn close(
-    close_frame: CloseFrame,
-    executor: &WebSocketExecutor,
-    recv_bridge: &mut EventBridge<RecvFuture>,
-    websocket: &mut WebSocket<EnvoyStream>,
-    envoy_filter: &mut impl EnvoyNetworkFilter,
-) {
-    let _ = websocket.close(Some(close_frame.clone()));
-    finish_close(websocket, envoy_filter);
-    recv_bridge.process(|future| {
-        executor.handle_recv_future_disconnect(
-            close_frame.code.into(),
-            close_frame.reason.clone(),
-            future,
-        );
-    });
-}
-
-fn finish_close(
-    websocket: &mut WebSocket<EnvoyStream>,
-    envoy_filter: &mut impl EnvoyNetworkFilter,
-) {
-    // Closing a websocket involves exchanging messages. This may cross network events,
-    // so we read as much and write as much as we can. Eventually it will be done.
-    websocket.get_mut().read_from(envoy_filter);
-    loop {
-        let message = websocket.read();
-        websocket.get_mut().write_to(envoy_filter);
-        // We shouldn't see any more real messages but it's fine to ignore them.
-        // Just check for when we need more bytes.
-        match message {
-            Err(tungstenite::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                break;
-            }
-            Err(tungstenite::Error::AlreadyClosed) => {
-                break;
-            }
-            Err(tungstenite::Error::ConnectionClosed) => {
-                // The close handshake is done, but the peer may still send
-                // frames after its Close. Closing the socket now would answer
-                // them with a RST, and Windows clients discard unread data on
-                // RST, losing our Close frame. Instead, send FIN and keep
-                // draining reads until the peer's FIN, when Envoy closes the
-                // connection.
-                envoy_filter.enable_half_close(true);
-                envoy_filter.write(&[], true);
-                break;
-            }
-            Err(_) => {
-                envoy_filter.close(
-                    abi::envoy_dynamic_module_type_network_connection_close_type::AbortReset,
-                );
-                break;
-            }
-            _ => {}
-        }
+/// Discards the readable request body.
+fn drain_request_body(envoy_filter: &mut impl EnvoyHttpFilter) {
+    let buffered = envoy_filter.get_buffered_request_body_size();
+    if buffered > 0 {
+        envoy_filter.drain_buffered_request_body(buffered);
+    }
+    let received = envoy_filter.get_received_request_body_size();
+    if received > 0 {
+        envoy_filter.drain_received_request_body(received);
     }
 }
 
-/// Serializes the head of an HTTP response denying a WebSocket connection. The
-/// connection closes after the response, so a body without a known length is
-/// delimited by the close.
-fn denial_response_head(start: ResponseStartEvent, body: &[u8], end_stream: bool) -> Vec<u8> {
-    let mut response = http::Response::new(());
-    *response.status_mut() = start.status;
-    let headers = response.headers_mut();
-    for (name, value) in start.headers {
-        headers.append(name, value);
+fn send_headers(
+    envoy_filter: &mut impl EnvoyHttpFilter,
+    status: StatusCode,
+    headers: &HeaderMap,
+    end_stream: bool,
+) {
+    let mut envoy_headers: Vec<(&str, &[u8])> = Vec::with_capacity(headers.len() + 1);
+    envoy_headers.push((":status", status.as_str().as_bytes()));
+    for (name, value) in headers {
+        envoy_headers.push((name.as_str(), value.as_bytes()));
     }
-    headers.insert(header::CONNECTION, HeaderValue::from_static("close"));
-    if end_stream
-        && !headers.contains_key(header::CONTENT_LENGTH)
-        && start.status != http::StatusCode::NO_CONTENT
-        && start.status != http::StatusCode::NOT_MODIFIED
-    {
-        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len()));
-    }
-    let mut buffer = Vec::new();
-    write_response(&mut buffer, &response).unwrap();
-    buffer
+    envoy_filter.send_response_headers(&envoy_headers, end_stream);
 }
 
 /// Parses the comma-separated subprotocols offered by the client across any
 /// number of `Sec-WebSocket-Protocol` headers, in offer order.
-fn parse_subprotocols(headers: &http::HeaderMap) -> Vec<String> {
+fn parse_subprotocols(headers: &[(HeaderName, HeaderValue)]) -> Vec<String> {
     headers
-        .get_all(header::SEC_WEBSOCKET_PROTOCOL)
         .iter()
-        .filter_map(|value| value.to_str().ok())
+        .filter(|(name, _)| name == header::SEC_WEBSOCKET_PROTOCOL)
+        .filter_map(|(_, value)| value.to_str().ok())
         .flat_map(|value| value.split(','))
         .map(str::trim)
         .filter(|protocol| !protocol.is_empty())
         .map(str::to_owned)
         .collect()
-}
-
-fn new_scope(
-    request: http::Request<()>,
-    envoy_filter: &mut impl EnvoyNetworkFilter,
-    trusted_proxies: &TrustedProxies,
-) -> Scope {
-    let (head, _) = request.into_parts();
-
-    // WebSocket connections don't go through the HTTP connection manager, so
-    // we resolve forwarded headers of trusted proxies the same way it does.
-    let peer = envoy_filter.get_remote_address();
-    let mut client = None;
-    let mut forwarded_proto_is_secure = None;
-    if trusted_proxies.is_trusted(|| strip_port(&peer.0).parse().ok()) {
-        let forwarded_for = head
-            .headers
-            .get_all("x-forwarded-for")
-            .iter()
-            .map(|value| value.to_str())
-            .collect::<Result<Vec<_>, _>>();
-        if let Ok(forwarded_for) = forwarded_for
-            && !forwarded_for.is_empty()
-        {
-            client = trusted_proxies
-                .client_from_forwarded_for(&forwarded_for.join(","))
-                .map(|address| (Box::from(address.to_string()), 0));
-        }
-        forwarded_proto_is_secure = head
-            .headers
-            .get("x-forwarded-proto")
-            .and_then(|value| forwarded::forwarded_proto_is_secure(value.as_bytes()));
-    }
-    let client = client.or_else(|| address_to_scope(peer));
-    let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(head.headers.len());
-    let mut current_name: Option<HeaderName> = None;
-    for (name, value) in head.headers.into_iter() {
-        if let Some(name) = name {
-            current_name = Some(name);
-        }
-        headers.push((current_name.as_ref().unwrap().clone(), value));
-    }
-
-    let is_ssl = envoy_filter.is_ssl();
-
-    Scope {
-        http_version: head.version,
-        method: head.method,
-        scheme: if forwarded_proto_is_secure.unwrap_or(is_ssl) {
-            uri::Scheme::try_from("wss").unwrap()
-        } else {
-            uri::Scheme::try_from("ws").unwrap()
-        },
-        raw_path: head
-            .uri
-            .path_and_query()
-            .map(|pq| Box::from(pq.as_str().as_bytes()))
-            .unwrap_or_default(),
-        headers,
-        client,
-        server: address_to_scope(envoy_filter.get_local_address())
-            .map(|(host, port)| (host, Some(port))),
-        // Network filter doesn't expose tls_version but we can report the rest.
-        tls_info: is_ssl.then(|| TlsInfo {
-            tls_version: None,
-            client_cert_name: envoy_filter
-                .get_ssl_subject()
-                .map(|s| Box::from(String::from_utf8_lossy(s.as_slice()))),
-        }),
-    }
-}
-
-/// Converts an Envoy `(address, port)` pair into an ASGI scope address, dropping
-/// any port suffix on the host and treating an empty host as "no address".
-/// Envoy only provides IP addresses to network filters, so a Unix socket is
-/// also "no address".
-fn address_to_scope((address, port): (String, u32)) -> Option<(Box<str>, i64)> {
-    if address.is_empty() {
-        return None;
-    }
-    Some((Box::from(strip_port(&address)), i64::from(port)))
 }

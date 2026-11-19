@@ -288,8 +288,9 @@ class PyvoyServer:
             loop: The event loop ASGI applications run on. 'asyncio' is the
                 standard library event loop. Unset uses uvloop, or winloop on
                 Windows. Other event loops must be installed separately.
-            websockets: Whether to enable ASGI WebSocket support. WebSockets are
-                handled by the primary application, which must use ASGI.
+            websockets: Whether to enable ASGI WebSocket support over HTTP/1.1,
+                HTTP/2 and HTTP/3. WebSockets are routed to application mounts
+                like HTTP requests, and only applications using ASGI accept them.
             websockets_max_message_size: The non-negative maximum WebSocket message
                 size in bytes. Unset uses the default of 64 MiB.
             websockets_compression: Whether to enable WebSocket per-message deflate
@@ -603,14 +604,18 @@ class PyvoyServer:
             base_pyvoy_config["lifespan"] = self._lifespan
         if self._loop is not None:
             base_pyvoy_config["loop"] = self._loop
-        if self._websockets_max_message_size is not None:
-            base_pyvoy_config["websockets_max_message_size"] = (
-                self._websockets_max_message_size
-            )
-        if not self._websockets_compression:
-            base_pyvoy_config["websockets_compression"] = False
-        if self._websockets_compression_no_context_takeover:
-            base_pyvoy_config["websockets_compression_no_context_takeover"] = True
+        # Only ASGI applications serve WebSockets.
+        websocket_config: dict[str, int | bool] = {}
+        if self._websockets:
+            websocket_config["websockets"] = True
+            if self._websockets_max_message_size is not None:
+                websocket_config["websockets_max_message_size"] = (
+                    self._websockets_max_message_size
+                )
+            if not self._websockets_compression:
+                websocket_config["websockets_compression"] = False
+            if self._websockets_compression_no_context_takeover:
+                websocket_config["websockets_compression_no_context_takeover"] = True
         if self._upstreams:
             base_pyvoy_config["enable_http_client"] = True
         if self._forwarded_allow_ips is not None:
@@ -626,19 +631,30 @@ class PyvoyServer:
             _compressor_filter(encoding, choose_first=i == 0)
             for i, encoding in enumerate(self._content_encodings)
         ]
-        virtual_host_config = {"name": "local_service", "domains": ["*"]}
-        ws_pyvoy_config: dict[str, str | int | bool] | None = None
+        virtual_host_config: dict[str, Any] = {
+            "name": "local_service",
+            "domains": ["*"],
+            "routes": [],
+        }
+        interfaces: list[Interface] = []
+
+        def app_config(
+            app: str, interface: Interface, root_path: str
+        ) -> dict[str, str | int | bool]:
+            interfaces.append(interface)
+            return {
+                "app": app,
+                "interface": interface,
+                "root_path": root_path,
+                **base_pyvoy_config,
+                **(websocket_config if interface == "asgi" else {}),
+            }
+
         # A plain single app with no static mounts uses a single terminal filter with
         # no routing. Anything else (multiple mounts, or static mounts) routes by path
         # prefix through a composite filter.
         if isinstance(self._app, str) and not self._static_mounts:
-            pyvoy_config: dict[str, str | int | bool] = {
-                "app": self._app,
-                "interface": self._interface,
-                "root_path": self._root_path,
-                **base_pyvoy_config,
-            }
-            ws_pyvoy_config = pyvoy_config
+            pyvoy_config = app_config(self._app, self._interface, self._root_path)
 
             http_filters = [
                 *compressor_filters,
@@ -660,13 +676,7 @@ class PyvoyServer:
         else:
             matcher_map: dict[str, dict] = {}
             if isinstance(self._app, str):
-                pyvoy_config = {
-                    "app": self._app,
-                    "interface": self._interface,
-                    "root_path": self._root_path,
-                    **base_pyvoy_config,
-                }
-                ws_pyvoy_config = pyvoy_config
+                pyvoy_config = app_config(self._app, self._interface, self._root_path)
                 # The single app is the catch-all. Envoy's prefix_match_map does
                 # longest-prefix matching, so static mounts at longer prefixes win.
                 matcher_map["/"] = _dynamic_module_action(
@@ -676,15 +686,7 @@ class PyvoyServer:
                 )
             else:
                 for mount in self._app:
-                    pyvoy_config = {
-                        "app": mount.app,
-                        "interface": mount.interface,
-                        "root_path": mount.path,
-                        **base_pyvoy_config,
-                    }
-                    # We always use the first app to serve websockets, for CLI usage the main app.
-                    if ws_pyvoy_config is None:
-                        ws_pyvoy_config = pyvoy_config
+                    pyvoy_config = app_config(mount.app, mount.interface, mount.path)
                     matcher_map[mount.path] = _dynamic_module_action(
                         "pyvoy",
                         pyvoy_config,
@@ -730,7 +732,7 @@ class PyvoyServer:
                     },
                 },
             ]
-            virtual_host_config["routes"] = [
+            virtual_host_config["routes"].append(
                 {
                     "match": {"prefix": "/"},
                     "direct_response": {
@@ -738,7 +740,7 @@ class PyvoyServer:
                         "body": {"inline_string": "Not Found"},
                     },
                 }
-            ]
+            )
         http_config = {
             "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
             "stat_prefix": "ingress_http",
@@ -757,38 +759,22 @@ class PyvoyServer:
         )
         if enable_http3:
             http_config["http3_protocol_options"] = {}
-        network_filters: list[dict] = []
         if self._websockets:
-            if ws_pyvoy_config is None:
+            if not interfaces:
                 msg = "websockets require an application mount, not only static mounts"
                 raise ValueError(msg)
-            if ws_pyvoy_config["interface"] != "asgi":
-                msg = (
-                    "websockets require the primary application to use the ASGI "
-                    "interface"
-                )
+            if "asgi" not in interfaces:
+                msg = "websockets require an application using the ASGI interface"
                 raise ValueError(msg)
-            network_filters.append(
-                {
-                    "name": "pyvoy-ws",
-                    "typed_config": {
-                        "@type": "type.googleapis.com/envoy.extensions.filters.network.dynamic_modules.v3.DynamicModuleNetworkFilter",
-                        "dynamic_module_config": _dynamic_module_config(),
-                        "filter_name": "pyvoy-ws",
-                        "filter_config": {
-                            "@type": "type.googleapis.com/google.protobuf.StringValue",
-                            "value": json.dumps(ws_pyvoy_config),
-                        },
-                    },
-                }
-            )
+            _enable_websockets(http_config)
+        if not virtual_host_config["routes"]:
+            del virtual_host_config["routes"]
         filter_chain: dict = {
             "filters": [
-                *network_filters,
                 {
                     "name": "envoy.filters.network.http_connection_manager",
                     "typed_config": http_config,
-                },
+                }
             ]
         }
 
@@ -1099,6 +1085,42 @@ def _strip_accept_encoding_filter() -> dict:
             "mutations": {"request_mutations": [{"remove": "accept-encoding"}]},
         },
     }
+
+
+def _enable_websockets(http_config: dict) -> None:
+    """Configures the HTTP connection manager to pass WebSocket handshakes over
+    any HTTP version to the application filters.
+    """
+    http_config["upgrade_configs"] = [{"upgrade_type": "websocket"}]
+    # Accept RFC 8441 extended CONNECT handshakes, which Envoy presents to
+    # filters as HTTP/1 upgrades.
+    http_config["http2_protocol_options"] = {"allow_connect": True}
+    if "http3_protocol_options" in http_config:
+        http_config["http3_protocol_options"]["allow_extended_connect"] = True
+    # WebSockets are long-lived and may be idle, so their stream must not time
+    # out. Only a route can set this per stream, and filters serve the stream
+    # before the router, so it is never used to forward. Without a filter to
+    # serve the path, the router responds 404 like the catch-all route.
+    http_config["route_config"]["virtual_hosts"][0]["routes"].insert(
+        0,
+        {
+            "match": {
+                "prefix": "/",
+                "headers": [
+                    {
+                        "name": "upgrade",
+                        "string_match": {"exact": "websocket", "ignore_case": True},
+                    }
+                ],
+            },
+            "route": {
+                "cluster_header": "x-pyvoy-unused",
+                "cluster_not_found_response_code": "NOT_FOUND",
+                "timeout": "0s",
+                "idle_timeout": "0s",
+            },
+        },
+    )
 
 
 def _dynamic_module_action(

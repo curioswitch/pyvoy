@@ -23,7 +23,7 @@ mod tracecontext;
 mod types;
 mod wsgi;
 
-declare_all_init_functions!(init, http: new_http_filter_config_fn, network: new_network_filter_config_fn);
+declare_all_init_functions!(init, http: new_http_filter_config_fn);
 
 // The library is loaded by Envoy as a dynamic module rather than imported by
 // Python, but exporting a module init function lets it be built and located
@@ -286,6 +286,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
             enable_http_client,
             trace_sampler,
             trusted_proxies,
+            parse_websocket_config(filter_config)?,
         )
         .map(|cfg| Box::new(cfg) as Box<dyn HttpFilterConfig<EHF>>),
         "wsgi" => wsgi::filter::Config::new(
@@ -305,38 +306,12 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     }
 }
 
-fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkFilter>(
-    _envoy_filter_config: &mut EC,
-    _filter_name: &str,
-    filter_config: &[u8],
-) -> Option<Box<dyn NetworkFilterConfig<EHF>>> {
-    let filter_config = match YamlLoader::load_from_str(std::str::from_utf8(filter_config).unwrap())
-    {
-        Ok(conf) => conf,
-        Err(e) => {
-            envoy_log_error!("Failed to parse filter config YAML: {}", e);
-            return None;
-        }
-    };
-    if filter_config.is_empty() {
-        envoy_log_error!("Filter config is empty");
-        return None;
+/// Parses the WebSocket settings, `Some(None)` when WebSockets are disabled
+/// and `None` when the config is invalid.
+fn parse_websocket_config(filter_config: &Yaml) -> Option<Option<asgi::filter::WebSocketSettings>> {
+    if !filter_config["websockets"].as_bool().unwrap_or(false) {
+        return Some(None);
     }
-    let filter_config = &filter_config[0];
-    let Some(app) = filter_config["app"].as_str() else {
-        envoy_log_error!("Filter config missing required 'app' field");
-        return None;
-    };
-    let interface = filter_config["interface"].as_str().unwrap_or("asgi");
-    if interface != "asgi" {
-        envoy_log_error!("WebSockets require the ASGI interface, got: {}", interface);
-        return None;
-    }
-    let root_path = filter_config["root_path"].as_str().unwrap_or("");
-    let worker_threads = parse_usize_config(filter_config, "worker_threads", 1, 1)?;
-    let enable_lifespan = filter_config["lifespan"].as_bool();
-    let loop_kind = parse_loop_config(filter_config)?;
-    let trusted_proxies = parse_forwarded_allow_ips_config(filter_config)?;
     let max_message_size =
         parse_usize_config(filter_config, "websockets_max_message_size", 64 << 20, 0)?; // Default to 64 MiB
     let deflate = if filter_config["websockets_compression"]
@@ -357,18 +332,8 @@ fn new_network_filter_config_fn<EC: EnvoyNetworkFilterConfig, EHF: EnvoyNetworkF
     } else {
         None
     };
-
-    let constants = Python::attach(types::Constants::get);
-    asgi::websocket::Config::new(
-        app,
-        root_path,
-        constants,
-        worker_threads,
-        enable_lifespan,
-        loop_kind,
+    Some(Some(asgi::filter::WebSocketSettings {
         max_message_size,
         deflate,
-        trusted_proxies,
-    )
-    .map(|cfg| Box::new(cfg) as Box<dyn NetworkFilterConfig<EHF>>)
+    }))
 }
