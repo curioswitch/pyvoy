@@ -59,6 +59,7 @@ class CLIArgs:
     websockets_max_message_size: int
     websockets_compression: bool
     websockets_compression_no_context_takeover: bool
+    websockets_ping_interval: float
     content_encodings: list[ContentEncoding]
     access_log: bool
     request_idle_timeout: float
@@ -297,6 +298,13 @@ async def amain() -> None:
     )
 
     parser.add_argument(
+        "--websockets-ping-interval",
+        help="positive seconds between pings sent to WebSocket clients, less than --request-idle-timeout (default: never)",
+        type=_positive_seconds,
+        default=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
         "--content-encodings",
         help="comma-separated content encodings to compress responses with, in order of preference, for example 'zstd,br,gzip'. Compression is disabled if unset.",
         type=_content_encodings,
@@ -319,7 +327,7 @@ async def amain() -> None:
 
     parser.add_argument(
         "--request-idle-timeout",
-        help="positive seconds a request, including a WebSocket connection, may go without sending or receiving any data before it is closed (default: never)",
+        help="positive seconds a request, including a WebSocket connection, may go without sending or receiving any data before it is closed. (default: never)",
         type=_positive_seconds,
         default=argparse.SUPPRESS,
     )
@@ -472,6 +480,7 @@ async def amain() -> None:
         websockets_max_message_size=getattr(args, "websockets_max_message_size", None),
         websockets_compression=args.websockets_compression,
         websockets_compression_no_context_takeover=args.websockets_compression_no_context_takeover,
+        websockets_ping_interval=getattr(args, "websockets_ping_interval", None),
         content_encodings=args.content_encodings,
         forwarded_allow_ips=getattr(args, "forwarded_allow_ips", None),
         access_log=args.access_log,

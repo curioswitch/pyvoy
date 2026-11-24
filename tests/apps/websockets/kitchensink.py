@@ -250,6 +250,25 @@ async def app(
     if path == "/bad-event":
         await send({"type": "websocket.frobnicate"})
         return
+    if path in ("/print-disconnect", "/late-print-disconnect"):
+        if path == "/late-print-disconnect":
+            # Let the client's Close arrive before receiving.
+            await anyio.sleep(0.3)
+        while True:
+            m = await receive()
+            if m["type"] == "websocket.disconnect":
+                print(  # noqa: T201
+                    f"print-disconnect: code={m['code']}", file=sys.stderr, flush=True
+                )
+                return
+    if path == "/send-only":
+        # Push messages without ever receiving, like a server-push feed.
+        try:
+            while True:
+                await send({"type": "websocket.send", "text": "tick"})
+                await anyio.sleep(0.05)
+        except OSError:
+            return
     if path == "/recv-after-disconnect":
         while True:
             m = await receive()

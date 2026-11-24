@@ -770,3 +770,8 @@ pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
 /// The event ID to trigger the filter to end a closed WebSocket stream that
 /// the client has not half-closed in time.
 pub(crate) const EVENT_ID_CLOSE_TIMEOUT: u64 = 4;
+/// The event ID to trigger the filter to send a keepalive ping.
+pub(crate) const EVENT_ID_PING: u64 = 5;
+/// The event ID to trigger the filter to close a WebSocket whose client has not
+/// answered a ping in time.
+pub(crate) const EVENT_ID_PING_TIMEOUT: u64 = 6;

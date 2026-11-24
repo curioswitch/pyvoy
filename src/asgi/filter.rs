@@ -8,6 +8,7 @@ use pyo3::types::PyTracebackMethods as _;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::asgi::python;
 use crate::asgi::python::*;
@@ -16,7 +17,10 @@ use crate::asgi::shared::eventloop::LoopKind;
 use crate::asgi::transport::{
     RequestBody, ResetReason, SendStreamDataEvent, TransportEvent, TransportState,
 };
-use crate::asgi::websocket::{self, EVENT_ID_CLOSE_TIMEOUT, WebSocketExecutor, WebSocketStream};
+use crate::asgi::websocket::{
+    self, EVENT_ID_CLOSE_TIMEOUT, EVENT_ID_PING, EVENT_ID_PING_TIMEOUT, WebSocketExecutor,
+    WebSocketStream,
+};
 use crate::envoy::*;
 use crate::eventbridge::EventBridge;
 use crate::forwarded::TrustedProxies;
@@ -26,6 +30,8 @@ use crate::types::*;
 pub struct WebSocketSettings {
     pub max_message_size: usize,
     pub deflate: Option<tungstenite::extensions::compression::deflate::DeflateConfig>,
+    pub ping_interval: Option<Duration>,
+    pub ping_timeout: Option<Duration>,
 }
 
 pub struct Config {
@@ -110,6 +116,8 @@ fn new_websocket_config(
         executor,
         settings.max_message_size,
         settings.deflate,
+        settings.ping_interval,
+        settings.ping_timeout,
     )?)
 }
 
@@ -278,6 +286,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
                     }
                 }
                 EVENT_ID_CLOSE_TIMEOUT => websocket.on_close_timeout(envoy_filter),
+                EVENT_ID_PING => websocket.on_ping(envoy_filter),
+                EVENT_ID_PING_TIMEOUT => websocket.on_ping_timeout(envoy_filter),
                 _ => {}
             }
             return;
