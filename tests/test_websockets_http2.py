@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 OPCODE_TEXT = 0x1
 OPCODE_BINARY = 0x2
 OPCODE_CLOSE = 0x8
+OPCODE_PING = 0x9
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -305,3 +306,41 @@ def _end_without_close(port: int) -> None:
 @pytest.mark.asyncio
 async def test_end_without_close(server: PyvoyServer) -> None:
     await asyncio.to_thread(_end_without_close, server.listener_port)
+
+
+def _ping_timeout(port: int) -> tuple[list[tuple[int, bytes]], int | None]:
+    ws = _Http2WebSocket(port, "/echo")
+    frames: list[tuple[int, bytes]] = []
+    try:
+        while True:
+            try:
+                frames.append(ws.recv_frame())
+            except EOFError:
+                return frames, ws.reset_code
+    finally:
+        ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ping_timeout(loop: Loop | None) -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        websockets_ping_interval=0.2,
+        request_idle_timeout=0.5,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        # Our client's WINDOW_UPDATEs aren't data on the stream, so they don't
+        # answer pings.
+        frames, reset_code = await asyncio.to_thread(_ping_timeout, srv.listener_port)
+    assert len(frames) >= 2
+    assert set(frames[:-1]) == {(OPCODE_PING, b"")}
+    assert frames[-1] == (
+        OPCODE_CLOSE,
+        _close_payload(1011) + b"keepalive ping timeout",
+    )
+    # Ending the response before the request resets the stream.
+    assert reset_code is not None

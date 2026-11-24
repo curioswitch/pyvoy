@@ -450,6 +450,33 @@ def test_request_idle_timeout_flag(
     assert captured_server._request_idle_timeout == expected
 
 
+def test_websockets_ping_interval_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_server: PyvoyServer | None = None
+
+    def capture_config(server: PyvoyServer) -> dict[str, object]:
+        nonlocal captured_server
+        captured_server = server
+        return {}
+
+    monkeypatch.setattr(PyvoyServer, "get_envoy_config", capture_config)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyvoy",
+            "tests.apps.asgi.kitchensink",
+            "--websockets-ping-interval",
+            "1.5",
+            "--print-envoy-config",
+        ],
+    )
+
+    cli.main()
+
+    assert captured_server is not None
+    assert captured_server._websockets_ping_interval == 1.5
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "inf", "nan"])
 def test_request_idle_timeout_must_be_positive(
     value: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

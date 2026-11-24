@@ -216,6 +216,7 @@ class PyvoyServer:
     _websockets_max_message_size: int | None
     _websockets_compression: bool
     _websockets_compression_no_context_takeover: bool
+    _websockets_ping_interval: float | None
     _content_encodings: list[ContentEncoding]
     _forwarded_allow_ips: list[str] | None
     _access_log: bool
@@ -248,6 +249,7 @@ class PyvoyServer:
         websockets_max_message_size: int | None = None,
         websockets_compression: bool = True,
         websockets_compression_no_context_takeover: bool = False,
+        websockets_ping_interval: float | None = None,
         content_encodings: Iterable[ContentEncoding] | None = None,
         forwarded_allow_ips: Iterable[str] | None = None,
         access_log: bool = False,
@@ -302,6 +304,9 @@ class PyvoyServer:
                 per-message deflate compression to reset its context after every
                 message in both directions, regardless of client settings. This
                 reduces compression ratio for streams of similar messages.
+            websockets_ping_interval: The positive number of seconds between pings
+                sent to WebSocket clients, less than request_idle_timeout. Unset
+                sends no pings.
             content_encodings: The content encodings to compress responses with, in
                 order of preference. Unset or empty disables response compression.
                 When set, applications no longer receive the Accept-Encoding
@@ -313,16 +318,9 @@ class PyvoyServer:
             access_log: Whether Envoy logs each request to its stdout.
             request_idle_timeout: The positive number of seconds a request,
                 including a WebSocket connection, may go without sending or
-                receiving any data before it is closed. If the response has not
-                started, the client receives a 504, or a 408 if the request has
-                not been fully received. Unset never closes idle requests.
+                receiving any data before it is closed. Unset means no timeout.
             enable_otel: Whether to export Envoy's traces and metrics with OTLP as
-                configured by the standard OTEL_* environment variables, read from
-                the environment the server is started with. Each signal is exported
-                when its OTEL_*_EXPORTER variable includes 'otlp' or, when unset, an
-                OTLP endpoint is configured. When traces are exported, applications
-                receive the trace context of Envoy's span in the traceparent request
-                header so their instrumentation continues the trace.
+                configured by the standard OTEL_* environment variables.
             additional_envoy_args: Additional command-line arguments to pass to Envoy.
             env: Additional environment variables to pass to the Envoy process.
             upstreams: A list of upstream clusters to add to the Envoy configuration.
@@ -366,15 +364,16 @@ class PyvoyServer:
             raise ValueError(msg)
         if forwarded_allow_ips is not None:
             forwarded_allow_ips = _parse_forwarded_allow_ips(forwarded_allow_ips)
-        if request_idle_timeout is not None:
-            if not isinstance(request_idle_timeout, int | float) or isinstance(
-                request_idle_timeout, bool
-            ):
-                msg = "request_idle_timeout must be a number"
-                raise TypeError(msg)
-            if not 0 < request_idle_timeout < math.inf:
-                msg = "request_idle_timeout must be a positive finite number"
-                raise ValueError(msg)
+        _check_positive_seconds("request_idle_timeout", request_idle_timeout)
+        _check_positive_seconds("websockets_ping_interval", websockets_ping_interval)
+        if (
+            websockets_ping_interval is not None
+            and request_idle_timeout is not None
+            and websockets_ping_interval >= request_idle_timeout
+        ):
+            # Envoy would close idle connections before they are pinged.
+            msg = "websockets_ping_interval must be less than request_idle_timeout"
+            raise ValueError(msg)
 
         self._app = app if isinstance(app, str) else list(app)
         self._address = address
@@ -393,6 +392,7 @@ class PyvoyServer:
         self._websockets_compression_no_context_takeover = (
             websockets_compression_no_context_takeover
         )
+        self._websockets_ping_interval = websockets_ping_interval
         self._content_encodings = content_encodings
         self._forwarded_allow_ips = forwarded_allow_ips
         self._access_log = access_log
@@ -622,7 +622,7 @@ class PyvoyServer:
             base_pyvoy_config["lifespan"] = self._lifespan
         if self._loop is not None:
             base_pyvoy_config["loop"] = self._loop
-        websocket_config: dict[str, int | bool] = {}
+        websocket_config: dict[str, float | bool] = {}
         if self._websockets:
             websocket_config["websockets"] = True
             if self._websockets_max_message_size is not None:
@@ -633,6 +633,16 @@ class PyvoyServer:
                 websocket_config["websockets_compression"] = False
             if self._websockets_compression_no_context_takeover:
                 websocket_config["websockets_compression_no_context_takeover"] = True
+            if self._websockets_ping_interval is not None:
+                websocket_config["websockets_ping_interval"] = float(
+                    self._websockets_ping_interval
+                )
+                # Pings reset Envoy's idle timeout, so we apply it to the client
+                # answering them instead.
+                if self._request_idle_timeout is not None:
+                    websocket_config["websockets_ping_timeout"] = float(
+                        self._request_idle_timeout
+                    )
         if self._upstreams:
             base_pyvoy_config["enable_http_client"] = True
         if self._forwarded_allow_ips is not None:
@@ -653,7 +663,7 @@ class PyvoyServer:
 
         def app_config(
             app: str, interface: Interface, root_path: str
-        ) -> dict[str, str | int | bool]:
+        ) -> dict[str, str | float | bool]:
             interfaces.append(interface)
             return {
                 "app": app,
@@ -1098,6 +1108,17 @@ def _strip_accept_encoding_filter() -> dict:
             "mutations": {"request_mutations": [{"remove": "accept-encoding"}]},
         },
     }
+
+
+def _check_positive_seconds(name: str, value: float | None) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        msg = f"{name} must be a number"
+        raise TypeError(msg)
+    if not 0 < value < math.inf:
+        msg = f"{name} must be a positive finite number"
+        raise ValueError(msg)
 
 
 def _enable_websockets(http_config: dict) -> None:

@@ -4,6 +4,7 @@ use envoy_proxy_dynamic_modules_rust_sdk::*;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tungstenite::extensions::compression::deflate::DeflateConfig;
 use tungstenite::protocol::Role;
 use yaml_rust2::{Yaml, YamlLoader};
@@ -138,6 +139,28 @@ fn parse_usize_config(
             None
         }
     }
+}
+
+/// Parses an optional positive number of seconds, `Some(None)` when unset and
+/// `None` when invalid.
+fn parse_seconds_config(filter_config: &Yaml, field: &str) -> Option<Option<Duration>> {
+    let value = &filter_config[field];
+    if value.is_badvalue() {
+        return Some(None);
+    }
+    let parsed = value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|value| value as f64))
+        .and_then(|value| Duration::try_from_secs_f64(value).ok())
+        .filter(|duration| !duration.is_zero());
+    if parsed.is_none() {
+        envoy_log_error!(
+            "Filter config field '{}' must be a positive number of seconds",
+            field
+        );
+        return None;
+    }
+    Some(parsed)
 }
 
 /// Parses the event loop ASGI applications run on, defaulting to the platform
@@ -332,8 +355,12 @@ fn parse_websocket_config(filter_config: &Yaml) -> Option<Option<asgi::filter::W
     } else {
         None
     };
+    let ping_interval = parse_seconds_config(filter_config, "websockets_ping_interval")?;
+    let ping_timeout = parse_seconds_config(filter_config, "websockets_ping_timeout")?;
     Some(Some(asgi::filter::WebSocketSettings {
         max_message_size,
         deflate,
+        ping_interval,
+        ping_timeout,
     }))
 }

@@ -218,6 +218,67 @@ def test_request_idle_timeout_config(
     assert _hcm_config(server)["stream_idle_timeout"] == expected
 
 
+@pytest.mark.parametrize(
+    ("request_idle_timeout", "expected"), [(None, None), (30, 30.0), (1.5, 1.5)]
+)
+def test_websockets_ping_config(
+    request_idle_timeout: float | None, expected: float | None
+) -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        websockets=True,
+        websockets_ping_interval=1,
+        request_idle_timeout=request_idle_timeout,
+    )
+
+    http_filter = _hcm_config(server)["http_filters"][0]
+    pyvoy_config = json.loads(http_filter["typed_config"]["filter_config"]["value"])
+    assert pyvoy_config["websockets_ping_interval"] == 1.0
+    assert pyvoy_config.get("websockets_ping_timeout") == expected
+
+
+def test_websockets_no_ping_timeout_without_interval() -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink", websockets=True, request_idle_timeout=30
+    )
+
+    http_filter = _hcm_config(server)["http_filters"][0]
+    pyvoy_config = json.loads(http_filter["typed_config"]["filter_config"]["value"])
+    assert "websockets_ping_timeout" not in pyvoy_config
+
+
+@pytest.mark.parametrize("value", [True, "1"])
+def test_websockets_ping_interval_must_be_a_number(value: object) -> None:
+    with pytest.raises(TypeError, match="websockets_ping_interval must be a number"):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink",
+            websockets_ping_interval=value,  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
+def test_websockets_ping_interval_must_be_positive(value: float) -> None:
+    with pytest.raises(
+        ValueError, match="websockets_ping_interval must be a positive finite number"
+    ):
+        PyvoyServer("tests.apps.asgi.kitchensink", websockets_ping_interval=value)
+
+
+@pytest.mark.parametrize("websockets_ping_interval", [1, 2])
+def test_websockets_ping_interval_must_be_less_than_idle_timeout(
+    websockets_ping_interval: float,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="websockets_ping_interval must be less than request_idle_timeout",
+    ):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink",
+            websockets_ping_interval=websockets_ping_interval,
+            request_idle_timeout=1,
+        )
+
+
 @pytest.mark.parametrize("request_idle_timeout", [True, "1"])
 def test_request_idle_timeout_must_be_a_number(request_idle_timeout: object) -> None:
     with pytest.raises(TypeError, match="request_idle_timeout must be a number"):

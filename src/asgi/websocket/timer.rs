@@ -111,12 +111,39 @@ fn run(receiver: mpsc::Receiver<Request>) {
             },
         };
         let (delay, scheduler, event_id) = received;
+        // A delay too long to represent never elapses.
+        let Some(deadline) = Instant::now().checked_add(delay) else {
+            continue;
+        };
         seq += 1;
         entries.push(Reverse(Entry {
-            deadline: Instant::now() + delay,
+            deadline,
             seq,
             scheduler,
             event_id,
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Recorder(mpsc::Sender<u64>);
+
+    impl EnvoyHttpFilterScheduler for Recorder {
+        fn commit(&self, event_id: u64) {
+            let _ = self.0.send(event_id);
+        }
+    }
+
+    #[test]
+    fn unrepresentable_delay_never_fires() {
+        let timer = Timer::new().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        timer.schedule(Duration::MAX, Box::new(Recorder(sender.clone())), 1);
+        timer.schedule(Duration::from_millis(1), Box::new(Recorder(sender)), 2);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(2));
+        assert!(receiver.recv_timeout(Duration::from_millis(50)).is_err());
     }
 }

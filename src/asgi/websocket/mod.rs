@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use envoy_proxy_dynamic_modules_rust_sdk::{EnvoyHttpFilter, EnvoyHttpFilterScheduler as _, abi};
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header, uri};
@@ -16,11 +16,15 @@ use crate::types::Scope;
 use executor::{
     Body, EVENT_ID_REQUEST, RecvFuture, ResponseBodyEvent, ResponseStartEvent, SendEvent,
 };
-pub(crate) use executor::{EVENT_ID_CLOSE_TIMEOUT, WebSocketExecutor};
+pub(crate) use executor::{
+    EVENT_ID_CLOSE_TIMEOUT, EVENT_ID_PING, EVENT_ID_PING_TIMEOUT, WebSocketExecutor,
+};
+use keepalive::{PingTracker, TimeoutAction};
 use stream::EnvoyStream;
 use timer::Timer;
 
 mod executor;
+mod keepalive;
 mod stream;
 mod timer;
 
@@ -33,6 +37,11 @@ pub(crate) struct Config {
     executor: WebSocketExecutor,
     max_message_size: usize,
     deflate: Option<DeflateConfig>,
+    /// How often to ping clients, or never if unset.
+    ping_interval: Option<Duration>,
+    /// How long a client may send nothing after a ping before it is closed, or
+    /// forever if unset.
+    ping_timeout: Option<Duration>,
     timer: Timer,
 }
 
@@ -41,11 +50,15 @@ impl Config {
         executor: WebSocketExecutor,
         max_message_size: usize,
         deflate: Option<DeflateConfig>,
+        ping_interval: Option<Duration>,
+        ping_timeout: Option<Duration>,
     ) -> std::io::Result<Self> {
         Ok(Self {
             executor,
             max_message_size,
             deflate,
+            ping_interval,
+            ping_timeout,
             timer: Timer::new()?,
         })
     }
@@ -109,6 +122,7 @@ pub(crate) struct WebSocketStream {
     /// Whether the close handshake is done and the response is waiting to end.
     closing: Cell<bool>,
     response_ended: Cell<bool>,
+    ping: RefCell<PingTracker>,
 }
 
 impl WebSocketStream {
@@ -151,6 +165,7 @@ impl WebSocketStream {
             wait_for_half_close,
             closing: Cell::new(false),
             response_ended: Cell::new(false),
+            ping: RefCell::new(PingTracker::default()),
         };
         stream.config.executor.execute_app(
             scope,
@@ -167,6 +182,7 @@ impl WebSocketStream {
         envoy_filter: &mut impl EnvoyHttpFilter,
         end_of_stream: bool,
     ) {
+        self.ping.borrow_mut().on_client_data();
         if end_of_stream {
             self.request_ended.set(true);
         }
@@ -195,6 +211,73 @@ impl WebSocketStream {
         if self.closing.get() {
             self.end_response(envoy_filter);
         }
+    }
+
+    pub(crate) fn on_ping(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if self.close_frame.borrow().is_some() || self.response_ended.get() {
+            return;
+        }
+        // Fails once the WebSocket has read the client's Close, even if the
+        // application hasn't received it yet.
+        let sent = self
+            .with_websocket(|websocket| websocket.send(Message::Ping(Default::default())).is_ok());
+        if sent != Some(true) {
+            return;
+        }
+        self.flush(envoy_filter);
+        if let Some(timeout) = self.config.ping_timeout {
+            let schedule_timeout = self.ping.borrow_mut().on_ping(Instant::now());
+            if schedule_timeout {
+                self.schedule_ping_timeout(envoy_filter, timeout);
+            }
+        }
+        self.schedule_ping(envoy_filter);
+    }
+
+    pub(crate) fn on_ping_timeout(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        // Only scheduled with a timeout.
+        let timeout = self.config.ping_timeout.unwrap();
+        let action = self.ping.borrow_mut().on_timeout(Instant::now(), timeout);
+        match action {
+            TimeoutAction::None => return,
+            TimeoutAction::Reschedule(delay) => {
+                self.schedule_ping_timeout(envoy_filter, delay);
+                return;
+            }
+            TimeoutAction::Close => {}
+        }
+        if self.close_frame.borrow().is_some() {
+            // Already closing, so there is nothing more to tell the client.
+            self.end_response(envoy_filter);
+            return;
+        }
+        self.with_websocket(|websocket| {
+            let _ = websocket.close(Some(CloseFrame {
+                code: CloseCode::Error,
+                reason: Utf8Bytes::from_static("keepalive ping timeout"),
+            }));
+        });
+        self.flush(envoy_filter);
+        // The client is likely gone, so we don't wait for its Close frame.
+        self.abnormal_close(envoy_filter);
+    }
+
+    fn schedule_ping(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        if let Some(interval) = self.config.ping_interval {
+            self.config.timer.schedule(
+                interval,
+                Box::new(envoy_filter.new_scheduler()),
+                EVENT_ID_PING,
+            );
+        }
+    }
+
+    fn schedule_ping_timeout(&self, envoy_filter: &mut impl EnvoyHttpFilter, delay: Duration) {
+        self.config.timer.schedule(
+            delay,
+            Box::new(envoy_filter.new_scheduler()),
+            EVENT_ID_PING_TIMEOUT,
+        );
     }
 
     pub(crate) fn on_stream_complete(&self) {
@@ -338,6 +421,7 @@ impl WebSocketStream {
                 );
                 // In case there were any recv tasks started before accepting.
                 envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
+                self.schedule_ping(envoy_filter);
                 self.config.executor.handle_send_future(event.future);
             }
             SendEvent::Close { code, reason } => {
@@ -449,11 +533,26 @@ impl WebSocketStream {
             return;
         }
 
-        while !self.recv_bridge.is_empty() {
+        loop {
+            if self.recv_bridge.is_empty() {
+                // Without a pending receive, we only read pings and pongs so
+                // pings are answered and pongs don't pile up in Envoy. Anything
+                // else stays in Envoy for backpressure, including a Close, which
+                // would fail the application's sends before it has seen it.
+                match self.io.next_frame_is_ping_or_pong() {
+                    Some(true) => {}
+                    Some(false) => return,
+                    None => {
+                        if self.io.read_block(envoy_filter) == 0 {
+                            return;
+                        }
+                        continue;
+                    }
+                }
+            }
             let Some(message) = self.with_websocket(|websocket| websocket.read()) else {
                 return;
             };
-            // Reading may queue writes such as pongs.
             self.flush(envoy_filter);
             match message {
                 Ok(Message::Binary(bytes)) => self.deliver(Body::Bytes(bytes)),
@@ -469,6 +568,14 @@ impl WebSocketStream {
                     self.finish_close(envoy_filter);
                     return;
                 }
+                Ok(Message::Ping(_)) => {
+                    // Reading only queues the pong, so send it in case we stop
+                    // reading.
+                    self.with_websocket(|websocket| {
+                        let _ = websocket.flush();
+                    });
+                    self.flush(envoy_filter);
+                }
                 Ok(_) => {}
                 Err(tungstenite::Error::Io(ref e))
                     if e.kind() == std::io::ErrorKind::WouldBlock =>
@@ -476,7 +583,9 @@ impl WebSocketStream {
                     // Need more bytes to parse a frame. Pull the next block from
                     // Envoy if available, or wait otherwise.
                     if self.io.read_block(envoy_filter) == 0 {
-                        if self.request_ended.get() {
+                        // Without a pending receive, the disconnect waits for the
+                        // application to receive.
+                        if self.request_ended.get() && !self.recv_bridge.is_empty() {
                             self.abnormal_close(envoy_filter);
                         }
                         return;

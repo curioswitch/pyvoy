@@ -546,20 +546,45 @@ def _client_frame(opcode: int, payload: bytes) -> bytes:
     return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked
 
 
+def _raw_connect(port: int, path: str) -> tuple[socket.socket, bytes]:
+    """Opens a WebSocket without extensions, returning the socket and the bytes
+    received after the handshake response.
+    """
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock.sendall(
+        (
+            f"GET {path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+            f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        ).encode()
+    )
+    received = b""
+    while b"\r\n\r\n" not in received:
+        received += _recv(sock)
+    return sock, received.split(b"\r\n\r\n", 1)[1]
+
+
+def _recv(sock: socket.socket) -> bytes:
+    if not (chunk := sock.recv(4096)):
+        msg = "connection closed"
+        raise EOFError(msg)
+    return chunk
+
+
+def _server_frames(data: bytes) -> list[tuple[int, bytes]]:
+    """Parses unmasked server frames with payloads under 126 bytes."""
+    frames = []
+    while data:
+        length = data[1]
+        frames.append((data[0] & 0x0F, data[2 : 2 + length]))
+        data = data[2 + length :]
+    return frames
+
+
 def _close_handshake(port: int) -> bytes:
-    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
-        key = base64.b64encode(os.urandom(16)).decode()
-        sock.sendall(
-            (
-                "GET /echo HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
-                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
-                "Sec-WebSocket-Version: 13\r\n\r\n"
-            ).encode()
-        )
-        received = b""
-        while b"\r\n\r\n" not in received:
-            received += sock.recv(4096)
-        received = received.split(b"\r\n\r\n", 1)[1]
+    sock, received = _raw_connect(port, "/echo")
+    with sock:
         sock.sendall(_client_frame(0x8, struct.pack("!H", 1000)))
         # The client sends nothing after its Close, as RFC 6455 requires, and
         # waits for the server to close the connection. That must be a clean
@@ -574,6 +599,124 @@ def _close_handshake(port: int) -> bytes:
 async def test_close_handshake_closes_cleanly(server: PyvoyServer) -> None:
     received = await asyncio.to_thread(_close_handshake, server.listener_port)
     assert received == b"\x88\x02" + struct.pack("!H", 1000)
+
+
+def _read_pings(port: int, count: int) -> bytes:
+    sock, received = _raw_connect(port, "/echo")
+    with sock:
+        while len(received) < 2 * count:
+            received += _recv(sock)
+        return received
+
+
+@pytest.mark.asyncio
+async def test_ping_without_timeout(loop: Loop | None) -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        websockets_ping_interval=0.1,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        # Unanswered pings keep coming without a timeout.
+        received = await asyncio.to_thread(_read_pings, srv.listener_port, 5)
+    assert received == b"\x89\x00" * 5
+
+
+@pytest_asyncio.fixture(scope="module")
+async def ping_server(loop: Loop | None) -> AsyncIterator[PyvoyServer]:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        websockets_ping_interval=0.2,
+        request_idle_timeout=0.5,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as server:
+        yield server
+
+
+def _unresponsive_client(port: int) -> list[tuple[int, bytes]]:
+    sock, received = _raw_connect(port, "/print-disconnect")
+    with sock:
+        while chunk := sock.recv(4096):
+            received += chunk
+        return _server_frames(received)
+
+
+@pytest.mark.asyncio
+async def test_ping_timeout(ping_server: PyvoyServer) -> None:
+    start = perf_counter_ns()
+    frames = await asyncio.to_thread(_unresponsive_client, ping_server.listener_port)
+    # The first ping is sent at 0.2s and times out at 0.7s, then Envoy delays
+    # closing the connection by 1s after the response ends.
+    assert perf_counter_ns() - start < 3_000_000_000
+    assert len(frames) >= 2
+    assert set(frames[:-1]) == {(0x9, b"")}
+    assert frames[-1] == (0x8, struct.pack("!H", 1011) + b"keepalive ping timeout")
+    assert ping_server.stdout is not None
+    await assert_logs_contains(ping_server.stdout, ["print-disconnect: code=1006"])
+
+
+@pytest.mark.asyncio
+async def test_ping_answered(ping_server: PyvoyServer) -> None:
+    # The client answers pings with pongs, keeping the connection open past the
+    # timeout.
+    async with websockets.connect(_url(ping_server, "/echo"), ping_interval=None) as ws:
+        await asyncio.sleep(1.5)
+        await ws.send("hello")
+        assert await ws.recv() == "hello"
+
+
+async def _recv_ticks(ws: websockets.ClientConnection, seconds: float) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while loop.time() < deadline:
+        assert await ws.recv() == "tick"
+
+
+@pytest.mark.asyncio
+async def test_ping_answered_while_not_receiving(ping_server: PyvoyServer) -> None:
+    # Pongs are read ahead of an application that isn't receiving.
+    async with websockets.connect(
+        _url(ping_server, "/send-only"), ping_interval=None, close_timeout=0.1
+    ) as ws:
+        await _recv_ticks(ws, 1.5)
+
+
+@pytest.mark.asyncio
+async def test_client_ping_while_not_receiving(server: PyvoyServer) -> None:
+    # Pings are read ahead of an application that isn't receiving, so they are
+    # answered.
+    async with websockets.connect(
+        _url(server, "/send-only"),
+        ping_interval=0.1,
+        ping_timeout=0.2,
+        close_timeout=0.1,
+    ) as ws:
+        await _recv_ticks(ws, 1)
+
+
+@pytest.mark.asyncio
+async def test_close_before_receive(loop: Loop | None) -> None:
+    # A Close read ahead of the application waits for it to receive, so it gets
+    # the client's code.
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        async with websockets.connect(_url(srv, "/late-print-disconnect")) as ws:
+            await ws.close(code=4001)
+        assert srv.stdout is not None
+        await assert_logs_contains(srv.stdout, ["print-disconnect: code=4001"])
 
 
 @pytest.fixture(scope="module")
