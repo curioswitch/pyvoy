@@ -701,6 +701,69 @@ async def test_client_ping_while_not_receiving(server: PyvoyServer) -> None:
         await _recv_ticks(ws, 1)
 
 
+def _ping_flood(port: int, limit: int) -> int:
+    """Sends pings without reading the pongs until the server stops reading
+    them or `limit` bytes are sent, returning how many bytes were sent.
+    """
+    sock, _ = _raw_connect(port, "/send-only")
+    with sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        batch = b"".join(_client_frame(0x9, os.urandom(125)) for _ in range(1000))
+        sock.settimeout(1)
+        sent = 0
+        while sent < limit:
+            try:
+                sock.sendall(batch)
+            except TimeoutError:
+                return sent
+            sent += len(batch)
+        return sent
+
+
+@pytest.mark.asyncio
+async def test_ping_flood_backpressure(server: PyvoyServer) -> None:
+    # Pings read ahead of an application that isn't receiving stay in Envoy
+    # while the client isn't reading their pongs, so the client's sends stall
+    # instead of the pongs piling up in Envoy without bound.
+    limit = 64 * 1024 * 1024
+    sent = await asyncio.to_thread(_ping_flood, server.listener_port, limit)
+    assert sent < limit
+
+
+@pytest.mark.asyncio
+async def test_frame_up_to_max_message_size(server: PyvoyServer) -> None:
+    # A single frame may be as large as the maximum message size, beyond the
+    # WebSocket library's 16 MiB default frame limit.
+    message = os.urandom(17 * 1024 * 1024)
+    async with websockets.connect(_url(server, "/echo"), max_size=None) as ws:
+        await ws.send(message)
+        assert await ws.recv() == message
+
+
+@pytest.mark.asyncio
+async def test_oversized_frame_closes(loop: Loop | None) -> None:
+    async with PyvoyServer(
+        "tests.apps.websockets.kitchensink",
+        loop=loop,
+        websockets=True,
+        lifespan=False,
+        websockets_max_message_size=1024,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    ) as srv:
+        # A frame over the limit with a payload larger than the WebSocket's read
+        # buffer. The server can't read past it to the client's Close, so it
+        # closes the connection after sending its own instead of waiting.
+        async with asyncio.timeout(5):
+            async with websockets.connect(
+                _url(srv, "/echo"), max_size=None, compression=None
+            ) as ws:
+                await ws.send(os.urandom(1024 * 1024))
+                with pytest.raises(ConnectionClosed) as ei:
+                    await ws.recv()
+            assert _close_code(ei.value) == 1009
+
+
 @pytest.mark.asyncio
 async def test_close_before_receive(loop: Loop | None) -> None:
     # A Close read ahead of the application waits for it to receive, so it gets

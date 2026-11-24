@@ -199,6 +199,10 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
             && websocket::is_handshake(&scope)
         {
             let stream = WebSocketStream::start(config.clone(), envoy_filter, scope, end_of_stream);
+            // Envoy replays an existing high watermark to new HTTP/2 streams.
+            if self.downstream_watermark_level.get() > 0 {
+                stream.on_write_blocked();
+            }
             let _ = self.websocket.set(stream);
             return abi::envoy_dynamic_module_type_on_http_filter_request_headers_status::StopIteration;
         }
@@ -311,6 +315,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
     fn on_downstream_above_write_buffer_high_watermark(&self, _envoy_filter: &mut EHF) {
         self.downstream_watermark_level
             .set(self.downstream_watermark_level.get() + 1);
+        if let Some(websocket) = self.websocket.get() {
+            websocket.on_write_blocked();
+        }
     }
 
     fn on_downstream_below_write_buffer_low_watermark(&self, envoy_filter: &mut EHF) {
@@ -318,6 +325,9 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for Filter {
         self.downstream_watermark_level.set(level);
         if level == 0 {
             envoy_filter.new_scheduler().commit(EVENT_ID_RESPONSE);
+            if let Some(websocket) = self.websocket.get() {
+                websocket.on_write_unblocked(envoy_filter);
+            }
         }
     }
 
