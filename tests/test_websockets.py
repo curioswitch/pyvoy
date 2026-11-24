@@ -8,7 +8,7 @@ import socket
 import ssl
 import struct
 import subprocess
-from time import perf_counter_ns, sleep
+from time import perf_counter_ns
 from typing import TYPE_CHECKING
 
 import pytest
@@ -470,6 +470,31 @@ async def test_recv_after_disconnect(loop: Loop | None) -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_idle_timeout(loop: Loop | None) -> None:
+    async with (
+        PyvoyServer(
+            "tests.apps.websockets.kitchensink",
+            loop=loop,
+            websockets=True,
+            lifespan=False,
+            request_idle_timeout=0.5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        ) as srv,
+        websockets.connect(_url(srv, "/echo"), open_timeout=5) as ws,
+    ):
+        # Messages keep the connection open past the timeout.
+        for _ in range(3):
+            await asyncio.sleep(0.3)
+            await ws.send("x")
+            assert await asyncio.wait_for(ws.recv(), timeout=5) == "x"
+        start = perf_counter_ns()
+        with pytest.raises(ConnectionClosed):
+            await asyncio.wait_for(ws.recv(), timeout=5)
+        assert perf_counter_ns() - start < 3_000_000_000
+
+
+@pytest.mark.asyncio
 async def test_response_backpressure(server: PyvoyServer) -> None:
     async with websockets.connect(
         _url(server, "/backpressure"), max_size=None, max_queue=1, compression=None
@@ -521,7 +546,7 @@ def _client_frame(opcode: int, payload: bytes) -> bytes:
     return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked
 
 
-def _frames_after_close(port: int) -> bytes:
+def _close_handshake(port: int) -> bytes:
     with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
         key = base64.b64encode(os.urandom(16)).decode()
         sock.sendall(
@@ -536,20 +561,18 @@ def _frames_after_close(port: int) -> bytes:
             received += sock.recv(4096)
         received = received.split(b"\r\n\r\n", 1)[1]
         sock.sendall(_client_frame(0x8, struct.pack("!H", 1000)))
+        # The client sends nothing after its Close, as RFC 6455 requires, and
+        # waits for the server to close the connection. That must be a clean
+        # close rather than a reset, which would raise here, or clients that
+        # haven't read the server's Close yet may lose it.
         while chunk := sock.recv(4096):
             received += chunk
-        # The server has finished the close handshake. A frame sent now
-        # must not make the server reset the connection, or clients that
-        # haven't read the server's Close yet may lose it.
-        sock.sendall(_client_frame(0x9, b""))
-        sleep(0.2)
-        sock.sendall(_client_frame(0x9, b""))
         return received
 
 
 @pytest.mark.asyncio
-async def test_frames_after_close_drained(server: PyvoyServer) -> None:
-    received = await asyncio.to_thread(_frames_after_close, server.listener_port)
+async def test_close_handshake_closes_cleanly(server: PyvoyServer) -> None:
+    received = await asyncio.to_thread(_close_handshake, server.listener_port)
     assert received == b"\x88\x02" + struct.pack("!H", 1000)
 
 
@@ -598,5 +621,5 @@ async def test_tls_scope(
     ) as ws:
         tls = json.loads(await ws.recv())
     assert tls is not None
-    assert tls["tls_version"] is None
+    assert tls["tls_version"] == 0x0304
     assert tls["client_cert_name"] == "CN=someclient,OU=tests,O=pyvoy"

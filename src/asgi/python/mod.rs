@@ -104,6 +104,16 @@ impl Executor {
         Ok((executor, ExecutorHandles { loops }))
     }
 
+    /// Returns the loaded application and its event loops.
+    pub(crate) fn loaded_app(&self, py: Python<'_>) -> (Py<PyAny>, Py<PyDict>, EventLoops) {
+        let inner = self.inner.as_ref();
+        (
+            inner.app.clone_ref(py),
+            inner.asgi.clone_ref(py),
+            inner.loops.clone(),
+        )
+    }
+
     pub(crate) fn execute_app(
         &self,
         scope: Scope,

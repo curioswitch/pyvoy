@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use envoy_proxy_dynamic_modules_rust_sdk::EnvoyNetworkFilterScheduler;
+use envoy_proxy_dynamic_modules_rust_sdk::EnvoyHttpFilterScheduler;
 use http::{HeaderName, HeaderValue, StatusCode};
 use pyo3::{
     Bound, IntoPyObjectExt as _, Py, PyAny, PyErr, PyResult, Python,
@@ -16,10 +16,8 @@ use tungstenite::{Utf8Bytes, protocol::frame::coding::CloseCode};
 
 use crate::{
     asgi::shared::{
-        ExecutorHandles,
-        app::load_app,
         awaitable::{EmptyAwaitable, ErrorAwaitable},
-        eventloop::{EventLoops, LoopHandle, LoopKind},
+        eventloop::{EventLoops, LoopHandle},
         future,
         headers::extract_headers_from_event,
         scope::new_scope_dict,
@@ -38,53 +36,42 @@ struct ExecutorInner {
 }
 
 #[derive(Clone)]
-pub(super) struct WebSocketExecutor {
+pub(crate) struct WebSocketExecutor {
     inner: Arc<ExecutorInner>,
 }
 
 impl WebSocketExecutor {
-    pub(super) fn new(
-        app_module: &str,
-        app_attr: &str,
+    pub(crate) fn new(
+        app: Py<PyAny>,
+        asgi: Py<PyDict>,
+        loops: EventLoops,
         root_path: &str,
         constants: Arc<Constants>,
-        worker_threads: usize,
-        enable_lifespan: Option<bool>,
-        loop_kind: LoopKind,
-    ) -> PyResult<(Self, ExecutorHandles)> {
-        let (app, asgi, loops) = load_app(
-            app_module,
-            app_attr,
-            &constants,
-            worker_threads,
-            enable_lifespan,
-            loop_kind,
-        )?;
+    ) -> PyResult<Self> {
         let (extensions, root_path) = Python::attach(|py| {
             let extensions = PyDict::new(py);
             extensions.set_item("websocket.http.response", PyDict::new(py))?;
             Ok::<_, PyErr>((extensions.unbind(), PyString::new(py, root_path).unbind()))
         })?;
-        let executor = Self {
+        Ok(Self {
             inner: Arc::new(ExecutorInner {
                 app,
                 asgi,
                 extensions,
                 root_path,
-                loops: loops.clone(),
+                loops,
                 constants,
             }),
-        };
-        Ok((executor, ExecutorHandles { loops }))
+        })
     }
 
-    pub(crate) fn execute_app(
+    pub(super) fn execute_app(
         &self,
         scope: Scope,
         subprotocols: Vec<String>,
         recv_bridge: EventBridge<RecvFuture>,
         send_bridge: EventBridge<SendEvent>,
-        scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
+        scheduler: Box<dyn EnvoyHttpFilterScheduler>,
     ) {
         let event = ExecuteAppEvent {
             scope: WebSocketScope {
@@ -104,7 +91,7 @@ impl WebSocketExecutor {
             }));
     }
 
-    pub(crate) fn handle_recv_future_connect(&self, mut future: RecvFuture) {
+    pub(super) fn handle_recv_future_connect(&self, mut future: RecvFuture) {
         let Some(future) = future.future.take() else {
             return;
         };
@@ -118,7 +105,7 @@ impl WebSocketExecutor {
             .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_recv_future_message(&self, body: Body, mut future: RecvFuture) {
+    pub(super) fn handle_recv_future_message(&self, body: Body, mut future: RecvFuture) {
         let Some(future) = future.future.take() else {
             return;
         };
@@ -133,7 +120,7 @@ impl WebSocketExecutor {
             .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_recv_future_disconnect(
+    pub(super) fn handle_recv_future_disconnect(
         &self,
         code: u16,
         reason: Utf8Bytes,
@@ -154,7 +141,7 @@ impl WebSocketExecutor {
             .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_dropped_recv_future(&self, future: LoopFuture) {
+    pub(super) fn handle_dropped_recv_future(&self, future: LoopFuture) {
         let executor = DroppedRecvFutureExecutor {
             future: future.future,
             constants: self.inner.constants.clone(),
@@ -165,7 +152,7 @@ impl WebSocketExecutor {
             .dispatch(Box::new(move |py, _| executor.run(py)));
     }
 
-    pub(crate) fn handle_send_future(&self, mut future: SendFuture) {
+    pub(super) fn handle_send_future(&self, mut future: SendFuture) {
         let Some(future) = future.future.take() else {
             return;
         };
@@ -178,7 +165,7 @@ impl WebSocketExecutor {
             }));
     }
 
-    pub(crate) fn handle_dropped_send_future(&self, future: LoopFuture) {
+    pub(super) fn handle_dropped_send_future(&self, future: LoopFuture) {
         let constants = self.inner.constants.clone();
         self.inner
             .loops
@@ -190,18 +177,6 @@ impl WebSocketExecutor {
                     &constants.client_disconnected_err,
                 )
             }));
-    }
-
-    /// Stops the event loops, executing shutdown lifespan if needed.
-    pub(crate) fn shutdown(&self) {
-        Python::attach(|py| {
-            if let Err(e) = self.inner.loops.stop(py) {
-                eprintln!(
-                    "Unexpected Python exception stopping ASGI event loops. This likely a bug in pyvoy: {}",
-                    e
-                );
-            }
-        });
     }
 
     /// Executes the ASGI application on the event loop thread.
@@ -344,7 +319,7 @@ struct ExecuteAppEvent {
     scope: WebSocketScope,
     recv_bridge: EventBridge<RecvFuture>,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Box<dyn EnvoyNetworkFilterScheduler>,
+    scheduler: Box<dyn EnvoyHttpFilterScheduler>,
 }
 
 struct WebSocketScope {
@@ -361,7 +336,7 @@ pub(super) enum Body {
 #[pyclass(module = "_pyvoy.asgi.websocket")]
 struct RecvCallable {
     recv_bridge: EventBridge<RecvFuture>,
-    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
     executor: WebSocketExecutor,
     constants: Arc<Constants>,
@@ -394,7 +369,7 @@ impl RecvCallable {
 #[pyclass(module = "_pyvoy.asgi.websocket")]
 struct AppFutureHandler {
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     constants: Arc<Constants>,
 }
 
@@ -441,7 +416,7 @@ struct SendCallable {
     /// filter can set the content length when the body is sent in one message.
     response_start: Option<ResponseStartEvent>,
     send_bridge: EventBridge<SendEvent>,
-    scheduler: Arc<Box<dyn EnvoyNetworkFilterScheduler>>,
+    scheduler: Arc<Box<dyn EnvoyHttpFilterScheduler>>,
     loop_: Py<PyAny>,
     executor: WebSocketExecutor,
     constants: Arc<Constants>,
@@ -792,3 +767,6 @@ impl Drop for SendFuture {
 pub(crate) const EVENT_ID_REQUEST: u64 = 1;
 /// The event ID to trigger the filter to process response events.
 pub(crate) const EVENT_ID_RESPONSE: u64 = 2;
+/// The event ID to trigger the filter to end a closed WebSocket stream that
+/// the client has not half-closed in time.
+pub(crate) const EVENT_ID_CLOSE_TIMEOUT: u64 = 4;

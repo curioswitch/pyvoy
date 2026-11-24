@@ -7,7 +7,7 @@ mod shared;
 pub(crate) use shared::eventloop::LoopKind;
 /// The pyqwest transport implementation.
 mod transport;
-/// The ASGI websocket filter.
+/// ASGI WebSockets.
 pub(crate) mod websocket;
 
 pub(crate) fn register_py_modules(py: pyo3::Python<'_>) -> pyo3::PyResult<()> {

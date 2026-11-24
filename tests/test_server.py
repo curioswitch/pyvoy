@@ -115,7 +115,9 @@ def test_websockets_max_message_size_must_be_in_range(
 
 
 def test_websockets_max_message_size_allows_zero() -> None:
-    server = PyvoyServer("tests.apps.asgi.kitchensink", websockets_max_message_size=0)
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink", websockets=True, websockets_max_message_size=0
+    )
 
     config = server.get_envoy_config()
     http_filter = config["static_resources"]["listeners"][0]["filter_chains"][0][
@@ -151,9 +153,7 @@ def _pyvoy_filter_configs(config: dict) -> dict[str, dict]:
     def visit(value: object) -> None:
         if isinstance(value, dict):
             typed_config = value.get("typed_config")
-            if value.get("name") in ("pyvoy", "pyvoy-ws") and isinstance(
-                typed_config, dict
-            ):
+            if value.get("name") == "pyvoy" and isinstance(typed_config, dict):
                 filters[value["name"]] = json.loads(
                     typed_config["filter_config"]["value"]
                 )
@@ -171,7 +171,7 @@ def test_loop_unset_by_default() -> None:
     server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True)
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
-    assert set(filters) == {"pyvoy", "pyvoy-ws"}
+    assert set(filters) == {"pyvoy"}
     for pyvoy_config in filters.values():
         assert "loop" not in pyvoy_config
 
@@ -180,7 +180,7 @@ def test_loop_configures_all_filters() -> None:
     server = PyvoyServer("tests.apps.asgi.kitchensink", websockets=True, loop="trio")
 
     filters = _pyvoy_filter_configs(server.get_envoy_config())
-    assert set(filters) == {"pyvoy", "pyvoy-ws"}
+    assert set(filters) == {"pyvoy"}
     for pyvoy_config in filters.values():
         assert pyvoy_config["loop"] == "trio"
 
@@ -196,6 +196,63 @@ def test_websockets_max_message_size_must_be_an_integer(
             "tests.apps.asgi.kitchensink",
             websockets_max_message_size=websockets_max_message_size,  # pyright: ignore[reportArgumentType]
         )
+
+
+def _hcm_config(server: PyvoyServer) -> dict:
+    config = server.get_envoy_config()
+    return config["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0][
+        "typed_config"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("request_idle_timeout", "expected"),
+    [(None, "0.000000000s"), (1.5, "1.500000000s"), (30, "30.000000000s")],
+)
+def test_request_idle_timeout_config(
+    request_idle_timeout: float | None, expected: str
+) -> None:
+    server = PyvoyServer(
+        "tests.apps.asgi.kitchensink", request_idle_timeout=request_idle_timeout
+    )
+    assert _hcm_config(server)["stream_idle_timeout"] == expected
+
+
+@pytest.mark.parametrize("request_idle_timeout", [True, "1"])
+def test_request_idle_timeout_must_be_a_number(request_idle_timeout: object) -> None:
+    with pytest.raises(TypeError, match="request_idle_timeout must be a number"):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink",
+            request_idle_timeout=request_idle_timeout,  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.parametrize("request_idle_timeout", [0, -1, float("inf"), float("nan")])
+def test_request_idle_timeout_must_be_positive(request_idle_timeout: float) -> None:
+    with pytest.raises(
+        ValueError, match="request_idle_timeout must be a positive finite number"
+    ):
+        PyvoyServer(
+            "tests.apps.asgi.kitchensink", request_idle_timeout=request_idle_timeout
+        )
+
+
+@pytest.mark.asyncio
+async def test_request_idle_timeout_closes_idle_request(client: Client) -> None:
+    async with PyvoyServer(
+        "tests.apps.asgi.kitchensink",
+        request_idle_timeout=0.3,
+        lifespan=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ) as server:
+        url = f"http://127.0.0.1:{server.listener_port}/controlled"
+        response = await client.get(url, headers={"x-sleep-ms": "50"})
+        assert response.status == 200
+        # The application waits longer than the timeout before responding to
+        # the complete request.
+        response = await client.get(url, headers={"x-sleep-ms": "3000"})
+        assert response.status == 504
 
 
 @pytest.mark.asyncio
