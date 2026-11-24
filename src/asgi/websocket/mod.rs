@@ -123,6 +123,8 @@ pub(crate) struct WebSocketStream {
     closing: Cell<bool>,
     response_ended: Cell<bool>,
     ping: RefCell<PingTracker>,
+    /// Whether the downstream write buffer is above its high watermark.
+    write_blocked: Cell<bool>,
 }
 
 impl WebSocketStream {
@@ -166,6 +168,7 @@ impl WebSocketStream {
             closing: Cell::new(false),
             response_ended: Cell::new(false),
             ping: RefCell::new(PingTracker::default()),
+            write_blocked: Cell::new(false),
         };
         stream.config.executor.execute_app(
             scope,
@@ -205,6 +208,17 @@ impl WebSocketStream {
             return;
         }
         self.handle_read(envoy_filter);
+    }
+
+    pub(crate) fn on_write_blocked(&self) {
+        self.write_blocked.set(true);
+    }
+
+    /// Resumes reading pings held in Envoy while the client wasn't reading,
+    /// from a request event rather than inside Envoy's watermark callback.
+    pub(crate) fn on_write_unblocked(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
+        self.write_blocked.set(false);
+        envoy_filter.new_scheduler().commit(EVENT_ID_REQUEST);
     }
 
     pub(crate) fn on_close_timeout(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
@@ -403,8 +417,11 @@ impl WebSocketStream {
                 for (name, value) in event.headers {
                     headers.append(name, value);
                 }
-                let ws_config =
-                    WebSocketConfig::default().max_message_size(Some(self.config.max_message_size));
+                // A frame can be as large as a message, rather than the
+                // WebSocket's smaller default frame limit.
+                let ws_config = WebSocketConfig::default()
+                    .max_message_size(Some(self.config.max_message_size))
+                    .max_frame_size(Some(self.config.max_message_size));
                 *self.state.borrow_mut() =
                     State::Accepted(Box::new(WebSocket::from_raw_socket_with_extensions(
                         self.io.clone(),
@@ -539,6 +556,11 @@ impl WebSocketStream {
                 // pings are answered and pongs don't pile up in Envoy. Anything
                 // else stays in Envoy for backpressure, including a Close, which
                 // would fail the application's sends before it has seen it.
+                // While the client isn't reading what we write, pings stay in
+                // Envoy too so their pongs don't pile up in the write buffer.
+                if self.write_blocked.get() {
+                    return;
+                }
                 match self.io.next_frame_is_ping_or_pong() {
                     Some(true) => {}
                     Some(false) => return,
@@ -603,8 +625,7 @@ impl WebSocketStream {
                         reason: Utf8Bytes::default(),
                     };
                     self.disconnect_receivers(&close_frame);
-                    self.cleanup();
-                    self.start_close(envoy_filter, close_frame);
+                    self.fail(envoy_filter, close_frame);
                     return;
                 }
             }
@@ -628,6 +649,20 @@ impl WebSocketStream {
         *self.close_frame.borrow_mut() = Some(close_frame);
         self.flush(envoy_filter);
         self.finish_close(envoy_filter);
+    }
+
+    /// Fails the connection after the client sent data the WebSocket can't read,
+    /// sending our Close frame without waiting for the client's (RFC 6455
+    /// 7.1.7). The WebSocket can't read past the bad data, so waiting would
+    /// never see the client's Close, for example after a frame over the maximum
+    /// size whose payload it never reads.
+    fn fail(&self, envoy_filter: &mut impl EnvoyHttpFilter, close_frame: CloseFrame) {
+        self.with_websocket(|websocket| {
+            let _ = websocket.close(Some(close_frame.clone()));
+        });
+        *self.close_frame.borrow_mut() = Some(close_frame);
+        self.flush(envoy_filter);
+        self.close_complete(envoy_filter);
     }
 
     fn finish_close(&self, envoy_filter: &mut impl EnvoyHttpFilter) {
